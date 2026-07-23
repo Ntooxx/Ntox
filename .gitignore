@@ -1,0 +1,12 @@
+node_modules/
+dist/
+data/
+.ntox_history
+!skills/
+experiments/
+*.log
+shell-audit.log
+coverage/
+.env
+.ntox/
+!skills/
