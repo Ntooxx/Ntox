@@ -76,8 +76,8 @@ describe("MentalModel", () => {
   });
 
   it("returns challenged entries", () => {
-    mm.extractFromConversation("I think speed matters most");
-    mm.extractFromConversation("I believe design matters more than speed");
+    mm.extractFromConversation("I think the code is hard to understand");
+    mm.extractFromConversation("I believe the code is easy to follow");
     const challenged = mm.getChallengedEntries();
     expect(challenged.length).toBeGreaterThan(0);
   });

@@ -51,6 +51,8 @@ import {
   renderSkillsMenu,
   renderDomainSkills,
   renderModelsMenu,
+  renderToolPill,
+  renderMemoryPulse,
 } from "./render.js";
 
 export class Repl {
@@ -439,6 +441,15 @@ export class Repl {
         this.lastReflection = null;
         this.lastStrategy = null;
         console.log(chalk.dim("Everything reset (memory + mistakes)."));
+        break;
+      case "brief":
+        this.handleBriefCommand();
+        break;
+      case "focus":
+        this.handleFocusCommand(arg);
+        break;
+      case "goals":
+        this.handleGoalsCommand();
         break;
       case "benchmark":
         await this.handleBenchmark();
@@ -1128,9 +1139,19 @@ export class Repl {
       },
       onToolCall: (name) => {
         startOutput();
-        writer.writeTag(renderInlineTag(`tool: ${name}`, chalk.dim));
+        if (this.config.animationLevel !== "off") {
+          writer.writeTag(renderInlineTag(renderToolPill(name, "running"), chalk.dim));
+        } else {
+          writer.writeTag(renderInlineTag(`tool: ${name}`, chalk.dim));
+        }
       },
-      onToolResult: () => {},
+      onToolResult: (name, result) => {
+        if (this.config.animationLevel !== "off") {
+          writer.writeTag(renderInlineTag(renderToolPill(name, result.success ? "done" : "failed"), chalk.dim));
+        }
+        if (result.success) playMelody("done");
+        else playMelody("error");
+      },
       onUsage: (usage) => {
         totalInputTokens += usage.inputTokens;
         totalOutputTokens += usage.outputTokens;
@@ -1138,9 +1159,22 @@ export class Repl {
       onThinking: (thought) => {
         if (hasStarted) writer.writeTag(renderInlineTag(thought, chalk.dim));
       },
-      onPhase: () => {},
-      onMemoryRecall: (count) => writer.writeTag(renderInlineTag(`recalled ${count} memories`, chalk.dim)),
+      onPhase: (phase) => {
+        if (this.config.animationLevel !== "off") {
+          spinner.setPhase(phase);
+        }
+      },
+      onMemoryRecall: (count) => {
+        if (this.config.animationLevel !== "off") {
+          writer.writeTag(renderInlineTag(renderMemoryPulse("recalled", count), chalk.dim));
+        } else {
+          writer.writeTag(renderInlineTag(`recalled ${count} memories`, chalk.dim));
+        }
+      },
       onMemoryStore: () => {
+        if (this.config.animationLevel !== "off") {
+          writer.writeTag(renderInlineTag(renderMemoryPulse("stored", 1), chalk.dim));
+        }
         playMelody("memory");
       },
       onStrategy: (type) => {

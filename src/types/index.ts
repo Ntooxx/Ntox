@@ -67,6 +67,7 @@ export interface NtoxConfig {
   theoryEnabled: boolean;
   soundEnabled: boolean;
   soundVolume: number;
+  animationLevel: "off" | "minimal" | "full";
   telegramToken: string;
   telegramAllowedUsers: string[];
   discordToken: string;

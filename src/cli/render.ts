@@ -237,3 +237,27 @@ export function renderDomainSkills(
   m.push(chalk.dim(`  /skill load <number>  or  /skill load <name>`));
   return m.join("\n");
 }
+
+export function renderToolPill(name: string, status: "running" | "done" | "failed"): string {
+  const icon = status === "running" ? chalk.dim("\u25F7") : status === "done" ? chalk.green("\u2713") : chalk.red("\u2717");
+  const color = status === "running" ? chalk.dim : status === "done" ? chalk.green : chalk.red;
+  return `${chalk.dim("tool:")} ${color(name)} ${icon}`;
+}
+
+export function renderMemoryPulse(action: "stored" | "recalled", count: number): string {
+  const color = action === "stored" ? chalk.green : chalk.cyan;
+  return `${chalk.dim("mem:")} ${color(action)} ${chalk.dim(count)}`;
+}
+
+export function renderConvergenceLine(progress: number): string {
+  const width = 20;
+  const half = Math.floor(width / 2);
+  const leftLen = Math.floor(half * progress);
+  const rightLen = Math.floor(half * progress);
+
+  const left = "\u2500".repeat(leftLen) + (progress < 1 ? "\u257A" : "");
+  const right = (progress < 1 ? "\u2578" : "") + "\u2500".repeat(rightLen);
+  const center = progress >= 1 ? chalk.cyan("\u25CF") : chalk.dim("\u25CB");
+
+  return `${chalk.dim(left)} ${center} ${chalk.dim(right)}`;
+}

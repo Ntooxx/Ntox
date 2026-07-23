@@ -9,6 +9,8 @@ import { SkillExecutor } from "../skills/executor.js";
 import { Analytics } from "../meta/analytics.js";
 import { ProactiveEngine, type ProactiveSuggestion } from "../meta/proactive.js";
 import { ObservationEngine } from "../meta/observation.js";
+import { MentalModel } from "../meta/mental-model.js";
+import { Executive } from "../meta/executive.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
 import { StyleOptimizer, classifyResponseStyle } from "../meta/style-optimizer.js";
 import { scoreEffectiveness } from "../meta/effectiveness.js";
@@ -44,6 +46,8 @@ export interface AgentConfig {
   proactive: ProactiveEngine;
   cognitiveKernel: CognitiveKernel;
   observation?: ObservationEngine;
+  mentalModel?: MentalModel;
+  executive?: Executive;
   skillLibrary?: SkillLibrary;
   kernelEnabled?: boolean;
   kernelBasePath?: string;
@@ -611,6 +615,16 @@ export class Agent {
 
     // 3. User model
     cfg.userModel.extractFromConversation(userInput, wasCorrection);
+
+    // 3b. Mental model extraction
+    if (cfg.mentalModel) {
+      cfg.mentalModel.extractFromConversation(userInput);
+    }
+
+    // 3c. Executive extraction
+    if (cfg.executive) {
+      cfg.executive.extractFromConversation(userInput);
+    }
 
     // 3a. Domain learning — auto-extend domain keywords from user's terms
     const words = userInput.toLowerCase().split(/\s+/).filter((w) => w.length > 4 && !/^\d+$/.test(w));

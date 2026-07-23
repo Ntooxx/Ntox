@@ -23,6 +23,7 @@ describe("validateConfig", () => {
     theoryEnabled: true,
     soundEnabled: false,
     soundVolume: 50,
+    animationLevel: "minimal",
     telegramToken: "",
     telegramAllowedUsers: [],
     discordToken: "",

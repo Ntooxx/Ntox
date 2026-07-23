@@ -236,7 +236,7 @@ export class MentalModel {
       for (const w of aWords) {
         if (bWords.has(w)) overlap++;
       }
-      if (overlap >= 2) return true;
+      if (overlap >= 1) return true;
     }
 
     return false;

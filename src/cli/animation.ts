@@ -1,11 +1,12 @@
 import chalk from "chalk";
-
-const FRAMES = "\u280B\u2819\u2839\u2838\u283C\u2834\u2826\u2827\u2807\u280F";
+import type { ThinkPhase } from "../types/index.js";
+import { getPhaseIndicator } from "./phases.js";
 
 export class Spinner {
   private interval: ReturnType<typeof setInterval> | null = null;
   private frame = 0;
   private text = "";
+  private phase: ThinkPhase = "thinking";
 
   start(text = "thinking"): void {
     if (this.interval) return;
@@ -13,8 +14,10 @@ export class Spinner {
     this.frame = 0;
 
     const tick = () => {
-      const f = FRAMES[this.frame % FRAMES.length];
-      process.stdout.write(`\r${chalk.hex("#00ccff")("\u2502")} ${chalk.cyan(f)} ${chalk.dim(this.text)}  \x1b[K`);
+      const ind = getPhaseIndicator(this.phase);
+      const char = ind.frames[this.frame % ind.frames.length];
+      const label = this.text || ind.label;
+      process.stdout.write(`\r${chalk.hex("#00ccff")("\u2502")} ${ind.color(char)} ${chalk.dim(label)}  \x1b[K`);
       this.frame++;
     };
     tick();
@@ -23,6 +26,10 @@ export class Spinner {
 
   setText(text: string): void {
     this.text = text;
+  }
+
+  setPhase(phase: ThinkPhase): void {
+    this.phase = phase;
   }
 
   stop(): void {
@@ -34,8 +41,19 @@ export class Spinner {
 }
 
 export function animateExit(): Promise<void> {
-  process.stdout.write("\r\x1b[K");
-  return Promise.resolve();
+  return new Promise((resolve) => {
+    const steps = 6;
+    let i = 0;
+    const interval = setInterval(() => {
+      process.stdout.write(`\r${chalk.dim(" ".repeat(40))}\x1b[K`);
+      if (i >= steps) {
+        clearInterval(interval);
+        process.stdout.write("\r\x1b[K");
+        resolve();
+      }
+      i++;
+    }, 30);
+  });
 }
 
 export function renderVolumeBar(pct: number, width = 10): string {
@@ -45,5 +63,30 @@ export function renderVolumeBar(pct: number, width = 10): string {
 }
 
 export function animateConvergence(): Promise<void> {
-  return Promise.resolve();
+  return new Promise((resolve) => {
+    const width = 20;
+    const half = Math.floor(width / 2);
+    let step = 0;
+    const totalSteps = 8;
+
+    const interval = setInterval(() => {
+      const progress = Math.min(1, step / totalSteps);
+      const leftLen = Math.floor(half * progress);
+      const rightLen = Math.floor(half * progress);
+
+      const left = "\u2500".repeat(leftLen) + "\u257A";
+      const right = "\u2578" + "\u2500".repeat(rightLen);
+      const center = progress >= 1 ? chalk.cyan("\u25CF") : chalk.dim("\u25CB");
+
+      const line = `${chalk.dim(left)} ${center} ${chalk.dim(right)}`;
+      process.stdout.write(`\r${chalk.hex("#00ccff")("\u2502")} ${line}  \x1b[K`);
+
+      step++;
+      if (step > totalSteps + 4) {
+        clearInterval(interval);
+        process.stdout.write("\r\x1b[K");
+        resolve();
+      }
+    }, 40);
+  });
 }
