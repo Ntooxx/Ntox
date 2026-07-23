@@ -1,4 +1,4 @@
-# Ntox one-liner installer — Windows PowerShell
+# Ntox one-liner installer, Windows PowerShell
 # Run: irm https://raw.githubusercontent.com/Ntooxx/Ntox/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"

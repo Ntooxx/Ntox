@@ -27,11 +27,11 @@ Open an issue with:
 
 ### PR Guidelines
 
-- **No comments in code** — write self-documenting code
+- **No comments in code**: write self-documenting code
 - **No emojis** in code or commit messages
-- **Tests required** — new features must include tests
-- **Typecheck must pass** — `npm run typecheck`
-- **All tests must pass** — `npm test`
+- **Tests required**: new features must include tests
+- **Typecheck must pass**: `npm run typecheck`
+- **All tests must pass**: `npm test`
 - One PR = one feature/fix. Keep it focused.
 
 ### Gateway Architecture (for messaging/voice contributors)

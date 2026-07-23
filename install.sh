@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ntox one-liner installer — macOS / Linux
+# Ntox one-liner installer, macOS / Linux
 # Run: curl -fsSL https://raw.githubusercontent.com/Ntooxx/Ntox/main/install.sh | bash
 
 set -e

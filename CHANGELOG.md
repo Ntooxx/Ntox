@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.0] — Unreleased
+## [0.1.0] - Unreleased
 
 ### Added
 - Cognitive kernel with pattern compilation and 8D cognitive vector space
