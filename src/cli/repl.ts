@@ -3,6 +3,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { randomUUID } from "node:crypto";
 import chalk from "chalk";
 import { createAgentInfra, createAgentConfig } from "../core/dispatcher.js";
+import { BriefingEngine } from "../meta/briefing.js";
 import { LLMClient, estimateCost, detectLocalProviders, getProviderNames, getProviders, providerRequiresKey, LOCAL_PROVIDERS } from "../core/llm.js";
 import { describeError } from "../core/errors.js";
 import { Agent } from "../core/agent.js";
@@ -83,10 +84,12 @@ export class Repl {
   private lastStrategy: QueryType | null = null;
 
   private infra: ReturnType<typeof createAgentInfra>;
+  private briefingEngine: BriefingEngine;
 
   constructor() {
     this.sessionId = `sess_${randomUUID().slice(0, 8)}`;
     this.infra = createAgentInfra(this.config);
+    this.briefingEngine = new BriefingEngine();
 
     this.llm = this.infra.llm;
     this.tools = this.infra.tools;
@@ -146,7 +149,7 @@ export class Repl {
     this.agent = this.createAgent();
     this.agent.setSkillsCount(this.skillRegistry.count());
     this.userModel.startSession();
-    await runFirstTimeOnboarding(this.userModel);
+    await runFirstTimeOnboarding(this.userModel, this.rl);
     await this.loadModels();
     this.skillLibrary.scan();
     this.agent.initKernel(this.config.model);
@@ -156,6 +159,7 @@ export class Repl {
 
     console.log(renderWelcome(this.config.model, providerLabel));
     playMelody("startup");
+    this.showAutoBrief();
     this.loop();
   }
 
@@ -837,6 +841,90 @@ export class Repl {
     }
 
     console.log(chalk.yellow(`Unknown menu: "${sub}". Try /help.`));
+  }
+
+  private handleBriefCommand(): void {
+    const exec = this.infra.executive;
+    const observations = this.infra.observation ? (() => {
+      try { return this.infra.observation.getAll(); } catch { return []; }
+    })() : [];
+    const mentalModel = this.infra.mentalModel ? (() => {
+      try { return this.infra.mentalModel.getAllEntries(); } catch { return []; }
+    })() : [];
+
+    const ctx = {
+      statedFocus: exec.getStatedFocus(),
+      goals: exec.getActiveGoals(),
+      risks: exec.getRisks(),
+      constraints: exec.getConstraints(),
+      observations: observations.slice(-20),
+      beliefs: mentalModel,
+      sessionCount: this.userModel.getProfile().sessionsCount,
+      lastSessionEndAt: this.userModel.getProfile().lastSessionEnd || 0,
+      lastBriefAt: 0,
+      bondLevel: 0,
+    };
+
+    const brief = this.briefingEngine.generate(ctx);
+    if (brief.type === "none") {
+      console.log(chalk.dim("\n  Nothing notable right now. Everything looks aligned."));
+      return;
+    }
+    console.log(chalk.cyan(this.briefingEngine.formatBrief(brief)));
+  }
+
+  private handleFocusCommand(arg: string): void {
+    const exec = this.infra.executive;
+    if (!arg) {
+      const current = exec.getStatedFocus();
+      console.log(current ? `Current focus: ${chalk.cyan(current)}` : chalk.dim("No focus set. Use /focus <goal>"));
+      return;
+    }
+    exec.setFocus(arg);
+    console.log(chalk.green(`Focus set: ${arg}`));
+  }
+
+  private handleGoalsCommand(): void {
+    const exec = this.infra.executive;
+    const goals = exec.getActiveGoals();
+    if (goals.length === 0) {
+      console.log(chalk.dim("No active goals. Tell NTOX about your goals to track them."));
+      return;
+    }
+    console.log(chalk.bold("\n  Active Goals:"));
+    for (const g of goals) {
+      const bar = g.progress > 0 ? ` ${g.progress}%` : "";
+      console.log(`    ${chalk.cyan(g.id.slice(0, 8))} ${g.description}${chalk.dim(bar)}`);
+    }
+    console.log("");
+  }
+
+  private showAutoBrief(): void {
+    const exec = this.infra.executive;
+    const observations = this.infra.observation ? (() => {
+      try { return this.infra.observation.getAll(); } catch { return []; }
+    })() : [];
+
+    const ctx = {
+      statedFocus: exec.getStatedFocus(),
+      goals: exec.getActiveGoals(),
+      risks: exec.getRisks(),
+      constraints: exec.getConstraints(),
+      observations: observations.slice(-20),
+      beliefs: [],
+      sessionCount: this.userModel.getProfile().sessionsCount,
+      lastSessionEndAt: this.userModel.getProfile().lastSessionEnd || 0,
+      lastBriefAt: 0,
+      bondLevel: 0,
+    };
+
+    const brief = this.briefingEngine.generate(ctx);
+    if (brief.type === "none") return;
+
+    const formatted = this.briefingEngine.formatBrief(brief);
+    if (!formatted) return;
+
+    console.log(chalk.cyan(formatted));
   }
 
   private async handleBenchmark(): Promise<void> {
