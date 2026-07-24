@@ -11,6 +11,8 @@ import { ProactiveEngine, type ProactiveSuggestion } from "../meta/proactive.js"
 import { ObservationEngine } from "../meta/observation.js";
 import { MentalModel } from "../meta/mental-model.js";
 import { Executive } from "../meta/executive.js";
+import { InterventionEngine, type InterventionContext } from "../meta/intervention.js";
+import { DisagreementEngine, type DisagreementContext } from "../meta/disagreement.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
 import { StyleOptimizer, classifyResponseStyle } from "../meta/style-optimizer.js";
 import { scoreEffectiveness } from "../meta/effectiveness.js";
@@ -48,6 +50,8 @@ export interface AgentConfig {
   observation?: ObservationEngine;
   mentalModel?: MentalModel;
   executive?: Executive;
+  intervention?: InterventionEngine;
+  disagreement?: DisagreementEngine;
   skillLibrary?: SkillLibrary;
   kernelEnabled?: boolean;
   kernelBasePath?: string;
@@ -82,6 +86,8 @@ export interface AgentCallbacks {
   onStyleGuidance?: (guidance: string) => void;
   onSelfAwareness?: (message: string) => void;
   onFeedbackRequest?: (question: string) => void;
+  onIntervention?: (intervention: import("../meta/intervention.js").Intervention) => void;
+  onDisagreement?: (disagreement: import("../meta/disagreement.js").Disagreement) => void;
 }
 
 export class Agent {
@@ -963,6 +969,47 @@ export class Agent {
           const feedbackRequest = this.selfAwareness.shouldRequestFeedback(0.5, wasCorrection, false);
           if (feedbackRequest) callbacks.onFeedbackRequest(feedbackRequest.question);
         } catch (e) { console.error("[feedback]", e); }
+      }
+
+      if (cfg.intervention && callbacks.onIntervention) {
+        try {
+          const observations = cfg.observation ? cfg.observation.getAll().slice(-20) : [];
+          const beliefs = cfg.mentalModel ? cfg.mentalModel.getAllEntries() : [];
+          const goals = cfg.executive ? cfg.executive.getActiveGoals() : [];
+          const risks = cfg.executive ? cfg.executive.getRisks() : [];
+          const constraints = cfg.executive ? cfg.executive.getConstraints() : [];
+          const intCtx: InterventionContext = {
+            observations,
+            beliefs,
+            statedFocus: cfg.executive ? cfg.executive.getStatedFocus() : null,
+            bondLevel: this.relationshipTracker.getBondLevel(),
+            sessionCount: cfg.userModel.getProfile().sessionsCount,
+            sessionIntent: this.sessionContext.intent,
+            lastInterventionAt: cfg.intervention.getLastIntervention()?.timestamp || 0,
+          };
+          const intervention = cfg.intervention.evaluate(intCtx);
+          if (intervention) callbacks.onIntervention(intervention);
+        } catch (e) { console.error("[intervention]", e); }
+      }
+
+      if (cfg.disagreement && callbacks.onDisagreement) {
+        try {
+          const observations = cfg.observation ? cfg.observation.getAll().slice(-20) : [];
+          const beliefs = cfg.mentalModel ? cfg.mentalModel.getAllEntries() : [];
+          const risks = cfg.executive ? cfg.executive.getRisks() : [];
+          const mistakes = cfg.mistakes ? cfg.mistakes.getAll().slice(-10).map((m: { correction: string }) => m.correction) : [];
+          const disCtx: DisagreementContext = {
+            proposal: userInput,
+            observations,
+            beliefs,
+            risks,
+            mistakeHistory: mistakes,
+            bondLevel: this.relationshipTracker.getBondLevel(),
+            sessionCount: cfg.userModel.getProfile().sessionsCount,
+          };
+          const disagreement = cfg.disagreement.evaluate(disCtx);
+          if (disagreement) callbacks.onDisagreement(disagreement);
+        } catch (e) { console.error("[disagreement]", e); }
       }
 
       // Slow post-processing: background

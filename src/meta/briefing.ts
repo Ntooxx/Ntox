@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { NTOX_DIR } from "../core/config.js";
 import type { ObservedSession } from "./observation.js";
@@ -74,7 +74,7 @@ export class BriefingEngine {
       writeFileSync(tmp, JSON.stringify(this.state, null, 2));
       writeFileSync(this.path, readFileSync(tmp, "utf-8"));
     } catch { }
-    try { require("node:fs").unlinkSync(tmp); } catch { }
+    try { unlinkSync(tmp); } catch { }
   }
 
   private persist(): void {

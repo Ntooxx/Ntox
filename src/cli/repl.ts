@@ -282,7 +282,7 @@ export class Repl {
 
   private loop(): void {
     if (this.exiting) return;
-      this.rl.question(renderUserPrompt(this.messageCount + 1), async (input) => {
+      this.rl.question(renderUserPrompt(this.messageCount + 1) + " ", async (input) => {
         if (this.exiting) return;
         try {
           const trimmed = input.trim();
@@ -306,7 +306,6 @@ export class Repl {
         }
 
         process.stdout.write(`\n${renderDivider()}\n`);
-        process.stdout.write(`${renderUserLabel()}${chalk.white(trimmed)}\n`);
         this.isProcessing = true;
         await this.handleMessage(trimmed);
         this.isProcessing = false;
@@ -1214,6 +1213,9 @@ export class Repl {
     spinner.start();
     const blockBuffer = new BlockBuffer((text) => writer.write(text));
 
+    let tagBuffer = "";
+    let inSystemReminder = false;
+
     const startOutput = () => {
       if (hasStarted) return;
       hasStarted = true;
@@ -1222,10 +1224,42 @@ export class Repl {
       writer.startLine();
     };
 
+    const filterToken = (token: string): string => {
+      let out = "";
+      for (const ch of token) {
+        if (inSystemReminder) {
+          tagBuffer += ch;
+          if (tagBuffer.includes("</system-reminder>")) {
+            inSystemReminder = false;
+            tagBuffer = "";
+          }
+          continue;
+        }
+        tagBuffer += ch;
+        if (tagBuffer.includes("<system-reminder>")) {
+          const preTag = tagBuffer.slice(0, tagBuffer.indexOf("<system-reminder>"));
+          out += preTag;
+          tagBuffer = "";
+          inSystemReminder = true;
+          continue;
+        }
+        if (tagBuffer.length > 20 && !"<system-reminder>".startsWith(tagBuffer)) {
+          out += tagBuffer;
+          tagBuffer = "";
+        }
+      }
+      if (!inSystemReminder && tagBuffer.length > 0 && !"<system-reminder>".startsWith(tagBuffer)) {
+        out += tagBuffer;
+        tagBuffer = "";
+      }
+      return out;
+    };
+
     const streamResult = this.agent.run(expandedInput, {
       onToken: (token) => {
         startOutput();
-        blockBuffer.write(token);
+        const filtered = filterToken(token);
+        if (filtered) blockBuffer.write(filtered);
       },
       onToolCall: (name) => {
         startOutput();
@@ -1304,6 +1338,14 @@ export class Repl {
       },
       onFeedbackRequest: (question) => {
         writer.writeTag(renderInlineTag(question, chalk.yellow));
+      },
+      onIntervention: (intervention) => {
+        const color = intervention.confidence > 0.7 ? chalk.red : chalk.yellow;
+        writer.writeTag(renderInlineTag(intervention.message, color));
+      },
+      onDisagreement: (disagreement) => {
+        const color = disagreement.confidence > 0.7 ? chalk.red : chalk.yellow;
+        writer.writeTag(renderInlineTag(`I disagree: ${disagreement.reason}`, color));
       },
     });
 

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { NTOX_DIR } from "../core/config.js";
@@ -65,7 +65,7 @@ export class InterventionEngine {
       writeFileSync(tmp, JSON.stringify(this.history, null, 2));
       writeFileSync(INTERVENTION_PATH, readFileSync(tmp, "utf-8"));
     } catch { }
-    try { require("node:fs").unlinkSync(tmp); } catch { }
+    try { unlinkSync(tmp); } catch { }
   }
 
   private persist(): void {

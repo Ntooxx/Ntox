@@ -8,7 +8,7 @@ function div(n = -1): string {
 }
 
 export function renderUserPrompt(msgCount: number): string {
-  return `\n${chalk.green("\u25B6")} ${chalk.dim(`[${msgCount}]`)} ${chalk.dim("\u25B8")} `;
+  return `${chalk.green("\u25B6")} ${chalk.dim(`[${msgCount}]`)} ${chalk.dim("\u25B8")} `;
 }
 
 export function renderAssistantLabel(): string {

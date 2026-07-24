@@ -25,6 +25,8 @@ import { ProactiveEngine } from "../meta/proactive.js";
 import { ObservationEngine } from "../meta/observation.js";
 import { MentalModel } from "../meta/mental-model.js";
 import { Executive } from "../meta/executive.js";
+import { InterventionEngine } from "../meta/intervention.js";
+import { DisagreementEngine } from "../meta/disagreement.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
 import type { NtoxConfig, CostUsage } from "../types/index.js";
 
@@ -42,6 +44,8 @@ export interface AgentInfra {
   observation: ObservationEngine;
   mentalModel: MentalModel;
   executive: Executive;
+  intervention: InterventionEngine;
+  disagreement: DisagreementEngine;
   cognitiveKernel: CognitiveKernel;
 }
 
@@ -62,6 +66,8 @@ export interface SessionInfra {
   observation: ObservationEngine;
   mentalModel: MentalModel;
   executive: Executive;
+  intervention: InterventionEngine;
+  disagreement: DisagreementEngine;
   cognitiveKernel: CognitiveKernel;
 }
 
@@ -105,6 +111,8 @@ export function createSessionInfra(shared: SharedInfra): SessionInfra {
     observation: new ObservationEngine(),
     mentalModel: new MentalModel(),
     executive: new Executive(),
+    intervention: new InterventionEngine(),
+    disagreement: new DisagreementEngine(),
     cognitiveKernel: new CognitiveKernel(shared.skillRegistry),
   };
 }
@@ -135,6 +143,8 @@ export function createAgentConfig(
     observation: infra.observation,
     mentalModel: infra.mentalModel,
     executive: infra.executive,
+    intervention: infra.intervention,
+    disagreement: infra.disagreement,
     cognitiveKernel: infra.cognitiveKernel,
     kernelEnabled: false,
     kernelBasePath: homedir(),

@@ -339,11 +339,12 @@ export async function playIntro(): Promise<void> {
 
   let skip = false;
 
+  const onKeypress = () => { skip = true; };
   readline.emitKeypressEvents(process.stdin);
   if (process.stdin.isTTY) {
     try { process.stdin.setRawMode(true); } catch { /* ok */ }
     process.stdin.resume();
-    process.stdin.on("keypress", () => { skip = true; });
+    process.stdin.on("keypress", onKeypress);
   }
 
   const startTime = Date.now();
@@ -380,6 +381,7 @@ export async function playIntro(): Promise<void> {
   } catch { /* intro failed, clean up */ }
    finally {
     try { process.stdout.write("\x1b[?25h"); } catch { /* ok */ }
+    process.stdin.removeListener("keypress", onKeypress);
     if (process.stdin.isTTY) {
       try { process.stdin.setRawMode(false); process.stdin.pause(); } catch { /* ok */ }
     }
