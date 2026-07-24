@@ -123,6 +123,8 @@ export class Repl {
       process.stdout.write(`\x1b[39m\n  ${chalk.rgb(255,183,77)('>')} ${chalk.dim('loading...')}\n`);
     }
 
+    this.rl = readline.createInterface({ input, output });
+
     if (!this.config.apiKey && providerRequiresKey(this.config.provider)) {
       await this.promptApiKey();
     }
