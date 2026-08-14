@@ -7,25 +7,31 @@ export class Spinner {
   private frame = 0;
   private text = "";
   private phase: ThinkPhase = "thinking";
+  private startedAt = 0;
 
   start(text = "thinking"): void {
     if (this.interval) return;
     this.text = text;
     this.frame = 0;
+    this.startedAt = Date.now();
 
     const tick = () => {
       const ind = getPhaseIndicator(this.phase);
       const char = ind.frames[this.frame % ind.frames.length];
-      const label = this.text || ind.label;
-      process.stdout.write(`\r${chalk.hex("#00ccff")("\u2502")} ${ind.color(char)} ${chalk.dim(label)}  \x1b[K`);
+      const elapsed = Date.now() - this.startedAt;
+      const label = this.fitLabel(this.text || ind.label, elapsed > 1200 ? 14 : 0);
+      const pulse = this.frame % 16 < 8 ? chalk.hex("#00ccff")("\u2502") : chalk.dim("\u2502");
+      const dots = ".".repeat((Math.floor(this.frame / 5) % 3) + 1).padEnd(3, " ");
+      const clock = elapsed > 1200 ? chalk.dim(` ${(elapsed / 1000).toFixed(1)}s`) : "";
+      process.stdout.write(`\r${pulse} ${ind.color(char)} ${chalk.dim(label)}${chalk.dim(dots)}${clock} \x1b[K`);
       this.frame++;
     };
     tick();
-    this.interval = setInterval(tick, 80);
+    this.interval = setInterval(tick, 55);
   }
 
   setText(text: string): void {
-    this.text = text;
+    this.text = text.replace(/\s+/g, " ").trim();
   }
 
   setPhase(phase: ThinkPhase): void {
@@ -38,21 +44,28 @@ export class Spinner {
     this.interval = null;
     process.stdout.write("\r\x1b[K");
   }
+
+  private fitLabel(label: string, reserved = 0): string {
+    const width = Math.max(20, (process.stdout.columns || 80) - 12 - reserved);
+    if (label.length <= width) return label;
+    return `${label.slice(0, Math.max(1, width - 1))}…`;
+  }
 }
 
 export function animateExit(): Promise<void> {
   return new Promise((resolve) => {
-    const steps = 6;
+    const steps = 10;
     let i = 0;
     const interval = setInterval(() => {
-      process.stdout.write(`\r${chalk.dim(" ".repeat(40))}\x1b[K`);
+      const trail = "\u2500".repeat(Math.max(0, steps - i));
+      process.stdout.write(`\r${chalk.dim("\u2502 " + trail)}\x1b[K`);
       if (i >= steps) {
         clearInterval(interval);
         process.stdout.write("\r\x1b[K");
         resolve();
       }
       i++;
-    }, 30);
+    }, 22);
   });
 }
 

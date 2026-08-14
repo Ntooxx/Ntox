@@ -35,16 +35,23 @@ const EMOTIONAL_MOMENT_PATTERNS = [
 ];
 
 const TOOL_BUILD_PATTERNS = [
-  /(create|build|write|make|develop)\s+(a|an|the)\s+(tool|script|program|app|function)/i,
-  /(can you|could you|would you)\s+(create|build|write|make|develop)/i,
-  /(write|code|implement)\s+(a|an|the)\s+(python|script|function|class|module)/i,
+  /(create|build|make|develop)\s+(a|an|the)\s+(tool|script|program|app)/i,
+  /(write|create|save)\s+.+\s+(file|to disk|in the repo|in this project)/i,
+  /\bimplement\b.+\b(in|inside|for)\s+(this|the)\s+(repo|project|codebase|file)/i,
   /register\s+(as|a)\s+(skill|tool|command)/i,
   /i need (a|an|the)\s+(tool|script|program)/i,
+];
+
+const CODE_ANSWER_PATTERNS = [
+  /\b(print|show|display|give|provide)\b.+\bcode\b/i,
+  /\b(can you|could you|would you)\s+write\s+(some\s+)?code\b/i,
+  /\bwrite\s+(a|an|some)?\s*(python|typescript|javascript|java|go|rust|c\+\+|c#)?\s*(function|class|snippet|example)\b/i,
 ];
 
 export function classifyMode(input: string): ResponseMode {
   // Priority: emotional > tool-build > profile > tool-execute > simple > complex
   if (EMOTIONAL_MOMENT_PATTERNS.some((p) => p.test(input))) return "emotional-moment";
+  if (CODE_ANSWER_PATTERNS.some((p) => p.test(input))) return "complex-reasoning";
   if (TOOL_BUILD_PATTERNS.some((p) => p.test(input))) return "tool-build";
   if (PROFILE_UPDATE_PATTERNS.some((p) => p.test(input))) return "profile-update";
   if (TOOL_EXECUTE_PATTERNS.some((p) => p.test(input))) return "tool-execute";
@@ -72,8 +79,8 @@ export function getModePrompt(mode: ResponseMode, userInput: string): string {
 - Use %USERPROFILE% for the user's home directory
 - Do NOT use ~/ or /home/ paths
 - Step 1: CREATE the file with the write tool
-- Step 2: VERIFY it exists with the bash tool (dir /b <path>)
-- Step 3: RUN it with the bash tool
+- Step 2: VERIFY it exists with the shell tool using PowerShell, e.g. Get-ChildItem -LiteralPath <path>
+- Step 3: RUN it with the shell tool only if the user asked you to run it
 - Step 4: SHOW the raw output
 - Step 5: STOP. No explanations. No feature lists. No "let me know if".
 

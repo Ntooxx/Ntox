@@ -7,12 +7,16 @@ import { shellTool } from "../tools/shell.js";
 import { readTool, writeTool, globTool, lsTool, editTool } from "../tools/filesystem.js";
 import { grepTool } from "../tools/grep.js";
 import { webFetchTool } from "../tools/web.js";
+import { webReadTool } from "../tools/web-read.js";
 import { searchTool } from "../tools/search.js";
 import { ttsTool } from "../tools/voice.js";
 import { sttTool } from "../tools/stt.js";
 import { imageTool } from "../tools/image.js";
 import { subagentTool } from "../tools/subagent.js";
 import { checkpointTool } from "../tools/checkpoint.js";
+import { browseTool } from "../tools/browse.js";
+import { jobTrackerTool } from "../tools/job-tracker.js";
+import { createProfileEvalTool } from "../tools/profile-eval.js";
 import { MemoryStore } from "../memory/episodic.js";
 import { UserModel } from "../memory/user-model.js";
 import { Reflector } from "../meta/reflector.js";
@@ -28,7 +32,9 @@ import { Executive } from "../meta/executive.js";
 import { InterventionEngine } from "../meta/intervention.js";
 import { DisagreementEngine } from "../meta/disagreement.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
-import type { NtoxConfig, CostUsage } from "../types/index.js";
+import type { NtoxConfig, CostUsage, WorkspaceProfile } from "../types/index.js";
+import type { SessionStore } from "../gateway/types.js";
+import { createPolicyRuntime, enforceToolPolicy, getDefaultProfile, type PolicyRuntime } from "./policy.js";
 
 export interface AgentInfra {
   llm: LLMClient;
@@ -47,6 +53,7 @@ export interface AgentInfra {
   intervention: InterventionEngine;
   disagreement: DisagreementEngine;
   cognitiveKernel: CognitiveKernel;
+  policy: PolicyRuntime;
 }
 
 export interface SharedInfra {
@@ -55,6 +62,7 @@ export interface SharedInfra {
   skillRegistry: SkillRegistry;
   skillExecutor: SkillExecutor;
   skillLibrary: SkillLibrary;
+  policy: PolicyRuntime;
 }
 
 export interface SessionInfra {
@@ -71,33 +79,35 @@ export interface SessionInfra {
   cognitiveKernel: CognitiveKernel;
 }
 
-export function createSharedInfra(config: NtoxConfig): SharedInfra {
+export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile): SharedInfra {
   const llm = new LLMClient(
     config.apiKey, config.model, config.embeddingModel,
     config.maxTokens, config.temperature, config.apiBaseUrl, config.provider
   );
 
+  const selectedProfile = profile || getDefaultProfile(config.profiles, config.defaultProfileId);
+  const runtimeProfile = selectedProfile.id === "default" && selectedProfile.name === "Default Workspace"
+    ? {
+      ...selectedProfile,
+      workspaceRoot: process.cwd(),
+      readRoots: [process.cwd()],
+      writeRoots: [process.cwd()],
+    }
+    : selectedProfile;
+  const policy = createPolicyRuntime(runtimeProfile);
   const tools = new ToolRegistry();
-  tools.register(readTool);
-  tools.register(writeTool);
-  tools.register(globTool);
-  tools.register(lsTool);
-  tools.register(shellTool);
-  tools.register(webFetchTool);
-  tools.register(searchTool);
-  tools.register(grepTool);
-  tools.register(editTool);
-  tools.register(ttsTool);
-  tools.register(sttTool);
-  tools.register(imageTool);
-  tools.register(subagentTool);
-  tools.register(checkpointTool);
+  for (const tool of [
+    readTool, writeTool, globTool, lsTool, shellTool, webFetchTool, webReadTool, searchTool, grepTool, editTool,
+    ttsTool, sttTool, imageTool, subagentTool, checkpointTool, browseTool, jobTrackerTool, createProfileEvalTool(llm),
+  ]) {
+    tools.register(enforceToolPolicy(tool, policy));
+  }
 
   const skillRegistry = new SkillRegistry();
-  const skillExecutor = new SkillExecutor(skillRegistry, true);
   const skillLibrary = new SkillLibrary();
+  const skillExecutor = new SkillExecutor(skillRegistry, skillLibrary, true);
 
-  return { llm, tools, skillRegistry, skillExecutor, skillLibrary };
+  return { llm, tools, skillRegistry, skillExecutor, skillLibrary, policy };
 }
 
 export function createSessionInfra(shared: SharedInfra): SessionInfra {
@@ -146,7 +156,8 @@ export function createAgentConfig(
     intervention: infra.intervention,
     disagreement: infra.disagreement,
     cognitiveKernel: infra.cognitiveKernel,
-    kernelEnabled: false,
+    policy: infra.policy,
+    kernelEnabled: true,
     kernelBasePath: homedir(),
     sessionId,
     systemPrompt: config.systemPrompt,
@@ -162,7 +173,7 @@ export function createAgentConfig(
   };
 }
 
-export class SessionManager {
+export class SessionManager implements SessionStore {
   private agents = new Map<string, Agent>();
   private lastActive = new Map<string, number>();
   private locks = new Map<string, boolean>();
@@ -197,6 +208,11 @@ export class SessionManager {
     return agent;
   }
 
+  set(id: string, agent: Agent): void {
+    this.agents.set(id, agent);
+    this.lastActive.set(id, Date.now());
+  }
+
   delete(id: string): void {
     this.agents.delete(id);
     this.lastActive.delete(id);
@@ -223,6 +239,18 @@ export class SessionManager {
 
   touch(id: string): void {
     this.lastActive.set(id, Date.now());
+  }
+
+  getLastActivity(id: string): number {
+    return this.lastActive.get(id) ?? 0;
+  }
+
+  getActiveChats(): string[] {
+    return Array.from(this.agents.keys());
+  }
+
+  status(): { sessions: number; locked: number; ids: string[] } {
+    return { sessions: this.agents.size, locked: this.locks.size, ids: this.getActiveChats() };
   }
 }
 
@@ -286,12 +314,22 @@ export class GatewayOutput implements MessageOutput {
   public toolCalls: string[] = [];
   private buffer = "";
   private notifyTyping?: () => void;
+  private externalOnToken?: (token: string) => void;
+  private tokenCount = 0;
 
-  constructor(notifyTyping?: () => void) {
+  constructor(notifyTyping?: () => void, externalOnToken?: (token: string) => void) {
     this.notifyTyping = notifyTyping;
+    this.externalOnToken = externalOnToken;
   }
 
-  onToken(token: string): void { this.buffer += token; }
+  onToken(token: string): void {
+    this.buffer += token;
+    this.tokenCount++;
+    this.externalOnToken?.(token);
+    if (this.tokenCount % 50 === 0) {
+      this.notifyTyping?.();
+    }
+  }
   onToolCall(name: string): void {
     this.toolCalls.push(name);
     this.notifyTyping?.();

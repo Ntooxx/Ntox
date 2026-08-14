@@ -56,7 +56,13 @@ describe("writeTool", () => {
     const path = join(tmpBase, "output.txt");
     const r = await writeTool.execute({ path, content: "data" });
     expect(r.success).toBe(true);
-      expect(r.data).toContain("4 bytes");
+    expect(r.data).toContain("4 bytes");
+  });
+
+  it("fails when path is missing", async () => {
+    const r = await writeTool.execute({ content: "data" });
+    expect(r.success).toBe(false);
+    expect(r.error).toContain("Missing required argument: path");
   });
 
   it("blocks sensitive paths", async () => {
@@ -83,6 +89,15 @@ describe("editTool", () => {
     });
     expect(r.success).toBe(false);
     expect(r.error).toContain("Access denied");
+  });
+
+  it("fails when filePath is missing", async () => {
+    const r = await editTool.execute({
+      oldString: "x",
+      newString: "y",
+    });
+    expect(r.success).toBe(false);
+    expect(r.error).toContain("Missing required argument: filePath");
   });
 });
 

@@ -4,14 +4,6 @@ function visibleLen(s: string): number {
   return s.replace(/\x1b\[[0-9;]*m/g, "").length;
 }
 
-function clean(s: string): string {
-  return s
-    .replace(/\*\*(.+?)\*\*/g, "$1")
-    .replace(/\*(.+?)\*/g, "$1")
-    .replace(/__(.+?)__/g, "$1")
-    .replace(/_(.+?)_/g, "$1");
-}
-
 export class LineWriter {
   private word = "";
   private out: NodeJS.WriteStream;
@@ -59,12 +51,14 @@ export class LineWriter {
 
       if (ch === " " || ch === "\t") {
         this.flushWord();
+        this.writePrefix();
         if (this.col + 1 >= this.width) {
           this.out.write(LF + this.wrapPrefix);
           this.col = this.prefixLen;
         } else {
-          this.out.write(" ");
-          this.col++;
+          const spaces = ch === "\t" ? 2 : 1;
+          this.out.write(" ".repeat(spaces));
+          this.col += spaces;
         }
         continue;
       }
@@ -78,7 +72,7 @@ export class LineWriter {
 
     this.writePrefix();
 
-    let w = clean(this.word);
+    let w = this.word;
     const wlen = visibleLen(w);
 
     if (this.col > this.prefixLen && this.col + wlen > this.width) {

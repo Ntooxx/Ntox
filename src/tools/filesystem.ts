@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Tool } from "../types/index.js";
 import { globToRegex } from "../utils/glob.js";
+import { recordFileChange } from "./change-tracker.js";
 
 const SENSITIVE_PATTERNS = [
   /[\\/]\.ssh[\\/]/i,
@@ -20,6 +21,13 @@ function isSensitivePath(path: string): boolean {
   return SENSITIVE_PATTERNS.some((p) => p.test(path));
 }
 
+function requireNonEmptyString(args: Record<string, unknown>, key: string): string | null {
+  const value = args[key];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export const readTool: Tool = {
   name: "read",
   description: "Read a file from the filesystem. Returns the file contents.",
@@ -31,7 +39,8 @@ export const readTool: Tool = {
     required: ["path"],
   },
   async execute(args) {
-    const path = String(args.path);
+    const path = requireNonEmptyString(args, "path");
+    if (!path) return { success: false, error: "Missing required argument: path" };
     if (isSensitivePath(path)) {
       return { success: false, error: `Access denied: sensitive path "${path}"` };
     }
@@ -56,13 +65,17 @@ export const writeTool: Tool = {
     required: ["path", "content"],
   },
   async execute(args) {
-    const path = String(args.path);
+    const path = requireNonEmptyString(args, "path");
+    if (!path) return { success: false, error: "Missing required argument: path" };
+    if (!("content" in args)) return { success: false, error: "Missing required argument: content" };
     const content = String(args.content);
     if (isSensitivePath(path)) {
       return { success: false, error: `Access denied: sensitive path "${path}"` };
     }
     try {
+      const before = await readFile(path, "utf-8").catch(() => null);
       await writeFile(path, content, "utf-8");
+      recordFileChange({ path, action: "write", before, after: content });
       return { success: true, data: `Written ${content.length} bytes to ${path}` };
     } catch (e) {
       return { success: false, error: `Failed to write file: ${e}` };
@@ -82,7 +95,8 @@ export const globTool: Tool = {
     required: ["pattern"],
   },
   async execute(args) {
-    const pattern = String(args.pattern);
+    const pattern = requireNonEmptyString(args, "pattern");
+    if (!pattern) return { success: false, error: "Missing required argument: pattern" };
     const dir = args.path ? String(args.path) : process.cwd();
     try {
       const regex = globToRegex(pattern);
@@ -139,7 +153,10 @@ export const editTool: Tool = {
     required: ["filePath", "oldString", "newString"],
   },
   async execute(args) {
-    const filePath = String(args.filePath);
+    const filePath = requireNonEmptyString(args, "filePath");
+    if (!filePath) return { success: false, error: "Missing required argument: filePath" };
+    if (!("oldString" in args)) return { success: false, error: "Missing required argument: oldString" };
+    if (!("newString" in args)) return { success: false, error: "Missing required argument: newString" };
     const oldString = String(args.oldString);
     const newString = String(args.newString);
     if (isSensitivePath(filePath)) {
@@ -153,6 +170,7 @@ export const editTool: Tool = {
       }
       const newContent = content.slice(0, idx) + newString + content.slice(idx + oldString.length);
       await writeFile(filePath, newContent, "utf-8");
+      recordFileChange({ path: filePath, action: "edit", before: content, after: newContent });
       return { success: true, data: `Replaced 1 occurrence in ${filePath}` };
     } catch (e) {
       return { success: false, error: `Edit failed: ${e}` };

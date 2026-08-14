@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shellTool } from "./shell.js";
+import { shellTool, validateShellCommand } from "./shell.js";
 
 describe("shellTool safety", () => {
   it("blocks rm -rf /", async () => {
@@ -38,5 +38,17 @@ describe("shellTool safety", () => {
   it("allows dir listing", async () => {
     const r = await shellTool.execute({ command: "Get-ChildItem node_modules" });
     expect(r.success).toBe(true);
+  });
+
+  it("rejects code fragments before shell execution", async () => {
+    expect(validateShellCommand("<div>Hello</div>")).toContain("looks like code");
+    const r = await shellTool.execute({ command: "< was unexpected at this time." });
+    expect(r.success).toBe(false);
+    expect(r.error).toContain("looks like code");
+  });
+
+  it("rejects Unix pipeline helpers on Windows", () => {
+    if (process.platform !== "win32") return;
+    expect(validateShellCommand("ls -la ~ | head -20")).toContain("Unix-style");
   });
 });

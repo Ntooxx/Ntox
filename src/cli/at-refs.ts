@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { execSync } from "node:child_process";
+import { webReadTool } from "../tools/web-read.js";
 
 const MAX_REFS = 5;
 const MAX_REF_SIZE = 50 * 1024;
@@ -89,23 +90,15 @@ async function fetchUrlContent(url: string): Promise<string> {
   const blockReason = validateUrlInternal(url);
   if (blockReason) return `[Error: ${blockReason}]`;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
   try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": "Ntox-Agent/1.0" },
-    });
-    if (!res.ok) return `[Error: HTTP ${res.status} ${res.statusText}]`;
-    const cl = res.headers.get("content-length");
-    if (cl && parseInt(cl) > MAX_REF_SIZE) return "[Error: Response too large]";
-    const text = await res.text();
+    const result = await webReadTool.execute({ url, waitMs: 1800 });
+    if (!result.success) return `[Error: ${result.error || "Unable to read URL"}]`;
+    const data = result.data && typeof result.data === "object" ? result.data as { title?: unknown; content?: unknown } : {};
+    const title = typeof data.title === "string" && data.title.trim() ? `# ${data.title.trim()}\n\n` : "";
+    const text = `${title}${String(data.content || "")}`;
     return text.length > MAX_REF_SIZE ? text.slice(0, MAX_REF_SIZE) + "\n... [truncated]" : text;
   } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") return "[Error: Fetch timed out after 30s]";
     return `[Error: ${e instanceof Error ? e.message : String(e)}]`;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

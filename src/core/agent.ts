@@ -27,14 +27,19 @@ import { buildTimeContext, getTimeGuidance } from "../meta/time-adapter.js";
 import { SkillLibrary } from "../skills/library.js";
 import { TheoryMemory } from "../memory/theory-memory.js";
 import { classifyMode, getModePrompt } from "../meta/response-mode.js";
-import { DebateOrchestrator } from "./orchestrator.js";
+import { DebateOrchestrator, DEBATE_VOICES } from "./orchestrator.js";
 import { DecisionKernel, InternalState, GoalQueue, Goal, Subtask, ActionResult, StateTransition, evolveState, IdentityLog, Verifier, ExecuteAction } from "../kernel/index.js";
 import { detectPromptInjection } from "./guard.js";
+import { buildNarrative } from "../memory/narrative.js";
 import { existsSync, appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Message, CostUsage, ToolResult, QueryType, Reflection, SkillTriggerMatch, ThinkPhase, CognitiveTrace } from "../types/index.js";
+import { MEMORY_DIR } from "./config.js";
+import type { Message, CostUsage, ToolResult, QueryType, Reflection, SkillTriggerMatch, ThinkPhase, CognitiveTrace, AgentTurnTrace, AgentToolTrace } from "../types/index.js";
 import { checkForSurfaceReasoning } from "../research/false-success.js";
 import { searchTool } from "../tools/search.js";
+import { resetPolicyRuntime, type PolicyRuntime } from "./policy.js";
+import { buildContextBudgetLedger } from "./context-ledger.js";
+import { getFileChangesSince } from "../tools/change-tracker.js";
 
 export interface AgentConfig {
   llm: LLMClient;
@@ -65,13 +70,14 @@ export interface AgentConfig {
   minConfidence: number;
   maxContextMessages: number;
   contextTokenBudget: number;
+  policy?: PolicyRuntime;
   skipReflection?: boolean;
 }
 
 export interface AgentCallbacks {
   onToken: (token: string) => void;
   onToolCall: (name: string, args: Record<string, unknown>) => void;
-  onToolResult: (name: string, result: ToolResult) => void;
+  onToolResult: (name: string, result: ToolResult, args: Record<string, unknown>) => void;
   onUsage: (usage: CostUsage) => void;
   onThinking: (thought: string) => void;
   onPhase?: (phase: ThinkPhase) => void;
@@ -88,6 +94,10 @@ export interface AgentCallbacks {
   onFeedbackRequest?: (question: string) => void;
   onIntervention?: (intervention: import("../meta/intervention.js").Intervention) => void;
   onDisagreement?: (disagreement: import("../meta/disagreement.js").Disagreement) => void;
+}
+
+export interface AgentRunOptions {
+  signal?: AbortSignal;
 }
 
 export class Agent {
@@ -121,6 +131,8 @@ export class Agent {
   private theoryMemory: TheoryMemory;
   private searchCache = new Map<string, string>();
   private lastSearchEntity = "";
+  private currentTrace: AgentTurnTrace | null = null;
+  private lastTrace: AgentTurnTrace | null = null;
 
   constructor(cfg: AgentConfig) {
     this.cfg = cfg;
@@ -133,8 +145,102 @@ export class Agent {
 
   getMessages(): Message[] { return [...this.messages]; }
 
+  removeLastTurn(): boolean {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      if (this.messages[i].role === "user") {
+        this.messages.splice(i);
+        this.lastAssistantResponse = this.findLastAssistantMessage();
+        this.lastUserMessage = this.findLastUserMessage();
+        this.lastTrace = null;
+        this.currentTrace = null;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  getLastTrace(): AgentTurnTrace | null {
+    if (!this.lastTrace) return null;
+    return {
+      ...this.lastTrace,
+      toolCalls: this.lastTrace.toolCalls.map((t) => ({ ...t, args: { ...t.args } })),
+      skill: this.lastTrace.skill ? { ...this.lastTrace.skill } : undefined,
+    };
+  }
+
   getRelationshipSummary(): string { return this.relationshipTracker.getSummary(); }
   getBondLabel(): string { return this.relationshipTracker.getBondLabel(); }
+
+  private startTrace(userInput: string): void {
+    this.currentTrace = {
+      startedAt: Date.now(),
+      userInput,
+      memoryRecallCount: 0,
+      searchUsed: false,
+      toolCalls: [],
+      workspaceProfile: this.cfg.policy ? {
+        id: this.cfg.policy.profile.id,
+        name: this.cfg.policy.profile.name,
+        workspaceRoot: this.cfg.policy.profile.workspaceRoot,
+      } : undefined,
+      policyDecisions: [],
+      checkpointIds: [],
+      retries: 0,
+    };
+    if (this.cfg.policy) resetPolicyRuntime(this.cfg.policy);
+  }
+
+  private finishTrace(response?: string, error?: string): void {
+    if (!this.currentTrace) return;
+    this.currentTrace.completedAt = Date.now();
+    if (response !== undefined) this.currentTrace.finalResponseLength = response.length;
+    if (error) this.currentTrace.error = error;
+    this.lastTrace = {
+      ...this.currentTrace,
+      toolCalls: this.currentTrace.toolCalls.map((t) => ({ ...t, args: { ...t.args } })),
+      policyDecisions: this.cfg.policy ? [...this.cfg.policy.decisions] : [...this.currentTrace.policyDecisions],
+      checkpointIds: this.cfg.policy ? [...this.cfg.policy.checkpointIds] : [...this.currentTrace.checkpointIds],
+      skill: this.currentTrace.skill ? { ...this.currentTrace.skill } : undefined,
+      fileChanges: getFileChangesSince(this.currentTrace.startedAt).map((change) => ({
+        path: change.path,
+        action: change.action,
+        timestamp: change.timestamp,
+      })),
+    };
+    this.currentTrace = null;
+  }
+
+  private sanitizeTraceArgs(args: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(args)) {
+      if (/token|key|secret|password|credential/i.test(key)) {
+        out[key] = "[redacted]";
+      } else if (typeof value === "string") {
+        out[key] = value.length > 200 ? value.slice(0, 197) + "..." : value;
+      } else if (typeof value === "number" || typeof value === "boolean" || value === null) {
+        out[key] = value;
+      } else {
+        out[key] = "[complex]";
+      }
+    }
+    return out;
+  }
+
+  private stableToolKey(name: string, args: Record<string, unknown>): string {
+    const ordered = Object.keys(args).sort().reduce((acc, key) => {
+      const value = args[key];
+      acc[key] = typeof value === "string" && value.length > 500 ? value.slice(0, 500) : value;
+      return acc;
+    }, {} as Record<string, unknown>);
+    return `${name}:${JSON.stringify(ordered)}`;
+  }
+
+  private extractAutoCheckpointId(result: ToolResult): string | undefined {
+    const data = result.data;
+    if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+    const id = (data as { autoCheckpointId?: unknown }).autoCheckpointId;
+    return typeof id === "string" && id ? id : undefined;
+  }
 
   initKernel(_basePath: string): void {
     const state = new InternalState({
@@ -456,7 +562,7 @@ export class Agent {
       }
 
       if (summary.length > 20) {
-        const memoryDir = join(process.cwd(), ".ntox");
+        const memoryDir = MEMORY_DIR;
         if (!existsSync(memoryDir)) mkdirSync(memoryDir, { recursive: true });
         const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
         appendFileSync(
@@ -470,8 +576,9 @@ export class Agent {
     }
   }
 
-  async *run(userInput: string, callbacks: AgentCallbacks): AsyncGenerator<string> {
+  async *run(userInput: string, callbacks: AgentCallbacks, options: AgentRunOptions = {}): AsyncGenerator<string> {
     const { cfg } = this;
+    this.startTrace(userInput);
     callbacks.onPhase?.("thinking");
     this.messages.push({ role: "user", content: userInput });
 
@@ -479,16 +586,19 @@ export class Agent {
     const injectionCheck = detectPromptInjection(userInput);
     if (injectionCheck.blocked) {
       const msg = "[Security] Potential prompt injection blocked. Your message was not processed.";
+      if (this.currentTrace) this.currentTrace.blockedReason = injectionCheck.reason;
       this.messages.push({ role: "assistant", content: msg });
       callbacks.onToken(msg);
       this.lastAssistantResponse = msg;
       this.lastUserMessage = userInput;
+      this.finishTrace(msg);
       yield msg;
       return;
     }
 
     // 0. Response mode classification
     const responseMode = classifyMode(userInput);
+    if (this.currentTrace) this.currentTrace.responseMode = responseMode;
 
     // 0a. Kernel routing — try kernel first for handleable modes
     if (this.decisionKernel && (
@@ -501,6 +611,7 @@ export class Agent {
       if (kernelResult !== null) {
         this.lastAssistantResponse = kernelResult;
         this.lastUserMessage = userInput;
+        this.finishTrace(kernelResult);
         yield kernelResult;
         return;
       }
@@ -517,18 +628,21 @@ export class Agent {
         callbacks.onToken(response);
         this.lastAssistantResponse = response;
         this.lastUserMessage = userInput;
+        this.finishTrace(response);
         yield response;
         return;
       }
       // Job update: "I work as X"
       const jobMatch = userInput.match(/(?:i work as|my (?:job|role|title) is)\s+(.+)/i);
       if (jobMatch) {
-        cfg.userModel.setPreference("verbosity", "balanced");
-        const response = `Got it — you work as **${jobMatch[1].trim()}**. I'll keep that in mind.`;
+        const job = jobMatch[1].trim();
+        cfg.userModel.setExpertise(job, "intermediate");
+        const response = `Got it — you work as **${job}**. I'll keep that in mind.`;
         this.messages.push({ role: "assistant", content: response });
         callbacks.onToken(response);
         this.lastAssistantResponse = response;
         this.lastUserMessage = userInput;
+        this.finishTrace(response);
         yield response;
         return;
       }
@@ -601,6 +715,7 @@ export class Agent {
     if (cfg.strategyEnabled) {
       callbacks.onPhase?.("analyzing");
       queryType = classifyQuery(userInput);
+      if (this.currentTrace) this.currentTrace.strategy = queryType;
       strategyPrompt = getStrategyPrompt(queryType);
       if (callbacks.onStrategy) callbacks.onStrategy(queryType);
       cfg.analytics.trackQueryType(queryType);
@@ -622,14 +737,18 @@ export class Agent {
     // 3. User model
     cfg.userModel.extractFromConversation(userInput, wasCorrection);
 
-    // 3b. Mental model extraction
+    // 3b. Mental model extraction + context
+    let mentalModelContext = "";
     if (cfg.mentalModel) {
       cfg.mentalModel.extractFromConversation(userInput);
+      mentalModelContext = cfg.mentalModel.buildContext();
     }
 
-    // 3c. Executive extraction
+    // 3c. Executive extraction + context
+    let executiveContext = "";
     if (cfg.executive) {
       cfg.executive.extractFromConversation(userInput);
+      executiveContext = cfg.executive.buildContext();
     }
 
     // 3a. Domain learning — auto-extend domain keywords from user's terms
@@ -649,7 +768,6 @@ export class Agent {
     callbacks.onPhase?.("recalling");
     let memoryContext = "";
     let theoryContext = "";
-    let queryEmbedding: number[] | null = null;
     const embedPromise: Promise<number[] | null> = cfg.memoryEnabled
       ? cfg.llm.embed(userInput).catch(() => null)
       : Promise.resolve(null);
@@ -659,7 +777,8 @@ export class Agent {
       embedPromise,
     ]);
     const searchContext = searchCtx;
-    queryEmbedding = embedResult;
+    if (this.currentTrace) this.currentTrace.searchUsed = searchContext.length > 0;
+    const queryEmbedding = embedResult;
 
     if (cfg.memoryEnabled) {
       if (queryEmbedding && queryEmbedding.length > 0) {
@@ -668,12 +787,17 @@ export class Agent {
         memoryContext = cfg.memory.buildMemoryContext(null, cfg.memoryRetrievalCount);
       }
       if (memoryContext && callbacks.onMemoryRecall) {
-        callbacks.onMemoryRecall(memoryContext.split("\n").filter((l) => l.startsWith("[")).length);
+        const recalled = memoryContext.split("\n").filter((l) => l.startsWith("[")).length;
+        if (this.currentTrace) this.currentTrace.memoryRecallCount = recalled;
+        callbacks.onMemoryRecall(recalled);
       }
       if (cfg.theoryEnabled ?? true) {
         const recentEpisodes = cfg.memory.getRecent(10);
         this.theoryMemory.processEpisodesBulk(recentEpisodes);
         theoryContext = this.theoryMemory.buildTheoryContext(userInput);
+        if (theoryContext && this.currentTrace) {
+          this.currentTrace.theoryReason = "Relevant theory memory matched this input and was injected into context";
+        }
       }
     }
 
@@ -686,12 +810,23 @@ export class Agent {
       cognitiveContext = this.lastCognitiveResult.cognitiveContext;
       if (callbacks.onCognitive) {
         const r = this.lastCognitiveResult;
-        callbacks.onCognitive(`compressed ${r.primitive.domains.length} domains → ${r.patterns.length} patterns`);
+        const summary = `compressed ${r.primitive.domains.length} domains -> ${r.patterns.length} patterns`;
+        if (this.currentTrace) this.currentTrace.cognitiveSummary = summary;
+        callbacks.onCognitive(summary);
       }
     }
 
     // 7. User profile
     const userContext = cfg.userModel.buildUserContext();
+
+    // 7b. Narrative — session continuity
+    let narrativeContext = "";
+    if (cfg.memoryEnabled) {
+      const recentEpisodes = cfg.memory.getRecent(5);
+      const profile = cfg.userModel.getProfile();
+      const narrative = buildNarrative(recentEpisodes, profile);
+      if (narrative) narrativeContext = `\n\n## Session Continuity\n${narrative}`;
+    }
 
     // 8. Unified skill matching — registry + library triggers
     let skillMatches: SkillTriggerMatch[] = [];
@@ -722,6 +857,7 @@ export class Agent {
           cfg.skillExecutor.incrementUsage(top.skill.name);
         }
         cfg.analytics.trackSkillTrigger(top.skill.name);
+        if (this.currentTrace) this.currentTrace.skill = { name: top.skill.name, confidence: top.confidence };
         if (callbacks.onSkillTriggered) {
           callbacks.onSkillTriggered(top.skill.name, top.confidence);
         }
@@ -737,6 +873,9 @@ export class Agent {
     if (theoryContext) parts.push(theoryContext);
     if (mistakesContext) parts.push(mistakesContext);
     if (userContext) parts.push(userContext);
+    if (narrativeContext) parts.push(narrativeContext);
+    if (mentalModelContext) parts.push(mentalModelContext);
+    if (executiveContext) parts.push(executiveContext);
     if (skillContext) parts.push(skillContext);
     if (searchContext) parts.push(searchContext);
 
@@ -791,6 +930,26 @@ export class Agent {
     if (timeGuidance) parts.push(`\n\n## Time Context\n${timeGuidance}`);
 
     const fullSystemPrompt = parts.join("");
+    if (this.currentTrace) {
+      this.currentTrace.contextBudget = buildContextBudgetLedger({
+        system: cfg.systemPrompt,
+        strategy: strategyPrompt,
+        cognition: cognitiveContext,
+        memory: memoryContext,
+        theory: theoryContext,
+        mistakes: mistakesContext,
+        user: userContext,
+        narrative: narrativeContext,
+        mentalModel: mentalModelContext,
+        executive: executiveContext,
+        skills: skillContext + libraryFrameworkContext,
+        search: searchContext,
+        mode: modePrompt,
+        session: sessionGuidance,
+        time: timeGuidance,
+        full: fullSystemPrompt,
+      });
+    }
 
     const openaiTools = cfg.tools.toOpenAITools();
 
@@ -804,13 +963,14 @@ export class Agent {
       const orchestrator = new DebateOrchestrator(cfg.llm);
       try {
         const result = await orchestrator.debate(cleanQuery, "", (voice, step) => {
-          callbacks.onThinking?.(`${voice} (${step}/${result.voiceCount || 8})`);
+          callbacks.onThinking?.(`${voice} (${step}/${DEBATE_VOICES.length})`);
         });
         const debateOutput = result.synthesis;
         callbacks.onToken(debateOutput);
         this.messages.push({ role: "assistant", content: debateOutput });
         this.lastAssistantResponse = debateOutput;
         this.lastUserMessage = userInput;
+        this.finishTrace(debateOutput);
         yield debateOutput;
         return;
       } catch (e) {
@@ -823,12 +983,14 @@ export class Agent {
     let done = false;
     let fullResponse = "";
     let attempts = 0;
+    const failedToolCalls = new Map<string, string>();
 
     while (!done && attempts < 10) {
       attempts++;
+      if (this.currentTrace) this.currentTrace.retries = Math.max(0, attempts - 1);
       let responseBuffer = "";
 
-      const streamIter = cfg.llm.stream(this.messages, fullSystemPrompt, openaiTools);
+      const streamIter = cfg.llm.stream(this.messages, fullSystemPrompt, openaiTools, options.signal);
       let hasToolCalls = false;
       try {
         for await (const chunk of streamIter) {
@@ -844,17 +1006,48 @@ export class Agent {
               callbacks.onToolCall(tc.name, args);
               cfg.analytics.trackToolCall(tc.name);
               this.toolUsageThisSession[tc.name] = (this.toolUsageThisSession[tc.name] || 0) + 1;
+              const toolKey = this.stableToolKey(tc.name, args);
+              let toolTrace: AgentToolTrace | null = null;
+              if (this.currentTrace) {
+                toolTrace = { name: tc.name, args: this.sanitizeTraceArgs(args) };
+                this.currentTrace.toolCalls.push(toolTrace);
+              }
 
               const tool = cfg.tools.get(tc.name);
               if (tool) {
-                const result = await tool.execute(args);
-                callbacks.onToolResult(tc.name, result);
+                const priorFailure = failedToolCalls.get(toolKey);
+                const startedAt = Date.now();
+                const result = priorFailure
+                  ? {
+                    success: false,
+                    error: `Repeated failed tool call skipped: ${priorFailure}`,
+                    data: { guidance: "Change the arguments, choose another tool, or answer without retrying the same failed call." },
+                  }
+                  : await tool.execute(args);
+                if (toolTrace) {
+                  toolTrace.success = result.success;
+                  if (result.error) toolTrace.error = result.error;
+                  toolTrace.durationMs = Date.now() - startedAt;
+                  toolTrace.autoCheckpointId = this.extractAutoCheckpointId(result);
+                  if (priorFailure) toolTrace.reason = "repeat-skipped";
+                }
+                if (!result.success && !priorFailure) failedToolCalls.set(toolKey, result.error || "failed");
+                const resultContent = this.compressToolResult(result);
+                if (this.currentTrace?.contextBudget) {
+                  this.currentTrace.contextBudget.toolResults += Math.ceil(resultContent.length / 4);
+                  this.currentTrace.contextBudget.total += Math.ceil(resultContent.length / 4);
+                }
+                callbacks.onToolResult(tc.name, result, args);
                 this.messages.push({
                   role: "tool",
                   tool_call_id: tc.id,
-                  content: JSON.stringify(result),
+                  content: resultContent,
                 });
               } else {
+                if (toolTrace) {
+                  toolTrace.success = false;
+                  toolTrace.error = `Unknown tool: ${tc.name}`;
+                }
                 this.messages.push({
                   role: "tool",
                   tool_call_id: tc.id,
@@ -868,7 +1061,12 @@ export class Agent {
         }
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
+        if (options.signal?.aborted || errMsg.includes("cancelled")) {
+          this.finishTrace(fullResponse + responseBuffer, "cancelled");
+          throw new Error("cancelled", { cause: e });
+        }
         this.messages.push({ role: "assistant", content: `[Stream error: ${errMsg}]` });
+        this.finishTrace(fullResponse + responseBuffer, errMsg);
         throw e;
       }
 
@@ -917,6 +1115,10 @@ export class Agent {
               "self-reflection"
             );
           }
+          try {
+            const { penalizeTheoriesForFalseSuccess } = await import("../research/theory-store.js");
+            penalizeTheoriesForFalseSuccess(`${userInput} ${responseBuffer}`, `Surface reasoning retry: ${surfaceCheck.details.join("; ")}`);
+          } catch { /* best effort */ }
           this.messages.push({ role: "assistant", content: responseBuffer });
           this.messages.push({
             role: "user",
@@ -930,6 +1132,7 @@ export class Agent {
 
       this.lastAssistantResponse = fullResponse;
       this.lastUserMessage = userInput;
+      this.finishTrace(fullResponse);
       yield fullResponse;
 
       // Fast post-processing: visible callbacks (inline tags)
@@ -975,9 +1178,6 @@ export class Agent {
         try {
           const observations = cfg.observation ? cfg.observation.getAll().slice(-20) : [];
           const beliefs = cfg.mentalModel ? cfg.mentalModel.getAllEntries() : [];
-          const goals = cfg.executive ? cfg.executive.getActiveGoals() : [];
-          const risks = cfg.executive ? cfg.executive.getRisks() : [];
-          const constraints = cfg.executive ? cfg.executive.getConstraints() : [];
           const intCtx: InterventionContext = {
             observations,
             beliefs,
@@ -1013,7 +1213,7 @@ export class Agent {
       }
 
       // Slow post-processing: background
-      Promise.resolve().then(async () => {
+      try {
         if (cfg.memoryEnabled && queryEmbedding && queryEmbedding.length > 0) {
           try {
             cfg.memory.addEpisode(cfg.sessionId, userInput, responseBuffer, queryEmbedding);
@@ -1026,10 +1226,29 @@ export class Agent {
         }
         this.selfAwareness.discoverFromIntent(this.sessionContext.intent, this.sessionContext.queryCount);
         await this.manageContextWindow();
-      }).catch((e) => console.error("[post-process]", e));
+      } catch (e) { console.error("[post-process]", e); }
 
       return;
     }
+  }
+
+  private compressToolResult(result: ToolResult): string {
+    if (!result.success && result.error && /ParserError|CommandNotFoundException|Unix-style command|looks like code|malformed tool XML/i.test(result.error)) {
+      return JSON.stringify({
+        success: false,
+        error: result.error.split("\n")[0].slice(0, 300),
+        guidance: "Do not retry the same shell command. If the user asked for code, answer in chat without tools. On Windows use PowerShell syntax.",
+      });
+    }
+    const json = JSON.stringify(result);
+    if (json.length <= 12_000) return json;
+    const head = json.slice(0, 8_000);
+    const tail = json.slice(-2_000);
+    return JSON.stringify({
+      success: result.success,
+      data: `${head}\n\n... tool result compressed (${json.length} chars) ...\n\n${tail}`,
+      error: result.error,
+    });
   }
 
   recordSessionEnd(sessionId: string): string | null {
@@ -1080,6 +1299,13 @@ export class Agent {
   private findLastAssistantMessage(): string | null {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       if (this.messages[i].role === "assistant") return this.messages[i].content;
+    }
+    return null;
+  }
+
+  private findLastUserMessage(): string | null {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      if (this.messages[i].role === "user") return this.messages[i].content;
     }
     return null;
   }

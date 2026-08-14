@@ -67,10 +67,19 @@ export class CognitiveSpace {
   }
 
   private initializeVectors(): void {
-    // Start with random vectors
-    for (const domain of ALL_DOMAIN_NAMES) {
+    for (let di = 0; di < ALL_DOMAIN_NAMES.length; di++) {
+      const domain = ALL_DOMAIN_NAMES[di];
       const vec = new Array(DIMS);
-      for (let i = 0; i < DIMS; i++) vec[i] = Math.random() - 0.5;
+      let h = 0x811c9dc5;
+      for (let c = 0; c < domain.length; c++) {
+        h ^= domain.charCodeAt(c);
+        h = Math.imul(h, 0x01000193);
+      }
+      for (let i = 0; i < DIMS; i++) {
+        h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+        h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+        vec[i] = ((h >>> 0) / 0xffffffff) - 0.5;
+      }
       const mag = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
       for (let i = 0; i < DIMS; i++) vec[i] /= mag;
       this.domainVectors.set(domain, vec);

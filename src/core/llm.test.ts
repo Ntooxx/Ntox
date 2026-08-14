@@ -1,10 +1,22 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
-  getProviderNames, getProviders, formatTokenCount, formatCost,
-  countTokens, countMessageTokens, providerRequiresKey,
-  estimateCost, LOCAL_PROVIDERS,
+  LLMClient,
+  getProviderNames,
+  getProviders,
+  formatTokenCount,
+  formatCost,
+  countTokens,
+  countMessageTokens,
+  providerRequiresKey,
+  estimateCost,
+  LOCAL_PROVIDERS,
+  toOpenAIMessages,
 } from "./llm.js";
 import type { ModelInfo } from "../types/index.js";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("countTokens", () => {
   it("counts tokens in text", () => {
@@ -30,6 +42,31 @@ describe("countMessageTokens", () => {
 
   it("returns 0 for empty array", () => {
     expect(countMessageTokens([])).toBe(0);
+  });
+});
+
+describe("toOpenAIMessages", () => {
+  it("wraps internal tool calls in OpenAI function envelopes", () => {
+    const messages = toOpenAIMessages(
+      [
+        { role: "user", content: "browse this" },
+        {
+          role: "assistant",
+          content: "(tool call)",
+          tool_calls: [{ id: "call_1", name: "browse", arguments: '{"url":"https://example.com"}' }],
+        },
+        { role: "tool", tool_call_id: "call_1", name: "browse", content: '{"success":true}' },
+      ],
+      "system",
+    );
+
+    expect(messages[0]).toEqual({ role: "system", content: "system" });
+    expect(messages[2].tool_calls?.[0]).toEqual({
+      id: "call_1",
+      type: "function",
+      function: { name: "browse", arguments: '{"url":"https://example.com"}' },
+    });
+    expect(messages[3]).toEqual({ role: "tool", content: '{"success":true}', tool_call_id: "call_1" });
   });
 });
 
@@ -108,6 +145,47 @@ describe("getProviderNames", () => {
     expect(names.openrouter).toBe("OpenRouter");
     expect(names.openai).toBe("OpenAI");
     expect(names.anthropic).toBe("Anthropic");
+  });
+});
+
+describe("OpenRouter model discovery", () => {
+  it("returns only the live OpenRouter catalog and normalizes its metadata", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "zeta/model",
+              name: "Zeta",
+              context_length: 200000,
+              pricing: { prompt: "0.2", completion: "0.4" },
+            },
+            {
+              id: "alpha/model",
+              name: "Alpha",
+              context_length: 128000,
+              pricing: { prompt: "0", completion: "0" },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const client = new LLMClient("key", "alpha/model", "openai/text-embedding-3-small", 1024, 0.7);
+
+    const models = await client.fetchModels();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://openrouter.ai/api/v1/models",
+      expect.objectContaining({ headers: { Authorization: "Bearer key" } }),
+    );
+    expect(models.map((model) => model.id)).toEqual(["alpha/model", "zeta/model"]);
+    expect(models[0]).toMatchObject({
+      provider: "openrouter",
+      pricing: { prompt: 0, completion: 0 },
+      context_length: 128000,
+    });
   });
 });
 

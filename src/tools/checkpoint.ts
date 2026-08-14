@@ -3,6 +3,7 @@ import { join, basename } from "node:path";
 import type { Tool } from "../types/index.js";
 import { NTOX_DIR } from "../core/config.js";
 import { randomUUID } from "node:crypto";
+import { recordFileChange } from "./change-tracker.js";
 
 const CHECKPOINTS_DIR = join(NTOX_DIR, "checkpoints");
 const MAX_PER_FILE = 50;
@@ -91,7 +92,9 @@ export const checkpointTool: Tool = {
         return { success: false, error: "Invalid checkpoint data" };
       }
 
+      const before = existsSync(checkpoint.originalPath) ? readFileSync(checkpoint.originalPath, "utf-8") : null;
       writeFileSync(checkpoint.originalPath, checkpoint.content);
+      recordFileChange({ path: checkpoint.originalPath, action: "rollback", before, after: checkpoint.content });
       return { success: true, data: { restoredTo: checkpoint.originalPath, checkpointId, size: checkpoint.content.length } };
     }
 

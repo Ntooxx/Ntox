@@ -3,8 +3,8 @@ export class NtoxError extends Error {
   public readonly retryable: boolean;
   public readonly status?: number;
 
-  constructor(message: string, code: string, retryable: boolean = false, status?: number) {
-    super(message);
+  constructor(message: string, code: string, retryable: boolean = false, status?: number, options?: ErrorOptions) {
+    super(message, options);
     this.name = code;
     this.code = code;
     this.retryable = retryable;
@@ -47,14 +47,14 @@ export class StreamError extends NtoxError {
 }
 
 export class NetworkError extends NtoxError {
-  constructor(message: string) {
-    super(message, "NETWORK_ERROR", true);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, "NETWORK_ERROR", true, undefined, options);
   }
 }
 
 export class TimeoutError extends NtoxError {
-  constructor(message: string) {
-    super(message, "TIMEOUT_ERROR", true);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, "TIMEOUT_ERROR", true, undefined, options);
   }
 }
 

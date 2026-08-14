@@ -4,7 +4,7 @@ import { NTOX_DIR } from "../core/config.js";
 import type { ObservedSession } from "./observation.js";
 import type { MentalModelEntry } from "./mental-model.js";
 import type { ExecGoal, Constraint, Risk } from "./executive.js";
-import { computeDriftConfidence, computePatternConfidence } from "./confidence.js";
+import { computeDriftConfidence } from "./confidence.js";
 
 const BRIEFING_STATE_PATH = join(NTOX_DIR, "briefing-state.json");
 

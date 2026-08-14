@@ -9,12 +9,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 interface WebConfig {
   port?: number;
-  onMessage: (chatId: string, text: string, username: string) => Promise<string>;
+  host?: string;
+  onMessage: (chatId: string, text: string, username: string, onToken?: (token: string) => void) => Promise<string>;
+  getStatus?: () => unknown;
 }
 
 export function createWebChannel(config: WebConfig): GatewayChannel {
-  const { onMessage } = config;
+  const { onMessage, getStatus } = config;
   const port = config.port ?? 3000;
+  const host = config.host ?? "127.0.0.1";
   let server: ReturnType<typeof createServer> | null = null;
   let io: import("socket.io").Server | null = null;
 
@@ -31,14 +34,19 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
 
     async start() {
       const http = await import("node:http");
-      server = http.createServer((_req: IncomingMessage, res: ServerResponse) => {
+      server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
+        if (req.url === "/status.json" && getStatus) {
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify(getStatus(), null, 2));
+          return;
+        }
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         res.end(htmlContent);
       });
 
       const { Server } = await import("socket.io");
       io = new Server(server, {
-        cors: { origin: "http://localhost:3000" },
+        cors: { origin: [`http://localhost:${port}`, `http://127.0.0.1:${port}`] },
         maxHttpBufferSize: 1e6,
         pingTimeout: 60000,
       });
@@ -52,13 +60,14 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
           pending = true;
 
           try {
-            const response = await onMessage(sid, text, WEB_USER);
-            const words = response.split(/(\s+)/);
-            for (const word of words) {
-              if (word) {
-                socket.emit("token", { text: word, done: false });
-                await new Promise((r) => setTimeout(r, 5));
-              }
+            const streamedTokens: string[] = [];
+            const onToken = (token: string) => {
+              streamedTokens.push(token);
+              socket.emit("token", { text: token, done: false });
+            };
+            const response = await onMessage(sid, text, WEB_USER, onToken);
+            if (streamedTokens.length === 0) {
+              socket.emit("token", { text: response, done: false });
             }
             socket.emit("token", { text: "", done: true, full: response });
           } catch (e) {
@@ -71,9 +80,9 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
       });
 
       await new Promise<void>((resolve) => {
-        server!.listen(port, resolve);
+        server!.listen(port, host, resolve);
       });
-      console.log(`[web] http://localhost:${port}`);
+      console.log(`[web] http://${host}:${port}`);
     },
 
     async stop() {

@@ -4,6 +4,16 @@
   "description": "Cognitive CLI agent with persistent memory, multi-channel gateway, and Docker sandboxing",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cognition": {
+      "types": "./dist/cognition/index.d.ts",
+      "import": "./dist/cognition/index.js"
+    }
+  },
   "bin": {
     "ntox": "dist/index.js"
   },
@@ -29,8 +39,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "prepublishOnly": "npm run build",
-    "prepare": "husky"
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "verify:all": "node scripts/verify-all.mjs",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "ai",
@@ -59,22 +71,22 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "chalk": "^5.4.1",
-    "conf": "^13.1.0",
-    "confbox": "^0.2.2",
-    "express": "^5.2.1",
     "gpt-tokenizer": "^3.4.0",
+    "linkedom": "^0.18.13",
     "ora": "^8.1.1",
+    "playwright-core": "^1.62.0",
     "socket.io": "^4.8.3",
     "ws": "^8.21.1",
     "zod": "^3.24.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/express": "^5.0.6",
     "@types/node": "^22.14.1",
     "@types/ws": "^8.18.1",
     "eslint": "^10.7.0",
+    "prettier": "^3.3.3",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.65.0",

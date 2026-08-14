@@ -72,7 +72,7 @@ export class CognitiveKernel {
     const retrievedPatterns = this.patterns.retrieve(queryVector, primitive.domains);
     this.patterns.learnFromQuery(primitive.domains);
 
-    const cognitiveContext = "";
+    const cognitiveContext = this.activator.activate(retrievedPatterns, primitive);
 
     let critique: CritiqueResult;
     if (response) {

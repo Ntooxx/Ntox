@@ -106,6 +106,9 @@ export const searchTool: Tool = {
       const html = await res.text();
       const snippets = extractSnippets(html);
       if (snippets.length === 0) {
+        if (html.length > 500 && !html.includes("no results")) {
+          return { success: false, error: "Search returned results but parsing failed — DuckDuckGo HTML structure may have changed" };
+        }
         return { success: false, error: "No results found", data: "" };
       }
       return { success: true, data: snippets.join("\n---\n") };

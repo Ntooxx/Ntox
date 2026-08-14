@@ -1,7 +1,4 @@
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { describe, it, expect, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { InterventionEngine } from "./intervention.js";
 import type { ObservedSession } from "./observation.js";

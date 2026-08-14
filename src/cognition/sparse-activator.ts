@@ -50,24 +50,4 @@ export class SparseActivator {
     }
     return checklist;
   }
-
-  private inferSkillDomain(skillName: string, triggers: string[]): string | null {
-    const combined = `${skillName} ${triggers.join(" ")}`.toLowerCase();
-    const domainKeywords: Record<string, string[]> = {
-      programming: ["code", "program", "function", "software"],
-      data_science: ["data", "model", "analy"],
-      devops: ["deploy", "infra", "docker"],
-      database: ["sql", "database", "query"],
-      design: ["design", "ui", "ux"],
-      writing: ["explain", "write", "document"],
-      python: ["python"],
-      javascript: ["javascript", "typescript"],
-      rust: ["rust"],
-      system_admin: ["system", "admin", "config"],
-    };
-    for (const [domain, kws] of Object.entries(domainKeywords)) {
-      if (kws.some((kw) => combined.includes(kw))) return domain;
-    }
-    return null;
-  }
 }

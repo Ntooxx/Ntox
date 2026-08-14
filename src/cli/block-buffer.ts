@@ -19,6 +19,8 @@ export class BlockBuffer {
 
     if (this.buffer.length >= this.max) {
       this.forceFlush();
+    } else if (this.buffer.length >= this.min && /[\s.,;:!?)}\]]$/.test(this.buffer)) {
+      this.forceFlush();
     }
   }
 

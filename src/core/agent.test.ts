@@ -9,6 +9,7 @@ import { Reflector } from "../meta/reflector.js";
 import { MistakeJournal } from "../meta/mistakes.js";
 import { SkillExecutor } from "../skills/executor.js";
 import { SkillRegistry } from "../skills/registry.js";
+import { SkillLibrary } from "../skills/library.js";
 import { Analytics } from "../meta/analytics.js";
 import { ProactiveEngine } from "../meta/proactive.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
@@ -26,7 +27,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     reflector: { reflect: async () => null, setEnabled: () => {} } as unknown as Reflector,
     mistakes: new MistakeJournal(),
     userModel: new UserModel(),
-    skillExecutor: new SkillExecutor(registry, true),
+    skillExecutor: new SkillExecutor(registry, new SkillLibrary(), true),
     analytics: new Analytics(),
     proactive: new ProactiveEngine(new Analytics()),
     cognitiveKernel: new CognitiveKernel(registry),
@@ -82,6 +83,25 @@ describe("Agent — message management", () => {
     const msgs = agent.getMessages();
     msgs.push({ role: "user", content: "y" });
     expect(agent.getMessages().length).toBe(1);
+  });
+
+  it("removes the last user turn and following assistant/tool messages", () => {
+    const agent = new Agent(makeConfig());
+    agent.addMessage({ role: "user", content: "first" });
+    agent.addMessage({ role: "assistant", content: "one" });
+    agent.addMessage({ role: "user", content: "second" });
+    agent.addMessage({ role: "assistant", content: "two" });
+    agent.addMessage({ role: "tool", content: "tool" });
+    expect(agent.removeLastTurn()).toBe(true);
+    expect(agent.getMessages()).toEqual([
+      { role: "user", content: "first" },
+      { role: "assistant", content: "one" },
+    ]);
+  });
+
+  it("returns false when there is no user turn to remove", () => {
+    const agent = new Agent(makeConfig());
+    expect(agent.removeLastTurn()).toBe(false);
   });
 
   it("countTokens reflects message content", () => {
@@ -329,6 +349,80 @@ describe("Agent — run() integration", () => {
     expect(tokens).toEqual(["A", "B", "C"]);
   });
 
+  it("records trace for a normal turn", async () => {
+    const cfg = makeConfig({ strategyEnabled: true });
+    (cfg.llm as unknown as { stream: () => AsyncGenerator<{ delta: string }> }).stream = async function* () {
+      yield { delta: "ok" };
+    };
+    const agent = new Agent(cfg);
+    await drainRun(agent, "explain this system");
+    const trace = agent.getLastTrace();
+    expect(trace).not.toBeNull();
+    expect(trace!.responseMode).toBe("simple-query");
+    expect(trace!.strategy).toBeDefined();
+    expect(trace!.finalResponseLength).toBe(2);
+    expect(trace!.toolCalls).toEqual([]);
+  });
+
+  it("records trace for tool calls with redacted args", async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "fake",
+      description: "fake tool",
+      parameters: { type: "object", properties: {}, required: [] },
+      execute: async () => ({ success: true, data: "done" }),
+    });
+    const cfg = makeConfig({ tools });
+    let calls = 0;
+    (cfg.llm as unknown as { stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }> }).stream = async function* () {
+      calls++;
+      if (calls === 1) {
+        yield { delta: "", toolCalls: [{ id: "tc_1", name: "fake", arguments: JSON.stringify({ apiKey: "sk-secret", content: "x".repeat(250) }) }] };
+        return;
+      }
+      yield { delta: "done" };
+    };
+    const agent = new Agent(cfg);
+    await drainRun(agent, "run fake");
+    const trace = agent.getLastTrace();
+    expect(trace!.toolCalls).toHaveLength(1);
+    expect(trace!.toolCalls[0].success).toBe(true);
+    expect(trace!.toolCalls[0].args.apiKey).toBe("[redacted]");
+    expect(String(trace!.toolCalls[0].args.content)).toHaveLength(200);
+  });
+
+  it("skips repeated identical failed tool calls in one turn", async () => {
+    const tools = new ToolRegistry();
+    let executed = 0;
+    tools.register({
+      name: "fake",
+      description: "fake tool",
+      parameters: { type: "object", properties: {}, required: [] },
+      execute: async () => {
+        executed++;
+        return { success: false, error: "boom" };
+      },
+    });
+    const cfg = makeConfig({ tools });
+    let calls = 0;
+    (cfg.llm as unknown as { stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }> }).stream = async function* () {
+      calls++;
+      if (calls <= 2) {
+        yield { delta: "", toolCalls: [{ id: `tc_${calls}`, name: "fake", arguments: JSON.stringify({ q: "same" }) }] };
+        return;
+      }
+      yield { delta: "done" };
+    };
+    const agent = new Agent(cfg);
+    await drainRun(agent, "run fake");
+    const trace = agent.getLastTrace();
+    expect(executed).toBe(1);
+    expect(trace!.toolCalls).toHaveLength(2);
+    expect(trace!.toolCalls[1].success).toBe(false);
+    expect(trace!.toolCalls[1].reason).toBe("repeat-skipped");
+    expect(trace!.toolCalls[1].error).toContain("Repeated failed tool call skipped");
+  });
+
   it("catches LLM stream errors", async () => {
     const cfg = makeConfig();
     (cfg.llm as unknown as { stream: () => AsyncGenerator<{ delta: string }> }).stream = async function* () {
@@ -339,4 +433,3 @@ describe("Agent — run() integration", () => {
     await expect(drainRun(agent, "hi")).rejects.toThrow("simulated stream failure");
   });
 });
-

@@ -17,8 +17,31 @@ interface GatewayPayload {
   t?: string;
 }
 
+class RateLimitTracker {
+  private resetAt = 0;
+  private remaining = 999;
+
+  update(headers: Headers): void {
+    const remaining = headers.get("x-ratelimit-remaining");
+    const reset = headers.get("x-ratelimit-reset");
+    if (remaining !== null) this.remaining = parseInt(remaining, 10);
+    if (reset !== null) this.resetAt = parseInt(reset, 10) * 1000;
+  }
+
+  async waitIfNeeded(): Promise<void> {
+    if (this.remaining <= 0 && this.resetAt > Date.now()) {
+      const wait = this.resetAt - Date.now() + 100;
+      console.error(`[discord] rate limited, waiting ${wait}ms`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
+const rateLimit = new RateLimitTracker();
+
 async function apiCall(token: string, path: string, method: string = "GET", body?: Record<string, unknown>): Promise<Response> {
-  return fetch(`${DISCORD_API}${path}`, {
+  await rateLimit.waitIfNeeded();
+  const res = await fetch(`${DISCORD_API}${path}`, {
     method,
     headers: {
       Authorization: `Bot ${token}`,
@@ -26,6 +49,14 @@ async function apiCall(token: string, path: string, method: string = "GET", body
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+  rateLimit.update(res.headers);
+  if (res.status === 429) {
+    const retryAfter = parseInt(res.headers.get("retry-after") || "1", 10) * 1000;
+    console.error(`[discord] 429 rate limited, retrying after ${retryAfter}ms`);
+    await new Promise((r) => setTimeout(r, retryAfter));
+    return apiCall(token, path, method, body);
+  }
+  return res;
 }
 
 export function createDiscordChannel(config: DiscordConfig): GatewayChannel {
@@ -77,6 +108,7 @@ export function createDiscordChannel(config: DiscordConfig): GatewayChannel {
 
   function scheduleReconnect(): void {
     if (!running) return;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     stopHeartbeat();
     if (ws) { try { ws.close(); } catch { /* cleanup ok */ }; ws = null; }
     const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
@@ -170,16 +202,15 @@ export function createDiscordChannel(config: DiscordConfig): GatewayChannel {
 
     if (isDM) {
       try {
-        onMessage(chatId, text, username).then(async (response) => {
-          await apiCall(token, `/channels/${chatId}/messages`, "POST", { content: response });
-        }).catch(async (e) => {
-          const errMsg = e instanceof Error ? e.message : String(e);
-          console.error(`[discord] dm error: ${errMsg}`);
-          await apiCall(token, `/channels/${chatId}/messages`, "POST", {
-            content: `Error: ${errMsg.slice(0, 1900)}`,
-          }).catch(() => {});
-        });
-      } catch { /* ignore */ }
+        const response = await onMessage(chatId, text, username);
+        await apiCall(token, `/channels/${chatId}/messages`, "POST", { content: response });
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[discord] dm error: ${errMsg}`);
+        await apiCall(token, `/channels/${chatId}/messages`, "POST", {
+          content: `Error: ${errMsg.slice(0, 1900)}`,
+        }).catch(() => {});
+      }
       return;
     }
 
@@ -190,16 +221,15 @@ export function createDiscordChannel(config: DiscordConfig): GatewayChannel {
     if (!cleanText) return;
 
     try {
-      onMessage(chatId, cleanText, username).then(async (response) => {
-        await apiCall(token, `/channels/${chatId}/messages`, "POST", { content: response });
-      }).catch(async (e) => {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        console.error(`[discord] guild error: ${errMsg}`);
-        await apiCall(token, `/channels/${chatId}/messages`, "POST", {
-          content: `Error: ${errMsg.slice(0, 1900)}`,
-        }).catch(() => {});
-      });
-    } catch { /* ignore */ }
+      const response = await onMessage(chatId, cleanText, username);
+      await apiCall(token, `/channels/${chatId}/messages`, "POST", { content: response });
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      console.error(`[discord] guild error: ${errMsg}`);
+      await apiCall(token, `/channels/${chatId}/messages`, "POST", {
+        content: `Error: ${errMsg.slice(0, 1900)}`,
+      }).catch(() => {});
+    }
   }
 
   return {

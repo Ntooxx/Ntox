@@ -10,6 +10,7 @@ export const CORRECTION_PATTERNS = [
   /you([\u2019']re| are)\s+(wrong|incorrect|mistaken)/i,
   /i\s+think\s+you([\u2019']re| are)\s+(wrong|confused)/i,
   /not\s+(quite|exactly)\s+(right|correct)/i,
+  /^(?:please\s+)?(?:correct|update|replace)\b/i,
 ];
 
 export function isUserCorrection(message: string): boolean {
@@ -18,7 +19,7 @@ export function isUserCorrection(message: string): boolean {
 
 export function extractCorrection(
   userMessage: string,
-  _previousAssistantMessage: string
+  _previousAssistantMessage: string,
 ): { topicKey: string; correction: string } {
   const lower = userMessage.toLowerCase();
   const topicMatch = lower.match(/(?:about|regarding|re:|on)\s+["']?([^"'.!?]+)["']?/i);
@@ -30,9 +31,7 @@ export function extractCorrection(
     .map((s) => s.trim())
     .filter((s) => s.length > 10 && !CORRECTION_PATTERNS.some((p) => p.test(s)));
 
-  const correction = correctionSentences.length > 0
-    ? correctionSentences.join(". ")
-    : userMessage.slice(0, 200);
+  const correction = correctionSentences.length > 0 ? correctionSentences.join(". ") : userMessage.slice(0, 200);
 
   return { topicKey, correction };
 }
@@ -65,7 +64,7 @@ export class MistakeJournal {
     query: string,
     wrongAnswer: string,
     correction: string,
-    source: "user-correction" | "self-reflection"
+    source: "user-correction" | "self-reflection",
   ): MistakeEntry {
     this.load();
     const existing = this.mistakes.findIndex((m) => m.topicKey === topicKey);
@@ -126,10 +125,10 @@ export class MistakeJournal {
     if (relevant.length === 0) return "";
 
     const lines = relevant.map(
-      (m) => `- Correction [${new Date(m.timestamp).toISOString().slice(0, 10)}]: ${m.topicKey} — ${m.correction}`
+      (m) => `- Correction [${new Date(m.timestamp).toISOString().slice(0, 10)}]: ${m.topicKey} — ${m.correction}`,
     );
 
-    return `\n\n## Previous Corrections to Remember\n${lines.join("\n")}`;
+    return `## Previous Corrections: Authoritative\nUse these corrections over conflicting older memories.\n${lines.join("\n")}`;
   }
 
   getAll(): MistakeEntry[] {

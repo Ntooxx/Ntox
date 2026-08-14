@@ -8,7 +8,7 @@ NTOX is a cognitive CLI agent with meta-cognition, pattern compilation, theory m
 
 ```
 src/
-├── cli/           REPL loop, render, animation, sound
+├── cli/           REPL loop, render, animation
 ├── core/          Agent entry point, LLM client, config
 │   ├── agent.ts   Main agent loop, manages messages, tool calls, memory, meta-cognition
 │   ├── llm.ts     LLM streaming client, 9 providers, OpenAI/Anthropic/Ollama formats
@@ -52,18 +52,18 @@ src/
 
 The current architecture supports REPL and multi-channel gateway. To add a new messaging channel:
 
-1. Extract the message processing from `repl.ts` `handleMessage()` into a shared service
+1. Reuse `src/core/dispatcher.ts` for shared/session infrastructure and gateway message execution
 2. Create a `Gateway` class in `src/gateway/` that accepts inbound messages and returns responses
 3. Each channel becomes a plugin (`src/gateway/telegram.ts`, etc.)
-4. The REPL and the gateway both consume the same `Agent` class
+4. Keep REPL-specific rendering in `src/cli/repl.ts`; move shared behavior into dispatcher/services
 
-See `src/cli/repl.ts:1079-1196` for the message handling core.
+See `src/core/dispatcher.ts` and `src/core/message-handler.ts` for the shared streaming infrastructure.
 
 ## Good First Issues
 
-- Add Telegram gateway plugin
-- Add voice input (Whisper STT)
-- Add TTS output (ElevenLabs/OpenAI)
-- Add GitHub Actions CI badge
-- Write tests for the cognitive kernel
-- Add Dockerfile for deployment
+- Add Slack or Matrix gateway plugin
+- Wire existing STT/TTS tools into Telegram/Discord voice messages
+- Add Web UI auth token mode beyond local-only binding
+- Add `/theories` and `/patterns` introspection commands
+- Add prediction-error tests for theory confidence updates
+- Add agent trace viewer for tool calls, memory retrieval, and skill activation

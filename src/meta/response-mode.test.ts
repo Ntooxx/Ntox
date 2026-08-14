@@ -23,7 +23,13 @@ describe("classifyMode", () => {
   it("detects tool-build", () => {
     expect(classifyMode("create a tool that reads files")).toBe("tool-build");
     expect(classifyMode("build a script for deployment")).toBe("tool-build");
-    expect(classifyMode("write a function to sort arrays")).toBe("tool-build");
+    expect(classifyMode("write this to a file in the repo")).toBe("tool-build");
+  });
+
+  it("does not treat code-printing requests as build mode", () => {
+    expect(classifyMode("can you write code for a binary search example?")).not.toBe("tool-build");
+    expect(classifyMode("show me code for a React button")).not.toBe("tool-build");
+    expect(classifyMode("write a function to sort arrays")).not.toBe("tool-build");
   });
 
   it("detects simple-query for short questions", () => {
@@ -59,6 +65,13 @@ describe("getModePrompt", () => {
     expect(getModePrompt("tool-execute", "run x")).toContain("Execute immediately");
     expect(getModePrompt("emotional-moment", "thanks")).toContain("genuine warmth");
     expect(getModePrompt("tool-build", "create x")).toContain("BUILD mode");
+  });
+
+  it("uses shell and PowerShell language in build prompt", () => {
+    const prompt = getModePrompt("tool-build", "build a script");
+    expect(prompt).toContain("shell tool");
+    expect(prompt).toContain("PowerShell");
+    expect(prompt).not.toContain("bash tool");
   });
 
   it("returns empty for complex-reasoning", () => {

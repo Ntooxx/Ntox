@@ -49,6 +49,7 @@ export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
   let running = false;
   let lastUpdateId = 0;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollFailures = 0;
 
   async function poll(): Promise<void> {
     if (!running) return;
@@ -60,10 +61,16 @@ export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
       if (!res.ok) {
         const err = await res.text().catch(() => "unknown");
         console.error(`[telegram] API error: ${res.status} ${err.slice(0, 200)}`);
+        pollFailures++;
+        schedulePoll();
         return;
       }
+      pollFailures = 0;
       const data = (await res.json()) as { ok: boolean; result: TelegramUpdate[] };
-      if (!data.ok || !data.result) return;
+      if (!data.ok || !data.result) {
+        schedulePoll();
+        return;
+      }
 
       for (const update of data.result) {
         if (update.update_id >= lastUpdateId) lastUpdateId = update.update_id;
@@ -74,11 +81,11 @@ export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
 
         if (text.startsWith("/start")) {
           await sendMessage(token, update.message.chat.id,
-            "Hello! I'm NTOX — your cognitive CLI agent.\n\n" +
+            "Hello! I'm NTOX - your cognitive CLI agent.\n\n" +
             "Send me any message and I'll help you with coding, research, analysis, or anything else.\n" +
             "Commands:\n" +
-            "/new — start fresh conversation\n" +
-            "/help — show this message");
+            "/new - start fresh conversation\n" +
+            "/help - show this message");
           continue;
         }
 
@@ -86,29 +93,35 @@ export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
           await sendMessage(token, update.message.chat.id,
             "NTOX Telegram Bot\n\n" +
             "Just send me a message and I'll respond.\n" +
-            "/new — reset conversation\n" +
-            "/help — this message");
+            "/new - reset conversation\n" +
+            "/help - this message");
           continue;
         }
 
         try {
           const msg = update.message!;
-          onMessage(chatId, text, username).then(async (response) => {
-            await sendMessage(token, msg.chat.id, response);
-          }).catch(async (e) => {
-            const errMsg = e instanceof Error ? e.message : String(e);
-            console.error(`[telegram] processing error: ${errMsg}`);
-            await sendMessage(token, msg.chat.id, `Error: ${errMsg.slice(0, 200)}`).catch(() => {});
-          });
-        } catch { /* ignore */ }
+          const response = await onMessage(chatId, text, username);
+          await sendMessage(token, msg.chat.id, response);
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          console.error(`[telegram] processing error: ${errMsg}`);
+          await sendMessage(token, update.message!.chat.id, `Error: ${errMsg.slice(0, 200)}`).catch(() => {});
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error(`[telegram] poll error: ${msg}`);
+      pollFailures++;
     }
-    if (running) {
-      pollTimer = setTimeout(poll, POLL_INTERVAL);
-    }
+    schedulePoll();
+  }
+
+  function schedulePoll(): void {
+    if (!running) return;
+    const delay = pollFailures > 0
+      ? Math.min(1000 * Math.pow(2, pollFailures), 30000)
+      : POLL_INTERVAL;
+    pollTimer = setTimeout(poll, delay);
   }
 
   return {
