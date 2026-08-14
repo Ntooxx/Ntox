@@ -7,6 +7,7 @@ import { createTelegramChannel } from "./telegram.js";
 import { createDiscordChannel } from "./discord.js";
 import { createWebChannel } from "./web.js";
 import { createWhatsAppChannel } from "./whatsapp.js";
+import { isAliveQuery, renderAliveStatus } from "./commands.js";
 import type { GatewayChannel } from "./types.js";
 
 const config = loadConfig();
@@ -111,6 +112,11 @@ export async function runGateway(channel?: string): Promise<void> {
       if (text === "/help") {
         sessions.unlock(chatId);
         return `Ntox on ${ctx}.\n\nSend any message. I can read/write files, run commands, search the web, and code.\n\n/new — reset conversation\n/cron — scheduled automations\n/help — this message`;
+      }
+
+      if (isAliveQuery(text)) {
+        sessions.unlock(chatId);
+        return renderAliveStatus(shared.alive.inspect(12));
       }
 
       const cronResponse = handleCronCommand(text, ctx, chatId);
