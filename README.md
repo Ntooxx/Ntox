@@ -4,7 +4,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](package.json)
 [![CI](https://github.com/Ntooxx/Ntox/actions/workflows/ci.yml/badge.svg)](https://github.com/Ntooxx/Ntox/actions)
 [![npm](https://img.shields.io/badge/npm-0.1.0-red)](package.json)
-[![tests](https://img.shields.io/badge/tests-507%20passing-44cc11)](https://github.com/Ntooxx/Ntox/actions)
+[![tests](https://img.shields.io/badge/tests-529%20passing-44cc11)](https://github.com/Ntooxx/Ntox/actions)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
 
 A self-improving CLI agent with persistent memory, a cognitive kernel, pattern compilation, theory distillation, and 74+ reasoning skills. Includes a runtime-neutral cognition API and DeepSeek Harness adapter. Multi-channel gateway (Telegram, Discord, Web UI). Docker sandboxing. Runs locally.
@@ -22,7 +22,7 @@ NTOX is the only agent with a **cognitive kernel**: it doesn't just call tools, 
 - **Multi-Agent Debate**: 8 internal voices (Researcher, Critic, Physicist, Mathematician, Architect, Economist, Inventor, Experimentalist) debate complex questions before synthesizing an answer
 - **False-Success Self-Correction**: Detects shallow reasoning and retries with deeper analysis
 - **Persistent Memory**: Every exchange is embedded and searchable via cosine similarity (local fallback, no API key needed)
-- **Multi-Channel Gateway**: Telegram, Discord (WebSocket with intents), and Web UI (glassmorphism dark chat) all run simultaneously
+- **Multi-Channel Gateway**: Telegram, Discord (WebSocket with intents), and a minimal local Web UI all share the same agent runtime
 - **Skill Library**: 74+ markdown skill documents, auto-triggered by semantic search
 - **Meta-Cognition**: Strategy classification, self-reflection, mistake journal, session intent, style optimization
 - **Runtime-Neutral Cognition API**: Mount NTOX cognitive context and turn learning into another agent runtime without replacing its model, tools, or session engine
@@ -55,6 +55,7 @@ ntox                      # Start chatting in the terminal
 
 ```bash
 ntox gateway              # Run all configured channels (Telegram, Discord, Web UI)
+ntox gateway web          # Run only the local browser chat at http://127.0.0.1:3000
 ntox setup                # Configure tokens
 ```
 
@@ -64,7 +65,7 @@ ntox setup                # Configure tokens
 | ------------ | -------------------------------------------------------------------------------------------- |
 | **Telegram** | Create bot via [@BotFather](https://t.me/BotFather), set `telegramToken` in config           |
 | **Discord**  | Create app at [Discord Developer Portal](https://discord.com/developers), set `discordToken` |
-| **Web UI**   | Auto-starts at `http://127.0.0.1:3000`, local-only by default                                |
+| **Web UI**   | Starts at `http://127.0.0.1:3000`, local-only by default, with streamed chat and activity    |
 
 ### Docker
 
@@ -147,6 +148,7 @@ NTOX now persists this state at `~/.ntox/alive.json`, records every tool result 
 | `/theories evidence <id>` | Inspect theory evidence                          |
 | `/patterns`               | Inspect cognitive patterns                       |
 | `/trace`                  | Inspect the last turn                            |
+| `/alive`                  | Inspect host events and wake state               |
 | `/workspace`              | Show active workspace profile                    |
 | `/permissions`            | Show tool permissions and recent denials         |
 | `/approve`                | Approve or deny a risky shell command            |
@@ -213,7 +215,11 @@ cd integrations/deepseek-harness && npm test  # Run adapter tests
 
 `verify:all` checks linting, type safety, tests, builds, package contents, the built CLI, the built cognition export, and every adapter package gate. It records results in `experiments/verification/report.json`.
 
-The current functional verification result is 11 of 12 passing checks: the remaining failure is the repository-wide Prettier check, which currently reports 118 source files requiring formatting. Linting, 522 root tests, builds, CLI startup, the cognition and Alive smoke scenarios, and all adapter checks pass.
+The current functional verification result is 11 of 12 passing checks: the remaining failure is the repository-wide Prettier check, which currently reports formatting drift in older files. Linting, 529 root tests, builds, CLI startup, the cognition and Alive smoke scenarios, and all adapter checks pass.
+
+## Roadmap
+
+See [`docs/NTOX_IMPROVEMENT_PLAN.md`](docs/NTOX_IMPROVEMENT_PLAN.md) for the next planned work across skills, plugins, web UI polish, memory recovery, and evaluation proof.
 
 ## Contributing
 
