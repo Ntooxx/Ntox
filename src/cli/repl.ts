@@ -169,6 +169,7 @@ export class Repl {
     this.userModel.startSession();
     await runFirstTimeOnboarding(this.userModel);
     await this.loadModels();
+    this.infra.aliveHosts?.start();
     this.skillLibrary.scan();
     this.agent.initKernel(this.config.model);
 
@@ -2032,6 +2033,7 @@ export class Repl {
 
   private doExit(): void {
     try {
+      this.infra.aliveHosts?.stop();
       const awarenessSummary = this.agent.recordSessionEnd(this.sessionId);
       this.userModel.endSession();
       this.userModel.flush();

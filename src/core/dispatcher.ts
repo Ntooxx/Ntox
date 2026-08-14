@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { LLMClient } from "./llm.js";
 import type { AgentConfig, AgentCallbacks } from "./agent.js";
 import { Agent } from "./agent.js";
@@ -32,9 +33,14 @@ import { Executive } from "../meta/executive.js";
 import { InterventionEngine } from "../meta/intervention.js";
 import { DisagreementEngine } from "../meta/disagreement.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
+import { AliveEngine } from "../alive/engine.js";
+import { NtoxAliveHostAdapters } from "../alive/host.js";
+import { JsonFileAliveStore } from "../alive/store.js";
+import { NtoxAliveBridge } from "../alive/ntox.js";
 import type { NtoxConfig, CostUsage, WorkspaceProfile } from "../types/index.js";
 import type { SessionStore } from "../gateway/types.js";
 import { createPolicyRuntime, enforceToolPolicy, getDefaultProfile, type PolicyRuntime } from "./policy.js";
+import { getNtoxDir } from "./config.js";
 
 export interface AgentInfra {
   llm: LLMClient;
@@ -54,6 +60,8 @@ export interface AgentInfra {
   disagreement: DisagreementEngine;
   cognitiveKernel: CognitiveKernel;
   policy: PolicyRuntime;
+  alive?: NtoxAliveBridge;
+  aliveHosts?: NtoxAliveHostAdapters;
 }
 
 export interface SharedInfra {
@@ -63,6 +71,8 @@ export interface SharedInfra {
   skillExecutor: SkillExecutor;
   skillLibrary: SkillLibrary;
   policy: PolicyRuntime;
+  alive: NtoxAliveBridge;
+  aliveHosts: NtoxAliveHostAdapters;
 }
 
 export interface SessionInfra {
@@ -106,8 +116,17 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
   const skillRegistry = new SkillRegistry();
   const skillLibrary = new SkillLibrary();
   const skillExecutor = new SkillExecutor(skillRegistry, skillLibrary, true);
+  const alive = new NtoxAliveBridge(
+    new AliveEngine({
+      store: new JsonFileAliveStore(join(getNtoxDir(), "alive.json")),
+    }),
+  );
+  const aliveHosts = new NtoxAliveHostAdapters({
+    bridge: alive,
+    workspaceRoot: runtimeProfile.workspaceRoot,
+  });
 
-  return { llm, tools, skillRegistry, skillExecutor, skillLibrary, policy };
+  return { llm, tools, skillRegistry, skillExecutor, skillLibrary, policy, alive, aliveHosts };
 }
 
 export function createSessionInfra(shared: SharedInfra): SessionInfra {
@@ -157,6 +176,7 @@ export function createAgentConfig(
     disagreement: infra.disagreement,
     cognitiveKernel: infra.cognitiveKernel,
     policy: infra.policy,
+    alive: infra.alive,
     kernelEnabled: true,
     kernelBasePath: homedir(),
     sessionId,

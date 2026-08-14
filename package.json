@@ -12,6 +12,18 @@
     "./cognition": {
       "types": "./dist/cognition/index.d.ts",
       "import": "./dist/cognition/index.js"
+    },
+    "./alive": {
+      "types": "./dist/alive/index.d.ts",
+      "import": "./dist/alive/index.js"
+    },
+    "./alive/ntox": {
+      "types": "./dist/alive/ntox.d.ts",
+      "import": "./dist/alive/ntox.js"
+    },
+    "./alive/host": {
+      "types": "./dist/alive/host.d.ts",
+      "import": "./dist/alive/host.js"
     }
   },
   "bin": {

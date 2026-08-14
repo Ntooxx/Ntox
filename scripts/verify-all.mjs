@@ -48,6 +48,7 @@ function runNpm(name, args, cwd) {
 
 const artifactSmoke = `
 import { NtoxCognitiveLayer } from "./dist/cognition/index.js";
+import { AliveEngine } from "./dist/alive/index.js";
 
 const layer = new NtoxCognitiveLayer({ cognitionEnabled: false, theoryEnabled: false, strategyEnabled: false });
 await layer.afterTurn({ sessionId: "verify", userMessage: "harbor=blue-ember", assistantResponse: "harbor=blue-ember" });
@@ -59,7 +60,11 @@ if (!context.diagnostics.correctionIncluded || !context.diagnostics.recoveryIncl
 const correctionsAt = context.prompt.indexOf("Previous Corrections: Authoritative");
 const memoriesAt = context.prompt.indexOf("Relevant Past Memories");
 if (memoriesAt >= 0 && correctionsAt > memoriesAt) throw new Error("Correction context must precede memories.");
-console.log("Built cognition artifact smoke test passed.");
+const alive = new AliveEngine({ wakePredictionError: 0.5 });
+const prediction = alive.createPrediction({ statement: "The check will pass.", confidence: 0.8, expectation: { eventType: "check_finished", payload: { status: "passed" } } });
+const pulse = alive.recordEvent({ type: "check_finished", source: "verify", predictionId: prediction.id, payload: { status: "failed" } });
+if (!pulse.actions.some((action) => action.kind === "wake")) throw new Error("Expected prediction error to wake the host.");
+console.log("Built cognition and alive artifact smoke test passed.");
 `;
 
 runNpm("root typecheck", ["run", "typecheck"], workspace);

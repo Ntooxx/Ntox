@@ -91,6 +91,43 @@ The adapter package is in [`integrations/deepseek-harness`](integrations/deepsee
 
 A small live paired proof has demonstrated durable cross-session recall through the same Harness runtime. Broader model-backed evaluation across task completion, correction handling, tool recovery, and context cost remains the next evidence milestone.
 
+## NTOX Alive
+
+`ntox/alive` is a standalone, event-driven persistent cognition core. It does not watch your computer or call an LLM by itself. A host supplies consented events, and the engine cheaply decides whether to ignore the event, learn from a resolved prediction, wake host cognition, or request a human decision.
+
+The NTOX REPL enables local host adapters while it is running: it watches only the active workspace, polls Git state every 30 seconds, and pulses open-loop deadlines every minute. It ignores `.git`, `.ntox`, dependencies, build output, and coverage. It never monitors typing, other applications, or remote services, and it only adds a concise wake context to the next user-triggered model turn.
+
+```ts
+import { AliveEngine, JsonFileAliveStore } from "ntox/alive";
+import { toolOutcomeToAliveEvent } from "ntox/alive/ntox";
+
+const alive = new AliveEngine({
+  store: new JsonFileAliveStore(".ntox/alive.json"),
+});
+
+const loop = alive.createOpenLoop({
+  goal: "Improve memory retrieval",
+  hypothesis: "Prediction-error weighting improves recall",
+  nextEvidence: "Run an A/B benchmark",
+});
+
+const prediction = alive.createPrediction({
+  statement: "The weighted benchmark will pass.",
+  confidence: 0.81,
+  expectation: { eventType: "benchmark_finished", payload: { winner: "weighted" } },
+  openLoopId: loop.id,
+});
+
+const pulse = alive.recordEvent({
+  type: "benchmark_finished",
+  source: "benchmark",
+  predictionId: prediction.id,
+  payload: { winner: "baseline" },
+});
+```
+
+NTOX now persists this state at `~/.ntox/alive.json`, records every tool result automatically, recognizes shell test commands as `test_finished` events, resolves explicitly linked predictions, and adds any wake decision to the next model prompt. Its public host adapter is available as `ntox/alive/host`; the core remains portable and privacy-bounded.
+
 ## Commands
 
 | Command                   | Description                                      |
@@ -176,7 +213,7 @@ cd integrations/deepseek-harness && npm test  # Run adapter tests
 
 `verify:all` checks linting, type safety, tests, builds, package contents, the built CLI, the built cognition export, and every adapter package gate. It records results in `experiments/verification/report.json`.
 
-The current functional verification result is 11 of 12 passing checks: the remaining failure is the repository-wide Prettier check, which currently reports 127 source files requiring formatting. Linting, 509 root tests, builds, CLI startup, the cognition smoke scenario, and all adapter checks pass.
+The current functional verification result is 11 of 12 passing checks: the remaining failure is the repository-wide Prettier check, which currently reports 118 source files requiring formatting. Linting, 522 root tests, builds, CLI startup, the cognition and Alive smoke scenarios, and all adapter checks pass.
 
 ## Contributing
 

@@ -40,6 +40,8 @@ import { searchTool } from "../tools/search.js";
 import { resetPolicyRuntime, type PolicyRuntime } from "./policy.js";
 import { buildContextBudgetLedger } from "./context-ledger.js";
 import { getFileChangesSince } from "../tools/change-tracker.js";
+import type { NtoxAliveBridge } from "../alive/ntox.js";
+import type { AliveAction, AlivePulse } from "../alive/engine.js";
 
 export interface AgentConfig {
   llm: LLMClient;
@@ -72,6 +74,7 @@ export interface AgentConfig {
   contextTokenBudget: number;
   policy?: PolicyRuntime;
   skipReflection?: boolean;
+  alive?: NtoxAliveBridge;
 }
 
 export interface AgentCallbacks {
@@ -94,6 +97,7 @@ export interface AgentCallbacks {
   onFeedbackRequest?: (question: string) => void;
   onIntervention?: (intervention: import("../meta/intervention.js").Intervention) => void;
   onDisagreement?: (disagreement: import("../meta/disagreement.js").Disagreement) => void;
+  onAliveAction?: (action: AliveAction) => void;
 }
 
 export interface AgentRunOptions {
@@ -133,10 +137,12 @@ export class Agent {
   private lastSearchEntity = "";
   private currentTrace: AgentTurnTrace | null = null;
   private lastTrace: AgentTurnTrace | null = null;
+  private readonly alive?: NtoxAliveBridge;
 
   constructor(cfg: AgentConfig) {
     this.cfg = cfg;
     this.theoryMemory = new TheoryMemory();
+    this.alive = cfg.alive;
   }
 
   setSkillsCount(n: number): void { this.skillsCount = n; }
@@ -864,6 +870,10 @@ export class Agent {
       }
     }
 
+    const alivePulse = this.alive?.pulse();
+    if (alivePulse) this.publishAliveActions(alivePulse, callbacks);
+    const aliveContext = this.alive?.consumeWakeContext() ?? "";
+
     // 9. Build system prompt
     const parts = [cfg.systemPrompt];
 
@@ -878,6 +888,7 @@ export class Agent {
     if (executiveContext) parts.push(executiveContext);
     if (skillContext) parts.push(skillContext);
     if (searchContext) parts.push(searchContext);
+    if (aliveContext) parts.push(`\n\n${aliveContext}`);
 
     // Library skill frameworks
     if (cfg.skillLibrary && userInput.trim().split(/\s+/).length >= 3) {
@@ -1038,6 +1049,7 @@ export class Agent {
                   this.currentTrace.contextBudget.total += Math.ceil(resultContent.length / 4);
                 }
                 callbacks.onToolResult(tc.name, result, args);
+                this.recordAliveToolOutcome(tc.name, result, args, toolTrace?.durationMs, callbacks);
                 this.messages.push({
                   role: "tool",
                   tool_call_id: tc.id,
@@ -1230,6 +1242,35 @@ export class Agent {
 
       return;
     }
+  }
+
+  private recordAliveToolOutcome(
+    toolName: string,
+    result: ToolResult,
+    args: Record<string, unknown>,
+    durationMs: number | undefined,
+    callbacks: AgentCallbacks,
+  ): void {
+    if (!this.alive) return;
+    try {
+      const pulse = this.alive.recordToolOutcome(
+        {
+          sessionId: this.cfg.sessionId,
+          toolName,
+          success: result.success,
+          error: result.error,
+          durationMs,
+        },
+        args,
+      );
+      this.publishAliveActions(pulse, callbacks);
+    } catch (error) {
+      console.error("[alive] tool outcome processing failed:", error);
+    }
+  }
+
+  private publishAliveActions(pulse: AlivePulse, callbacks: AgentCallbacks): void {
+    for (const action of pulse.actions) callbacks.onAliveAction?.(action);
   }
 
   private compressToolResult(result: ToolResult): string {

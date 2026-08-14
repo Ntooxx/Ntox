@@ -13,6 +13,8 @@ import { SkillLibrary } from "../skills/library.js";
 import { Analytics } from "../meta/analytics.js";
 import { ProactiveEngine } from "../meta/proactive.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
+import { AliveEngine } from "../alive/engine.js";
+import { NtoxAliveBridge } from "../alive/ntox.js";
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   const llm = {
@@ -276,6 +278,27 @@ describe("Agent — run() integration", () => {
     const agent = new Agent(cfg);
     const result = await drainRun(agent, "hi");
     expect(result.response).toContain("He");
+  });
+
+  it("injects queued Alive wake context into the next model prompt", async () => {
+    const bridge = new NtoxAliveBridge(new AliveEngine());
+    bridge.recordToolOutcome(
+      { sessionId: "session", toolName: "shell", success: false, error: "test failure" },
+      { command: "npm test" },
+    );
+    const cfg = makeConfig({ alive: bridge });
+    let systemPrompt = "";
+    (
+      cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }
+    ).stream = async function* (_messages, system) {
+      systemPrompt = system;
+      yield { delta: "ok" };
+    };
+
+    await drainRun(new Agent(cfg), "What changed?");
+
+    expect(systemPrompt).toContain("NTOX Alive");
+    expect(systemPrompt).toContain("Significant test_finished event");
   });
 
   it("handles empty stream gracefully", async () => {
