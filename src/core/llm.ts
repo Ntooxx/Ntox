@@ -151,6 +151,7 @@ function getProviderConfig(provider: string): ProviderConfig | undefined {
 
 const FETCH_TIMEOUT = 120000;
 const EMBED_TIMEOUT = 10000;
+const STREAM_STALL_TIMEOUT_MS = 90000;
 
 function resolveProvider(configuredProvider: string, modelId: string): string {
   // Model prefix overrides configured provider for local providers
@@ -264,7 +265,7 @@ async function* streamOpenAICompatible(
   let yieldedUsage = false;
   const toolCallAccumulator = new Map<number, { id: string; name: string; args: string }>();
 
-  for await (const line of StreamLineParser.readLines(reader)) {
+  for await (const line of StreamLineParser.readLines(reader, { idleTimeoutMs: STREAM_STALL_TIMEOUT_MS, signal })) {
     if (!line.startsWith("data: ")) continue;
     const data = line.slice(6);
     if (data === "[DONE]") {
@@ -423,7 +424,7 @@ async function* streamAnthropic(
   let yieldedAnyContent = false;
   const toolUseAcc = new Map<string, { id: string; name: string; args: string }>();
 
-  for await (const line of StreamLineParser.readLines(reader)) {
+  for await (const line of StreamLineParser.readLines(reader, { idleTimeoutMs: STREAM_STALL_TIMEOUT_MS, signal })) {
     if (!line.startsWith("data: ")) continue;
     const data = line.slice(6);
     try {
@@ -540,7 +541,7 @@ async function* streamOllama(
 
   let yieldedAnyContent = false;
 
-  for await (const line of StreamLineParser.readLines(reader)) {
+  for await (const line of StreamLineParser.readLines(reader, { idleTimeoutMs: STREAM_STALL_TIMEOUT_MS, signal })) {
     try {
       const parsed = JSON.parse(line) as {
         message?: { content: string };
@@ -885,6 +886,7 @@ export class LLMClient {
         return;
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e));
+        if (signal?.aborted || /cancell/i.test(lastError.message)) throw new Error("cancelled", { cause: e });
         if (yieldedAny) throw lastError;
         if (attempt === MAX_RETRIES) break;
         if (isRetryableError(lastError)) {

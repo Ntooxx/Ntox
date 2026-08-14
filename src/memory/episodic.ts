@@ -26,6 +26,15 @@ function normalizeDurableMemory(memory: DurableMemory): DurableMemory {
   };
 }
 
+function normalizeText(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function includesText(haystack: string, needle: string | undefined): boolean {
+  if (!needle || needle.trim().length < 3) return false;
+  return normalizeText(haystack).includes(normalizeText(needle));
+}
+
 export class MemoryStore {
   private episodes: Episode[] = [];
   private durable: DurableMemory[] = [];
@@ -226,6 +235,51 @@ export class MemoryStore {
     return memory;
   }
 
+  applyCorrectionToDurableMemories(input: {
+    correction: string;
+    topicKey?: string;
+    wrongAnswer?: string;
+  }): DurableMemory[] {
+    this.loadDurable();
+    const corrected: DurableMemory[] = [];
+    const now = Date.now();
+    const correction = input.correction.replace(/\s+/g, " ").trim();
+    if (!correction) return [];
+
+    for (const memory of this.durable) {
+      const exactWrong = includesText(memory.text, input.wrongAnswer);
+      const topicMatch = includesText(memory.text, input.topicKey);
+      const alreadyCorrected = includesText(memory.text, correction);
+      if (exactWrong) {
+        memory.history.push({
+          text: memory.text,
+          timestamp: now,
+          reason: `user correction${input.topicKey ? `: ${input.topicKey}` : ""}`,
+        });
+        memory.text = correction;
+        memory.confidence = Math.max(memory.confidence, 0.95);
+        memory.source = "user";
+        memory.provenance = "user correction";
+        memory.contradictionCount += 1;
+        memory.updatedAt = now;
+        corrected.push(memory);
+      } else if (topicMatch && !alreadyCorrected) {
+        memory.history.push({
+          text: memory.text,
+          timestamp: now,
+          reason: `possibly superseded by user correction${input.topicKey ? `: ${input.topicKey}` : ""}`,
+        });
+        memory.confidence = Math.min(memory.confidence, 0.35);
+        memory.contradictionCount += 1;
+        memory.updatedAt = now;
+        corrected.push(memory);
+      }
+    }
+
+    if (corrected.length > 0) this.saveDurable();
+    return corrected.map((memory) => ({ ...memory, history: [...memory.history] }));
+  }
+
   markDurableMemoryContradicted(id: string, reason = "manual contradiction"): DurableMemory | null {
     this.loadDurable();
     const memory = this.durable.find((item) => item.id === id);
@@ -264,7 +318,10 @@ export class MemoryStore {
 
     const durableLines = this.listDurableMemories()
       .filter((memory) => memory.confidence >= 0.4)
-      .sort((a, b) => (b.confidence - a.confidence) || (a.contradictionCount - b.contradictionCount) || (b.updatedAt - a.updatedAt))
+      .sort(
+        (a, b) =>
+          b.confidence - a.confidence || a.contradictionCount - b.contradictionCount || b.updatedAt - a.updatedAt,
+      )
       .slice(0, Math.max(2, maxMemories))
       .map((memory) => `- ${memory.lane}: ${memory.text}`);
 

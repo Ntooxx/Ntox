@@ -18,6 +18,7 @@ describe("command catalog", () => {
     expect(groups.flatMap((group) => group.items).some(([cmd]) => cmd === "/retry")).toBe(true);
     expect(groups.flatMap((group) => group.items).some(([cmd]) => cmd === "/last")).toBe(true);
     expect(groups.flatMap((group) => group.items).some(([cmd]) => cmd === "/tips")).toBe(true);
+    expect(groups.flatMap((group) => group.items).some(([cmd]) => cmd === "/alive")).toBe(true);
     expect(groups.flatMap((group) => group.items).some(([cmd]) => cmd === "@https://url")).toBe(true);
   });
 
@@ -28,6 +29,7 @@ describe("command catalog", () => {
     expect(names).toContain("doctor");
     expect(names).toContain("last");
     expect(names).toContain("tips");
+    expect(names).toContain("alive");
     expect(names).toContain("undo");
     expect(names).toContain("retry");
     expect(names).toContain("quit");

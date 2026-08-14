@@ -1,234 +1,125 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { dirname, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+import {
+  proofDir,
+  dshBin,
+  model,
+  KEYS,
+  randomValue,
+  run,
+  runSafe,
+  prepareHome,
+  ledgerText,
+  passed,
+  leaked,
+  contextCostProbe,
+  toolRecoveryProbe,
+} from "./lib/harness-eval.mjs";
 
-const integrationDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const workspace = resolve(integrationDir, "..", "..");
-const proofDir = resolve(workspace, "experiments", "harness-proof");
-const evaluationWorkspace = resolve(proofDir, "paired-eval-workspace");
-const toolchainDir = resolve(proofDir, "toolchain");
-const dshBin = resolve(toolchainDir, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
-const adapterUrl = pathToFileURL(resolve(integrationDir, "dist", "index.js")).href;
-const model = process.env.NTOX_HARNESS_MODEL ?? "deepseek/deepseek-chat-v3.1";
+const BASE_DIR = mkdtempSync(resolve(tmpdir(), "ntox-paired-eval-"));
 
-const groups = [
-  [
-    ["harbor", "blue-ember"],
-    ["cinder", "fox-signal"],
-    ["mosaic", "river-echo"],
-    ["quartz", "lime-orbit"],
-  ],
-  [
-    ["beacon", "amber-pulse"],
-    ["willow", "north-delta"],
-    ["tundra", "violet-pine"],
-    ["comet", "silver-bay"],
-  ],
-  [
-    ["orbit", "copper-dawn"],
-    ["meadow", "jade-crest"],
-    ["lantern", "pearl-wind"],
-    ["summit", "coral-ridge"],
-  ],
-  [
-    ["fable", "indigo-stone"],
-    ["kestrel", "golden-mist"],
-    ["grove", "crimson-vale"],
-    ["prism", "teal-harbor"],
-  ],
-  [
-    ["cipher", "onyx-wave"],
-    ["raven", "mint-flare"],
-    ["solstice", "ruby-fjord"],
-    ["thistle", "ivory-field"],
-  ],
-];
+const GROUPS_PER_BATCH = 4;
+const BATCHES = 5;
+const keysToTest = KEYS.slice(0, GROUPS_PER_BATCH * BATCHES);
+const samples = new Map(keysToTest.map((key) => [key, randomValue()]));
+const corrected = new Map(
+  keysToTest.slice(0, 2 * GROUPS_PER_BATCH).map((key) => [key, randomValue([samples.get(key)])]),
+);
 
-const corrections = new Map([
-  ["harbor", "navy-ember"],
-  ["cinder", "wolf-signal"],
-  ["mosaic", "lake-echo"],
-  ["quartz", "orange-orbit"],
-  ["beacon", "scarlet-pulse"],
-  ["willow", "south-delta"],
-  ["tundra", "violet-cedar"],
-  ["comet", "bronze-bay"],
-]);
-
-if (!existsSync(dshBin)) {
-  throw new Error(
-    `Harness CLI is missing at ${dshBin}. Run npm install --prefix experiments/harness-proof/toolchain @deepseek-ai/dsh@0.1.0-rc.6 first.`,
-  );
+if (!dshBin) {
+  throw new Error("Harness CLI is missing. Run npm install --prefix experiments/harness-proof/toolchain @deepseek-ai/dsh@0.1.0-rc.6 first.");
 }
 
 if (!process.env.OPENROUTER_API_KEY) {
   throw new Error("OPENROUTER_API_KEY is required for the paired evaluation.");
 }
 
-function run(home, task) {
-  const result = spawnSync(process.execPath, [dshBin, "--profile", "headless", task], {
-    cwd: evaluationWorkspace,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      DSH_HOME: home,
-      NTOX_DIR: resolve(home, "ntox"),
-    },
-    timeout: 180000,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`Harness run failed for \"${task}\".\n${result.stderr || result.stdout}`);
-  }
-  return result.stdout.trim();
-}
+const onRun = (task, output) => console.log(`  * ${task.split("\n")[0].slice(0, 70)}... -> ${output.slice(0, 60)}`);
 
-function prepareHome(name, cognition) {
-  const home = resolve(proofDir, name, ".dsh");
-  rmSync(home, { recursive: true, force: true });
-  mkdirSync(home, { recursive: true });
-  const init = spawnSync(process.execPath, [dshBin, "--profile", "headless", "--help"], {
-    cwd: evaluationWorkspace,
-    encoding: "utf8",
-    env: { ...process.env, DSH_HOME: home, NTOX_DIR: resolve(home, "ntox") },
-    timeout: 60000,
-  });
-  if (init.error) throw init.error;
-  if (init.status !== 0) throw new Error(`Harness profile initialization failed.\n${init.stderr || init.stdout}`);
-  writeFileSync(
-    resolve(home, "settings.yaml"),
-    `llm-pi-ai:\n  providers:\n    openrouter:\n      apiKeyEnv: OPENROUTER_API_KEY\n      models:\n        - id: ${model}\n          contextWindow: 163840\n          maxTokens: 256\n`,
-  );
-  const plugin = cognition
-    ? `\n- insert:\n    - id: ntox-cognition\n      name: ${adapterUrl}\n      config:\n        cognitionEnabled: true\n        memoryEnabled: true\n        theoryEnabled: true\n        mistakesEnabled: true\n        strategyEnabled: true\n`
-    : "\n";
-  writeFileSync(
-    resolve(home, "profiles", "headless", "cordis.patch.yml"),
-    `- id: system-prompt\n  config:\n    persona: >-\n      You are an evaluation agent. Answer only from information included in the current conversation and supplied context. Do not call tools, inspect files, or create files. Follow any reply-only instruction exactly.\n- id: agent-default-model\n  config:\n    provider: openrouter\n    model: ${model}${plugin}`,
-  );
-  return home;
-}
+const baselineSetup = prepareHome(BASE_DIR, "paired-eval-baseline", {
+  pluginFlags: {},
+  persona:
+    "You are an evaluation agent. Answer only from information included in the current conversation and supplied context. Do not call tools, inspect files, or create files. Follow any reply-only instruction exactly.",
+});
+const cognitionSetup = prepareHome(BASE_DIR, "paired-eval-ntox", {
+  pluginFlags: {
+    cognitionEnabled: true,
+    memoryEnabled: true,
+    theoryEnabled: true,
+    mistakesEnabled: true,
+    strategyEnabled: true,
+  },
+});
+const arms = {
+  baseline: { ...baselineSetup, name: "baseline" },
+  ntox: { ...cognitionSetup, name: "ntox" },
+};
 
-function ledgerText(entries, prefix) {
-  return `${prefix} ${entries.map(([key, value]) => `${key}=${value}`).join("; ")}. Reply only acknowledged.`;
+const groups = [];
+for (let batch = 0; batch < BATCHES; batch++) {
+  groups.push(keysToTest.slice(batch * GROUPS_PER_BATCH, (batch + 1) * GROUPS_PER_BATCH).map((key) => [key, samples.get(key)]));
 }
-
-function normalize(answer) {
-  return answer
-    .trim()
-    .toLowerCase()
-    .replace(/^[`"']|[`"'.]$/g, "");
-}
-
-function passed(answer, expected, alternatives) {
-  const normalized = normalize(answer);
-  return (
-    normalized.includes(expected) && alternatives.every((value) => value === expected || !normalized.includes(value))
-  );
-}
-
-async function contextCost(home, sampleKey) {
-  process.env.NTOX_DIR = resolve(home, "ntox");
-  const { createCognitiveLayer } = await import("ntox/cognition");
-  const layer = createCognitiveLayer();
-  const context = await layer.beforeStep({
-    sessionId: "paired-eval-cost",
-    turnId: "1",
-    userMessage: `What is the ledger value for ${sampleKey}? Reply only the exact value.`,
-  });
-  return {
-    characters: context.prompt.length,
-    estimatedTokens: Math.ceil(context.prompt.length / 4),
-    sections: context.sections.map((section) => section.name),
-  };
-}
-
-async function toolObserver(home) {
-  process.env.NTOX_DIR = resolve(home, "ntox");
-  const { createCognitiveLayer } = await import("ntox/cognition");
-  const layer = createCognitiveLayer({ cognitionEnabled: false, theoryEnabled: false });
-  await layer.afterTool({
-    sessionId: "paired-eval-tool",
-    turnId: "1",
-    toolName: "read",
-    success: false,
-    error: "ENOENT",
-  });
-  const result = await layer.afterTurn({
-    sessionId: "paired-eval-tool",
-    turnId: "1",
-    userMessage: "Read the release manifest.",
-    assistantResponse: "The read failed; use the fallback manifest.",
-  });
-  return {
-    observed: result.toolOutcomes.length === 1 && result.toolOutcomes[0].error === "ENOENT",
-    reinjectedIntoLaterPrompt: false,
-  };
-}
-
-rmSync(evaluationWorkspace, { recursive: true, force: true });
-mkdirSync(evaluationWorkspace, { recursive: true });
-const baselineHome = prepareHome("paired-eval-baseline", false);
-const cognitionHome = prepareHome("paired-eval-ntox", true);
 const seeds = groups.map((group) => ledgerText(group, "Remember this ledger:"));
 const correctionGroups = groups.slice(0, 2).map((group) =>
   ledgerText(
-    group.map(([key, value]) => [key, corrections.get(key) ?? value]),
+    group.map(([key, value]) => [key, corrected.get(key) ?? value]),
     "Correct the ledger now:",
   ),
 );
 
+const runFor = (arm, task) => run(arm.home, task, { cwd: arm.workspace, onRun });
+
 for (const task of seeds) {
-  run(baselineHome, task);
-  run(cognitionHome, task);
+  for (const arm of Object.values(arms)) runFor(arm, task);
 }
 
 for (const task of correctionGroups) {
-  run(baselineHome, task);
-  run(cognitionHome, task);
+  for (const arm of Object.values(arms)) runFor(arm, task);
 }
 
-const cases = groups.flat().map(([key, initial]) => ({
+const cases = keysToTest.map((key) => ({
   key,
-  expected: corrections.get(key) ?? initial,
-  corrected: corrections.has(key),
+  expected: corrected.get(key) ?? samples.get(key),
+  corrected: corrected.has(key),
   task: `What is the ledger value for ${key}? Reply only the exact value.`,
 }));
 
 const results = cases.map((entry) => {
-  const baseline = run(baselineHome, entry.task);
-  const ntox = run(cognitionHome, entry.task);
-  const alternatives = [
-    ...groups
-      .flat()
-      .filter(([key]) => key === entry.key)
-      .map(([, value]) => value),
-    ...(corrections.has(entry.key) ? [corrections.get(entry.key)] : []),
-  ];
+  const baseline = runSafe(arms.baseline.home, entry.task, { cwd: arms.baseline.workspace, onRun });
+  const ntox = runSafe(arms.ntox.home, entry.task, { cwd: arms.ntox.workspace, onRun });
+  const alternatives = [samples.get(entry.key), ...(corrected.has(entry.key) ? [corrected.get(entry.key)] : [])].filter(Boolean);
   return {
     ...entry,
-    baseline,
-    ntox,
-    baselinePassed: passed(baseline, entry.expected, alternatives),
-    ntoxPassed: passed(ntox, entry.expected, alternatives),
+    baseline: baseline.error ? `[run failed: ${baseline.error.message.slice(0, 80)}]` : baseline.output,
+    ntox: ntox.error ? `[run failed: ${ntox.error.message.slice(0, 80)}]` : ntox.output,
+    baselineLeaked: baseline.error ? true : leaked(baseline.output),
+    ntoxLeaked: ntox.error ? true : leaked(ntox.output),
+    baselinePassed: baseline.error ? false : passed(baseline.output, entry.expected, alternatives),
+    ntoxPassed: ntox.error ? false : passed(ntox.output, entry.expected, alternatives),
   };
 });
 
 const baselinePassed = results.filter((entry) => entry.baselinePassed).length;
 const ntoxPassed = results.filter((entry) => entry.ntoxPassed).length;
+const baselineLeaked = results.filter((entry) => entry.baselineLeaked).length;
+const ntoxLeaked = results.filter((entry) => entry.ntoxLeaked).length;
 const correctionResults = results.filter((entry) => entry.corrected);
 const baselineCorrections = correctionResults.filter((entry) => entry.baselinePassed).length;
 const ntoxCorrections = correctionResults.filter((entry) => entry.ntoxPassed).length;
-const cost = await contextCost(cognitionHome, cases[0].key);
-const toolRecovery = await toolObserver(cognitionHome);
+const cost = await contextCostProbe(arms.ntox.home, cases[0].key);
+const toolRecovery = await toolRecoveryProbe(arms.ntox.home);
 const report = {
   model,
+  isolation: {
+    directory: BASE_DIR,
+    note: "The eval runs in a throwaway temp directory. Seed values are generated at runtime and are never written to disk by the harness or the eval script. The agent itself may persist workspace files in its own per-arm directory; both arms share that capability (same-tools pairing), and per-arm workspaces are fully isolated from each other.",
+  },
   taskCount: results.length,
   methodology: {
-    baseline: "Fresh Harness headless session per task with no NTOX plugin.",
-    ntox: "Fresh Harness headless session per task with the NTOX cognitive plugin and one isolated persistent NTOX store.",
-    scoring: "The answer must contain the expected value and no competing historical value for that key.",
+    baseline: "Fresh Harness headless session per task with no NTOX plugin. Seed facts are only ever present in the conversation.",
+    ntox: "Fresh Harness headless session per task with the NTOX cognitive plugin and one isolated persistent NTOX store outside the repo.",
+    scoring: "The answer must contain the expected value, must not contain a competing historical value, and must not cite files or the evaluation source (leak detection).",
   },
   metrics: {
     taskCompletion: {
@@ -241,21 +132,28 @@ const report = {
       ntox: `${ntoxCorrections}/${correctionResults.length}`,
       delta: ntoxCorrections - baselineCorrections,
     },
+    leakDetection: {
+      baselineLeaked: `${baselineLeaked}/${results.length}`,
+      ntoxLeaked: `${ntoxLeaked}/${results.length}`,
+    },
     toolRecovery: {
-      outcomeObserved: toolRecovery.observed,
-      modelVisibleRecoveryEvidence: toolRecovery.reinjectedIntoLaterPrompt,
+      ...toolRecovery,
       status:
-        "Tool outcomes are captured through afterTurn, but they are not yet turned into model-visible recovery guidance on later turns.",
+        toolRecovery.reinjectedIntoLaterPrompt && toolRecovery.consumedAfterOneStep
+          ? "Tool outcomes are captured through afterTurn and reinjected as recovery guidance into exactly the next step of the same session."
+          : "The tool-recovery reinjection probe did not pass. Inspect the layer before drawing conclusions.",
     },
     contextCost: {
       baselineAddedCharacters: 0,
       ntoxAddedCharacters: cost.characters,
       ntoxEstimatedAddedTokens: cost.estimatedTokens,
       sections: cost.sections,
+      diagnostics: cost.diagnostics,
     },
   },
   cases: results,
 };
 
+for (const entry of results) delete entry.alternatives;
 writeFileSync(resolve(proofDir, "paired-eval-report.json"), `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify(report, null, 2));

@@ -21,20 +21,48 @@ import { RelationshipTracker } from "../memory/relationship.js";
 import { SelfReflector } from "../meta/self-reflection.js";
 import { SelfAwareness } from "../meta/self-aware.js";
 import { learnDomainKeyword, findClosestDomain } from "../cognition/domains.js";
-import { classifySessionIntent, isTechnicalQuery, shouldShiftIntent, getIntentGuidance } from "../meta/session-intent.js";
+import {
+  classifySessionIntent,
+  isTechnicalQuery,
+  shouldShiftIntent,
+  getIntentGuidance,
+} from "../meta/session-intent.js";
 import type { SessionContext } from "../meta/session-intent.js";
 import { buildTimeContext, getTimeGuidance } from "../meta/time-adapter.js";
 import { SkillLibrary } from "../skills/library.js";
 import { TheoryMemory } from "../memory/theory-memory.js";
 import { classifyMode, getModePrompt } from "../meta/response-mode.js";
 import { DebateOrchestrator, DEBATE_VOICES } from "./orchestrator.js";
-import { DecisionKernel, InternalState, GoalQueue, Goal, Subtask, ActionResult, StateTransition, evolveState, IdentityLog, Verifier, ExecuteAction } from "../kernel/index.js";
+import {
+  DecisionKernel,
+  InternalState,
+  GoalQueue,
+  Goal,
+  Subtask,
+  ActionResult,
+  StateTransition,
+  evolveState,
+  IdentityLog,
+  Verifier,
+  ExecuteAction,
+} from "../kernel/index.js";
 import { detectPromptInjection } from "./guard.js";
 import { buildNarrative } from "../memory/narrative.js";
 import { existsSync, appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { MEMORY_DIR } from "./config.js";
-import type { Message, CostUsage, ToolResult, QueryType, Reflection, SkillTriggerMatch, ThinkPhase, CognitiveTrace, AgentTurnTrace, AgentToolTrace } from "../types/index.js";
+import type {
+  Message,
+  CostUsage,
+  ToolResult,
+  QueryType,
+  Reflection,
+  SkillTriggerMatch,
+  ThinkPhase,
+  CognitiveTrace,
+  AgentTurnTrace,
+  AgentToolTrace,
+} from "../types/index.js";
 import { checkForSurfaceReasoning } from "../research/false-success.js";
 import { searchTool } from "../tools/search.js";
 import { resetPolicyRuntime, type PolicyRuntime } from "./policy.js";
@@ -145,11 +173,17 @@ export class Agent {
     this.alive = cfg.alive;
   }
 
-  setSkillsCount(n: number): void { this.skillsCount = n; }
+  setSkillsCount(n: number): void {
+    this.skillsCount = n;
+  }
 
-  addMessage(msg: Message): void { this.messages.push(msg); }
+  addMessage(msg: Message): void {
+    this.messages.push(msg);
+  }
 
-  getMessages(): Message[] { return [...this.messages]; }
+  getMessages(): Message[] {
+    return [...this.messages];
+  }
 
   removeLastTurn(): boolean {
     for (let i = this.messages.length - 1; i >= 0; i--) {
@@ -174,8 +208,12 @@ export class Agent {
     };
   }
 
-  getRelationshipSummary(): string { return this.relationshipTracker.getSummary(); }
-  getBondLabel(): string { return this.relationshipTracker.getBondLabel(); }
+  getRelationshipSummary(): string {
+    return this.relationshipTracker.getSummary();
+  }
+  getBondLabel(): string {
+    return this.relationshipTracker.getBondLabel();
+  }
 
   private startTrace(userInput: string): void {
     this.currentTrace = {
@@ -184,11 +222,13 @@ export class Agent {
       memoryRecallCount: 0,
       searchUsed: false,
       toolCalls: [],
-      workspaceProfile: this.cfg.policy ? {
-        id: this.cfg.policy.profile.id,
-        name: this.cfg.policy.profile.name,
-        workspaceRoot: this.cfg.policy.profile.workspaceRoot,
-      } : undefined,
+      workspaceProfile: this.cfg.policy
+        ? {
+            id: this.cfg.policy.profile.id,
+            name: this.cfg.policy.profile.name,
+            workspaceRoot: this.cfg.policy.profile.workspaceRoot,
+          }
+        : undefined,
       policyDecisions: [],
       checkpointIds: [],
       retries: 0,
@@ -233,11 +273,16 @@ export class Agent {
   }
 
   private stableToolKey(name: string, args: Record<string, unknown>): string {
-    const ordered = Object.keys(args).sort().reduce((acc, key) => {
-      const value = args[key];
-      acc[key] = typeof value === "string" && value.length > 500 ? value.slice(0, 500) : value;
-      return acc;
-    }, {} as Record<string, unknown>);
+    const ordered = Object.keys(args)
+      .sort()
+      .reduce(
+        (acc, key) => {
+          const value = args[key];
+          acc[key] = typeof value === "string" && value.length > 500 ? value.slice(0, 500) : value;
+          return acc;
+        },
+        {} as Record<string, unknown>,
+      );
     return `${name}:${JSON.stringify(ordered)}`;
   }
 
@@ -290,10 +335,18 @@ export class Agent {
       k.goalQueue.add(goal);
       const action = k.tick();
       if (action instanceof ExecuteAction) {
-        const outcome = this.verifier.verifySubtask((action.subtask as Subtask), null);
-        const result = new ActionResult(actionType, outcome.success, outcome.details, this.kernelCycle, this.cfg.sessionId);
+        const outcome = this.verifier.verifySubtask(action.subtask as Subtask, null);
+        const result = new ActionResult(
+          actionType,
+          outcome.success,
+          outcome.details,
+          this.kernelCycle,
+          this.cfg.sessionId,
+        );
         const after = evolveState(k.state, result);
-        this.identityLog.append(new StateTransition(k.state.clone(), after, result, `kernel:${actionType}`, this.kernelCycle));
+        this.identityLog.append(
+          new StateTransition(k.state.clone(), after, result, `kernel:${actionType}`, this.kernelCycle),
+        );
         k.state = after;
         this.kernelCycle++;
         callbacks.onToken(outcome.success ? successMsg : failMsg);
@@ -306,12 +359,11 @@ export class Agent {
 
     // Create file — natural language: "create a file called X with content Y" or "/kernel create X with content Y"
     const createMatch = userInput.match(
-      /^(?:\/kernel\s+)?create\s+(?:a\s+)?(?:file|script|program)\s+(?:called\s+|named\s+)?(.+?)\s+(?:with\s+)?(?:content\s+)?([\s\S]+)$/i
+      /^(?:\/kernel\s+)?create\s+(?:a\s+)?(?:file|script|program)\s+(?:called\s+|named\s+)?(.+?)\s+(?:with\s+)?(?:content\s+)?([\s\S]+)$/i,
     );
     // Also match /kernel create <path> with content <content> without requiring "file"
-    const createExplicitMatch = !createMatch && userInput.match(
-      /^\/kernel\s+create\s+(.+?)\s+with\s+content\s+([\s\S]+)$/i
-    );
+    const createExplicitMatch =
+      !createMatch && userInput.match(/^\/kernel\s+create\s+(.+?)\s+with\s+content\s+([\s\S]+)$/i);
     const createData = createMatch || createExplicitMatch;
     if (createData) {
       const filePath = createData[1].trim().replace(/^\/+/, "");
@@ -323,7 +375,9 @@ export class Agent {
         created = res.success;
       }
       return executeKernelAction(
-        "create", `create ${filePath}`, `write ${filePath}`,
+        "create",
+        `create ${filePath}`,
+        `write ${filePath}`,
         () => created,
         `File created: ${filePath}`,
         `Failed to create: ${filePath}`,
@@ -398,8 +452,12 @@ export class Agent {
       lines.push("=== NTOX COGNITIVE KERNEL ===");
       lines.push("");
       lines.push("State:");
-      lines.push(`  confidence: ${(s.confidence * 100).toFixed(0)}%  energy: ${(s.energy * 100).toFixed(0)}%  curiosity: ${(s.curiosity * 100).toFixed(0)}%`);
-      lines.push(`  analytical: ${(s.analytical * 100).toFixed(0)}%  patience: ${(s.patience * 100).toFixed(0)}%  cycles: ${this.kernelCycle}`);
+      lines.push(
+        `  confidence: ${(s.confidence * 100).toFixed(0)}%  energy: ${(s.energy * 100).toFixed(0)}%  curiosity: ${(s.curiosity * 100).toFixed(0)}%`,
+      );
+      lines.push(
+        `  analytical: ${(s.analytical * 100).toFixed(0)}%  patience: ${(s.patience * 100).toFixed(0)}%  cycles: ${this.kernelCycle}`,
+      );
       lines.push("");
 
       try {
@@ -407,9 +465,13 @@ export class Agent {
         const stats = getTheoryStats();
         lines.push("Knowledge Distilled:");
         lines.push(`  observations: ${stats.totalObservations}  patterns: ${stats.totalPatterns}`);
-        lines.push(`  theories: ${stats.totalTheories} (${stats.confirmedTheories} confirmed)  meta-theories: ${stats.totalMetaTheories}`);
+        lines.push(
+          `  theories: ${stats.totalTheories} (${stats.confirmedTheories} confirmed)  meta-theories: ${stats.totalMetaTheories}`,
+        );
         lines.push("");
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
 
       try {
         const patterns = this.cfg.cognitiveKernel?.getPatterns?.();
@@ -418,18 +480,24 @@ export class Agent {
           lines.push(`Cognitive Patterns: ${all.length} learned`);
           const top = all.slice(0, 5);
           for (const p of top) {
-            lines.push(`  [${(p.strength * 100).toFixed(0)}%] ${p.name} — hits: ${p.hitCount} — domains: ${p.domains.join(", ")}`);
+            lines.push(
+              `  [${(p.strength * 100).toFixed(0)}%] ${p.name} — hits: ${p.hitCount} — domains: ${p.domains.join(", ")}`,
+            );
           }
           lines.push("");
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
 
       lines.push(`Identity Log: ${this.identityLog.length} transitions`);
       const allTransitions = [...this.identityLog];
       const recent = allTransitions.slice(-5);
       for (const t of recent) {
         const ts = new Date(t.timestamp).toLocaleTimeString();
-        lines.push(`  ${ts} — ${t.actionResult.actionType} — ${t.actionResult.success ? "success" : "fail"} — confidence: ${t.after.confidence.toFixed(2)}`);
+        lines.push(
+          `  ${ts} — ${t.actionResult.actionType} — ${t.actionResult.success ? "success" : "fail"} — confidence: ${t.after.confidence.toFixed(2)}`,
+        );
       }
 
       const response = lines.join("\n");
@@ -487,13 +555,66 @@ export class Agent {
           this.searchCache.set(clean, ctx);
           return ctx;
         }
-      } catch { /* search failed */ }
+      } catch {
+        /* search failed */
+      }
     }
     if (entityMatch) {
       const groups = entityMatch.slice(1).filter((g) => g && typeof g === "string" && g.length > 2);
       const entity = groups[groups.length - 1];
-      const clean = entity.replace(/[^a-z0-9\s]/gi, "").trim().toLowerCase();
-      const skipWords = new Set(["you", "your", "it", "that", "this", "there", "here", "how", "what", "why", "when", "where", "who", "which", "do", "does", "did", "is", "are", "was", "were", "can", "could", "would", "will", "shall", "may", "might", "please", "thanks", "online", "now", "then", "first", "next", "last", "up", "down", "about", "into", "with", "without", "for", "from", "like", "just", "also"]);
+      const clean = entity
+        .replace(/[^a-z0-9\s]/gi, "")
+        .trim()
+        .toLowerCase();
+      const skipWords = new Set([
+        "you",
+        "your",
+        "it",
+        "that",
+        "this",
+        "there",
+        "here",
+        "how",
+        "what",
+        "why",
+        "when",
+        "where",
+        "who",
+        "which",
+        "do",
+        "does",
+        "did",
+        "is",
+        "are",
+        "was",
+        "were",
+        "can",
+        "could",
+        "would",
+        "will",
+        "shall",
+        "may",
+        "might",
+        "please",
+        "thanks",
+        "online",
+        "now",
+        "then",
+        "first",
+        "next",
+        "last",
+        "up",
+        "down",
+        "about",
+        "into",
+        "with",
+        "without",
+        "for",
+        "from",
+        "like",
+        "just",
+        "also",
+      ]);
       if (clean.length > 2 && clean.split(/\s+/).length <= 6 && !skipWords.has(clean)) {
         const cached = this.searchCache.get(clean);
         if (cached) return cached;
@@ -505,7 +626,9 @@ export class Agent {
             this.lastSearchEntity = clean;
             return ctx;
           }
-        } catch { /* search failed, proceed without */ }
+        } catch {
+          /* search failed, proceed without */
+        }
       }
     }
     return "";
@@ -519,7 +642,7 @@ export class Agent {
     const budget = this.cfg.contextTokenBudget;
     const msgCap = this.cfg.maxContextMessages;
     const currentTokens = this.estimateTokens(this.messages);
-    const anchorEnd = (this.messages.length > 0 && this.messages[0].role === "system") ? 1 : 0;
+    const anchorEnd = this.messages.length > 0 && this.messages[0].role === "system" ? 1 : 0;
 
     if (this.messages.length <= msgCap && currentTokens <= budget * 0.8) return;
 
@@ -528,8 +651,10 @@ export class Agent {
     }
 
     const minKeep = anchorEnd + 2;
-    while (this.messages.length > minKeep &&
-           (this.estimateTokens(this.messages) > budget || this.messages.length > msgCap)) {
+    while (
+      this.messages.length > minKeep &&
+      (this.estimateTokens(this.messages) > budget || this.messages.length > msgCap)
+    ) {
       this.messages.splice(anchorEnd, 1);
     }
   }
@@ -561,7 +686,7 @@ export class Agent {
       let summary = "";
       const stream = this.cfg.llm.stream(
         [{ role: "user", content: prompt }],
-        "You are a conversation summarizer. Output only the summary, no introduction."
+        "You are a conversation summarizer. Output only the summary, no introduction.",
       );
       for await (const chunk of stream) {
         if (chunk.delta) summary += chunk.delta;
@@ -571,10 +696,7 @@ export class Agent {
         const memoryDir = MEMORY_DIR;
         if (!existsSync(memoryDir)) mkdirSync(memoryDir, { recursive: true });
         const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
-        appendFileSync(
-          join(memoryDir, "memory.md"),
-          `\n## ${stamp}\n${summary.trim()}\n`
-        );
+        appendFileSync(join(memoryDir, "memory.md"), `\n## ${stamp}\n${summary.trim()}\n`);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -607,12 +729,13 @@ export class Agent {
     if (this.currentTrace) this.currentTrace.responseMode = responseMode;
 
     // 0a. Kernel routing — try kernel first for handleable modes
-    if (this.decisionKernel && (
-      responseMode === "tool-execute" ||
-      responseMode === "tool-build" ||
-      responseMode === "profile-update" ||
-      userInput.trim().startsWith("/kernel")
-    )) {
+    if (
+      this.decisionKernel &&
+      (responseMode === "tool-execute" ||
+        responseMode === "tool-build" ||
+        responseMode === "profile-update" ||
+        userInput.trim().startsWith("/kernel"))
+    ) {
       const kernelResult = await this.handleKernelMessage(userInput, callbacks);
       if (kernelResult !== null) {
         this.lastAssistantResponse = kernelResult;
@@ -625,7 +748,9 @@ export class Agent {
 
     // Quick handlers for modes that skip the full LLM pipeline
     if (responseMode === "profile-update") {
-      const nameMatch = userInput.match(/(?:my name is|call me|i am|i'm|people call me)\s+([\w\s]+?)(?:\s*,|\s*\.|\s*$)/i);
+      const nameMatch = userInput.match(
+        /(?:my name is|call me|i am|i'm|people call me)\s+([\w\s]+?)(?:\s*,|\s*\.|\s*$)/i,
+      );
       if (nameMatch) {
         const name = nameMatch[1].trim().replace(/\s{2,}/g, " ");
         cfg.userModel.setName(name);
@@ -699,7 +824,11 @@ export class Agent {
       this.sessionContext.startedAt = Date.now();
     } else {
       // Track intent shifts
-      const newIntent = shouldShiftIntent(this.sessionContext.intent, userInput, this.sessionContext.consecutiveTechnical);
+      const newIntent = shouldShiftIntent(
+        this.sessionContext.intent,
+        userInput,
+        this.sessionContext.consecutiveTechnical,
+      );
       if (newIntent) {
         this.sessionContext.intent = newIntent;
         this.sessionContext.lastIntentShift = Date.now();
@@ -758,7 +887,10 @@ export class Agent {
     }
 
     // 3a. Domain learning — auto-extend domain keywords from user's terms
-    const words = userInput.toLowerCase().split(/\s+/).filter((w) => w.length > 4 && !/^\d+$/.test(w));
+    const words = userInput
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 4 && !/^\d+$/.test(w));
     for (const word of words) {
       const closest = findClosestDomain(word);
       if (closest) {
@@ -778,10 +910,7 @@ export class Agent {
       ? cfg.llm.embed(userInput).catch(() => null)
       : Promise.resolve(null);
 
-    const [searchCtx, embedResult] = await Promise.all([
-      this.resolveSearchContext(userInput),
-      embedPromise,
-    ]);
+    const [searchCtx, embedResult] = await Promise.all([this.resolveSearchContext(userInput), embedPromise]);
     const searchContext = searchCtx;
     if (this.currentTrace) this.currentTrace.searchUsed = searchContext.length > 0;
     const queryEmbedding = embedResult;
@@ -853,7 +982,11 @@ export class Agent {
 
       const seen = new Set<string>();
       skillMatches = skillMatches
-        .filter((m) => { const isNew = !seen.has(m.skill.name); seen.add(m.skill.name); return isNew; })
+        .filter((m) => {
+          const isNew = !seen.has(m.skill.name);
+          seen.add(m.skill.name);
+          return isNew;
+        })
         .sort((a, b) => b.confidence - a.confidence);
 
       if (skillMatches.length > 0) {
@@ -926,7 +1059,9 @@ export class Agent {
             if (libLines.length > 1) libraryFrameworkContext = libLines.join("\n");
           }
         }
-      } catch { /* library not available */ }
+      } catch {
+        /* library not available */
+      }
     }
     if (libraryFrameworkContext) parts.push(libraryFrameworkContext);
 
@@ -965,8 +1100,11 @@ export class Agent {
     const openaiTools = cfg.tools.toOpenAITools();
 
     // 9a. Debate detection — route complex research questions to multi-agent debate
-    const isDebateQuery = userInput.startsWith("/debate") ||
-      (userInput.length > 80 && /\b(?:debate|compare|analyze|evaluate|assess)\b/i.test(userInput) && /\b(?:why|how|should|is it|are there|what are the implications)\b/i.test(userInput));
+    const isDebateQuery =
+      userInput.startsWith("/debate") ||
+      (userInput.length > 80 &&
+        /\b(?:debate|compare|analyze|evaluate|assess)\b/i.test(userInput) &&
+        /\b(?:why|how|should|is it|are there|what are the implications)\b/i.test(userInput));
 
     if (isDebateQuery && !cfg.cognitiveKernel.isEnabled()) {
       const cleanQuery = userInput.replace(/^\/debate\s*/i, "");
@@ -1013,7 +1151,11 @@ export class Agent {
 
             for (const tc of toolCalls) {
               let args: Record<string, unknown> = {};
-              try { args = JSON.parse(tc.arguments || "{}"); } catch { /* use empty */ }
+              try {
+                args = JSON.parse(tc.arguments || "{}");
+              } catch {
+                /* use empty */
+              }
               callbacks.onToolCall(tc.name, args);
               cfg.analytics.trackToolCall(tc.name);
               this.toolUsageThisSession[tc.name] = (this.toolUsageThisSession[tc.name] || 0) + 1;
@@ -1030,10 +1172,13 @@ export class Agent {
                 const startedAt = Date.now();
                 const result = priorFailure
                   ? {
-                    success: false,
-                    error: `Repeated failed tool call skipped: ${priorFailure}`,
-                    data: { guidance: "Change the arguments, choose another tool, or answer without retrying the same failed call." },
-                  }
+                      success: false,
+                      error: `Repeated failed tool call skipped: ${priorFailure}`,
+                      data: {
+                        guidance:
+                          "Change the arguments, choose another tool, or answer without retrying the same failed call.",
+                      },
+                    }
                   : await tool.execute(args);
                 if (toolTrace) {
                   toolTrace.success = result.success;
@@ -1069,7 +1214,10 @@ export class Agent {
             }
             continue;
           }
-          if (chunk.delta) { responseBuffer += chunk.delta; callbacks.onToken(chunk.delta); }
+          if (chunk.delta) {
+            responseBuffer += chunk.delta;
+            callbacks.onToken(chunk.delta);
+          }
         }
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
@@ -1091,7 +1239,8 @@ export class Agent {
 
       // Tool-build enforcement
       if (responseMode === "tool-build" && attempts < 3 && !hasToolCalls) {
-        const correction = "[BUILD MODE] You explained instead of building. Create the file NOW using the write tool. No explanation. No questions. Just build it.";
+        const correction =
+          "[BUILD MODE] You explained instead of building. Create the file NOW using the write tool. No explanation. No questions. Just build it.";
         this.messages.push({ role: "assistant", content: responseBuffer });
         this.messages.push({ role: "user", content: correction });
         continue;
@@ -1122,19 +1271,27 @@ export class Agent {
           this.falseSuccessRetriesThisSession++;
           if (cfg.mistakesEnabled) {
             cfg.mistakes.add(
-              "shallow-reasoning", userInput, responseBuffer,
+              "shallow-reasoning",
+              userInput,
+              responseBuffer,
               `Surface reasoning: ${surfaceCheck.details.join("; ")}`,
-              "self-reflection"
+              "self-reflection",
             );
           }
           try {
             const { penalizeTheoriesForFalseSuccess } = await import("../research/theory-store.js");
-            penalizeTheoriesForFalseSuccess(`${userInput} ${responseBuffer}`, `Surface reasoning retry: ${surfaceCheck.details.join("; ")}`);
-          } catch { /* best effort */ }
+            penalizeTheoriesForFalseSuccess(
+              `${userInput} ${responseBuffer}`,
+              `Surface reasoning retry: ${surfaceCheck.details.join("; ")}`,
+            );
+          } catch {
+            /* best effort */
+          }
           this.messages.push({ role: "assistant", content: responseBuffer });
           this.messages.push({
             role: "user",
-            content: "[SELF-CORRECTION] Your previous answer used surface-level reasoning. Re-answer with deeper causal reasoning: identify mechanisms, state assumptions, include a self-critique of limitations, and use first-principles thinking."
+            content:
+              "[SELF-CORRECTION] Your previous answer used surface-level reasoning. Re-answer with deeper causal reasoning: identify mechanisms, state assumptions, include a self-critique of limitations, and use first-principles thinking.",
           });
           continue;
         }
@@ -1154,28 +1311,37 @@ export class Agent {
           if (reflection && callbacks.onReflection) {
             callbacks.onReflection(reflection);
           }
-        } catch (e) { console.error("[reflect]", e); }
+        } catch (e) {
+          console.error("[reflect]", e);
+        }
       }
 
       if (callbacks.onProactiveSuggestion) {
         try {
           cfg.proactive.setBondLevel(
             this.relationshipTracker.getBondLevel(),
-            this.relationshipTracker.getNewMilestones()
+            this.relationshipTracker.getNewMilestones(),
           );
           const suggestion = cfg.proactive.generate(
-            cfg.userModel.getProfile(), this.messages.length, this.skillsCount, cfg.memory.count(),
-            this.sessionContext.intent
+            cfg.userModel.getProfile(),
+            this.messages.length,
+            this.skillsCount,
+            cfg.memory.count(),
+            this.sessionContext.intent,
           );
           if (suggestion) callbacks.onProactiveSuggestion(suggestion);
-        } catch (e) { console.error("[proactive]", e); }
+        } catch (e) {
+          console.error("[proactive]", e);
+        }
       }
 
       if (callbacks.onSelfAwareness) {
         try {
           const announcement = this.selfAwareness.getNextAnnouncement();
           if (announcement) callbacks.onSelfAwareness(announcement);
-        } catch (e) { console.error("[awareness]", e); }
+        } catch (e) {
+          console.error("[awareness]", e);
+        }
       }
 
       if (callbacks.onFeedbackRequest) {
@@ -1183,7 +1349,9 @@ export class Agent {
           const wasCorrection = this.messages.some((m) => m.content.includes("user-correction"));
           const feedbackRequest = this.selfAwareness.shouldRequestFeedback(0.5, wasCorrection, false);
           if (feedbackRequest) callbacks.onFeedbackRequest(feedbackRequest.question);
-        } catch (e) { console.error("[feedback]", e); }
+        } catch (e) {
+          console.error("[feedback]", e);
+        }
       }
 
       if (cfg.intervention && callbacks.onIntervention) {
@@ -1201,7 +1369,9 @@ export class Agent {
           };
           const intervention = cfg.intervention.evaluate(intCtx);
           if (intervention) callbacks.onIntervention(intervention);
-        } catch (e) { console.error("[intervention]", e); }
+        } catch (e) {
+          console.error("[intervention]", e);
+        }
       }
 
       if (cfg.disagreement && callbacks.onDisagreement) {
@@ -1209,7 +1379,12 @@ export class Agent {
           const observations = cfg.observation ? cfg.observation.getAll().slice(-20) : [];
           const beliefs = cfg.mentalModel ? cfg.mentalModel.getAllEntries() : [];
           const risks = cfg.executive ? cfg.executive.getRisks() : [];
-          const mistakes = cfg.mistakes ? cfg.mistakes.getAll().slice(-10).map((m: { correction: string }) => m.correction) : [];
+          const mistakes = cfg.mistakes
+            ? cfg.mistakes
+                .getAll()
+                .slice(-10)
+                .map((m: { correction: string }) => m.correction)
+            : [];
           const disCtx: DisagreementContext = {
             proposal: userInput,
             observations,
@@ -1221,7 +1396,9 @@ export class Agent {
           };
           const disagreement = cfg.disagreement.evaluate(disCtx);
           if (disagreement) callbacks.onDisagreement(disagreement);
-        } catch (e) { console.error("[disagreement]", e); }
+        } catch (e) {
+          console.error("[disagreement]", e);
+        }
       }
 
       // Slow post-processing: background
@@ -1230,15 +1407,22 @@ export class Agent {
           try {
             cfg.memory.addEpisode(cfg.sessionId, userInput, responseBuffer, queryEmbedding);
             if (callbacks.onMemoryStore) callbacks.onMemoryStore();
-          } catch (e) { console.error("[memory]", e); }
+          } catch (e) {
+            console.error("[memory]", e);
+          }
         }
         if (cfg.cognitiveKernel.isEnabled() && this.lastCognitiveResult) {
-          try { this.lastCognitiveResult = cfg.cognitiveKernel.process(userInput, responseBuffer); }
-          catch (e) { console.error("[cognition]", e); }
+          try {
+            this.lastCognitiveResult = cfg.cognitiveKernel.process(userInput, responseBuffer);
+          } catch (e) {
+            console.error("[cognition]", e);
+          }
         }
         this.selfAwareness.discoverFromIntent(this.sessionContext.intent, this.sessionContext.queryCount);
         await this.manageContextWindow();
-      } catch (e) { console.error("[post-process]", e); }
+      } catch (e) {
+        console.error("[post-process]", e);
+      }
 
       return;
     }
@@ -1274,11 +1458,16 @@ export class Agent {
   }
 
   private compressToolResult(result: ToolResult): string {
-    if (!result.success && result.error && /ParserError|CommandNotFoundException|Unix-style command|looks like code|malformed tool XML/i.test(result.error)) {
+    if (
+      !result.success &&
+      result.error &&
+      /ParserError|CommandNotFoundException|Unix-style command|looks like code|malformed tool XML/i.test(result.error)
+    ) {
       return JSON.stringify({
         success: false,
         error: result.error.split("\n")[0].slice(0, 300),
-        guidance: "Do not retry the same shell command. If the user asked for code, answer in chat without tools. On Windows use PowerShell syntax.",
+        guidance:
+          "Do not retry the same shell command. If the user asked for code, answer in chat without tools. On Windows use PowerShell syntax.",
       });
     }
     const json = JSON.stringify(result);
@@ -1304,7 +1493,7 @@ export class Agent {
         { ...this.toolUsageThisSession },
         this.sessionContext.intent,
         this.correctionsThisSession,
-        this.sessionStartTime
+        this.sessionStartTime,
       );
       if (this.cfg.observation) {
         this.cfg.observation.recordSession({

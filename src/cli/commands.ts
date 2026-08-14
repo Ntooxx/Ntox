@@ -51,6 +51,7 @@ export const COMMANDS: CommandDef[] = [
   { name: "meta", description: "meta-cognition status", group: "diagnostics" },
   { name: "analytics", description: "usage stats", group: "diagnostics" },
   { name: "trace", description: "last turn trace", group: "diagnostics" },
+  { name: "alive", description: "host events and wake state", group: "diagnostics" },
   { name: "workspace", description: "active workspace", group: "diagnostics" },
   { name: "permissions", description: "tool policy status", group: "diagnostics" },
   { name: "agents", description: "subagent runs", group: "diagnostics" },

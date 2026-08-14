@@ -79,7 +79,13 @@ export async function runGateway(channel?: string): Promise<void> {
   const sessions = new SessionManager();
   const channelsByName = new Map<string, GatewayChannel>();
   const makeHandler = (ctx: string) =>
-    async (chatId: string, text: string, username: string, onToken?: (token: string) => void): Promise<string> => {
+    async (
+      chatId: string,
+      text: string,
+      username: string,
+      onToken?: (token: string) => void,
+      onEvent?: (event: Record<string, unknown>) => void,
+    ): Promise<string> => {
       const allowed = ctx === "telegram" ? config.telegramAllowedUsers
         : ctx === "discord" ? config.discordAllowedUsers
         : [];
@@ -117,7 +123,7 @@ export async function runGateway(channel?: string): Promise<void> {
       const channel = channelsByName.get(ctx);
       const notifyTyping = channel ? () => channel.notifyTyping(chatId) : undefined;
       try {
-        const output = new GatewayOutput(notifyTyping, onToken);
+        const output = new GatewayOutput(notifyTyping, onToken, onEvent);
         const result = await runAgentMessage(agent, text, output);
         if (result.error) return `Error: ${result.error.slice(0, 400)}`;
         const safe = sanitizeOutput(result.response);
@@ -196,6 +202,15 @@ export async function runGateway(channel?: string): Promise<void> {
       host: config.webHost || "127.0.0.1",
       onMessage: makeHandler("web"),
       getStatus: () => ({
+        model: config.model,
+        provider: config.provider,
+        memoryEnabled: config.memoryEnabled,
+        theoryEnabled: config.theoryEnabled,
+        metaEnabled: {
+          strategy: config.metaStrategyEnabled,
+          mistakes: config.metaMistakesEnabled,
+          reflection: config.metaReflectionEnabled,
+        },
         profile: shared.policy.profile,
         sessions: sessions.status(),
         policyDenials: shared.policy.decisions.filter((d) => !d.allowed).slice(-20),

@@ -172,6 +172,7 @@ describe("NtoxCognitiveLayer", () => {
     expect(recovery.diagnostics.recoveryIncluded).toBe(true);
     expect(recovery.prompt).toContain("Tool Recovery Guidance");
     expect(recovery.prompt).toContain("ENOENT: release manifest");
+    expect(recovery.prompt).toContain("Next step: Verify the path or discover the file before retrying.");
     expect(later.diagnostics.recoveryIncluded).toBe(false);
   });
 
@@ -195,5 +196,70 @@ describe("NtoxCognitiveLayer", () => {
 
     expect(context.embedding?.length).toBeGreaterThan(0);
     expect(context.diagnostics.errors).toContain("embedding: provider unavailable");
+  });
+
+  it("gates durable learning when storeEnabled is false (full cognition without learning)", async () => {
+    memory.addDurableMemory("fact", "harbor=blue-ember", "test");
+    mistakes.add("harbor", "old question", "harbor=blue-ember", "harbor=navy-ember", "user-correction");
+
+    const noStore = new NtoxCognitiveLayer(
+      { cognitionEnabled: false, theoryEnabled: false, storeEnabled: false },
+      { memory, mistakes },
+    );
+
+    const learning = await noStore.afterTurn({
+      sessionId: "session-1",
+      userMessage: "The ledger value for harbor is blue-ember.",
+      assistantResponse: "harbor=blue-ember",
+      correction: { topicKey: "harbor", correction: "harbor=navy-ember" },
+    });
+
+    expect(learning.memoryId).toBeUndefined();
+    expect(learning.mistakeId).toBeUndefined();
+    expect(learning.theoryUpdated).toBe(false);
+
+    const next = await noStore.beforeStep({
+      sessionId: "session-1",
+      turnId: "turn-2",
+      userMessage: "What is the ledger value for harbor?",
+    });
+    expect(next.diagnostics.memoryIncluded).toBe(false);
+    expect(next.diagnostics.correctionIncluded).toBe(false);
+
+    const withStore = new NtoxCognitiveLayer(
+      { cognitionEnabled: false, theoryEnabled: false, storeEnabled: true },
+      { memory, mistakes },
+    );
+    const stored = await withStore.afterTurn({
+      sessionId: "session-2",
+      userMessage: "The ledger value for harbor is blue-ember.",
+      assistantResponse: "harbor=blue-ember",
+      correction: { topicKey: "harbor", correction: "harbor=navy-ember" },
+    });
+    expect(stored.memoryId).toMatch(/^ep_/);
+    expect(stored.mistakeId).toMatch(/^mist_/);
+  });
+
+  it("updates conflicting durable memories from explicit corrections", async () => {
+    const layer = new NtoxCognitiveLayer(
+      { cognitionEnabled: false, theoryEnabled: false },
+      { memory, mistakes },
+    );
+    const oldMemory = memory.addDurableMemory("fact", "harbor=blue-ember", "test", 0.8);
+
+    await layer.afterTurn({
+      sessionId: "session-1",
+      userMessage: "Correct harbor.",
+      assistantResponse: "harbor=blue-ember",
+      correction: {
+        topicKey: "harbor",
+        wrongAnswer: "harbor=blue-ember",
+        correction: "harbor=navy-ember",
+      },
+    });
+
+    const stored = memory.getDurableMemory(oldMemory.id);
+    expect(stored?.text).toBe("harbor=navy-ember");
+    expect(stored?.provenance).toBe("user correction");
   });
 });

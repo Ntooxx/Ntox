@@ -494,6 +494,9 @@ export class Repl {
       case "trace":
         this.printTrace();
         break;
+      case "alive":
+        this.printAlive();
+        break;
       case "diff":
         this.printLastDiff();
         break;
@@ -1535,6 +1538,32 @@ export class Repl {
     console.log(renderMistakeList(all));
   }
 
+  private printAlive(): void {
+    const alive = this.infra.alive;
+    if (!alive) {
+      console.log(chalk.dim("\nAlive is not configured."));
+      return;
+    }
+    const snapshot = alive.inspect();
+    console.log(chalk.bold("\nalive"));
+    console.log(`  ${chalk.dim("events")}      ${chalk.cyan(String(snapshot.events.length))}`);
+    console.log(`  ${chalk.dim("pending")}     ${chalk.cyan(String(snapshot.pendingActions.length))}`);
+    console.log(`  ${chalk.dim("predictions")} ${chalk.cyan(String(snapshot.predictions.length))}`);
+    console.log(`  ${chalk.dim("open loops")}  ${chalk.cyan(String(snapshot.openLoops.length))}`);
+    if (snapshot.pendingActions.length > 0) {
+      console.log(`  ${chalk.dim("wake")}`);
+      for (const action of snapshot.pendingActions.slice(0, 5)) console.log(`    ${action.kind}: ${action.reason}`);
+    }
+    if (snapshot.events.length > 0) {
+      console.log(`  ${chalk.dim("recent")}`);
+      for (const event of snapshot.events.slice(0, 5)) {
+        const path = typeof event.payload.path === "string" ? ` ${event.payload.path}` : "";
+        const status = typeof event.payload.status === "string" ? ` ${event.payload.status}` : "";
+        console.log(`    ${event.type}${status}${path} ${chalk.dim(event.source)}`);
+      }
+    }
+  }
+
   private async handleModelCommand(arg: string): Promise<void> {
     if (arg.toLowerCase() === "refresh") {
       console.log(chalk.dim("Refreshing the OpenRouter model catalog..."));
@@ -1827,7 +1856,11 @@ export class Repl {
     };
 
     let outputTokenCount = 0;
-    const { error: streamError, cancelled } = await runAgentStream(
+    const {
+      error: streamError,
+      cancelled,
+      timedOut,
+    } = await runAgentStream(
       this.agent,
       expandedInput,
       {
@@ -1995,7 +2028,9 @@ export class Repl {
         }
       }
 
-      if (cancelled) {
+      if (timedOut) {
+        console.log(chalk.yellow("\n  Turn timed out after 10 minutes — turn aborted so you're never stuck."));
+      } else if (cancelled) {
         console.log(chalk.yellow("\n  Turn cancelled."));
       } else if (streamError) {
         const info = describeError(streamError);

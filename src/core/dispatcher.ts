@@ -91,24 +91,46 @@ export interface SessionInfra {
 
 export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile): SharedInfra {
   const llm = new LLMClient(
-    config.apiKey, config.model, config.embeddingModel,
-    config.maxTokens, config.temperature, config.apiBaseUrl, config.provider
+    config.apiKey,
+    config.model,
+    config.embeddingModel,
+    config.maxTokens,
+    config.temperature,
+    config.apiBaseUrl,
+    config.provider,
   );
 
   const selectedProfile = profile || getDefaultProfile(config.profiles, config.defaultProfileId);
-  const runtimeProfile = selectedProfile.id === "default" && selectedProfile.name === "Default Workspace"
-    ? {
-      ...selectedProfile,
-      workspaceRoot: process.cwd(),
-      readRoots: [process.cwd()],
-      writeRoots: [process.cwd()],
-    }
-    : selectedProfile;
+  const runtimeProfile =
+    selectedProfile.id === "default" && selectedProfile.name === "Default Workspace"
+      ? {
+          ...selectedProfile,
+          workspaceRoot: process.cwd(),
+          readRoots: [process.cwd()],
+          writeRoots: [process.cwd()],
+        }
+      : selectedProfile;
   const policy = createPolicyRuntime(runtimeProfile);
   const tools = new ToolRegistry();
   for (const tool of [
-    readTool, writeTool, globTool, lsTool, shellTool, webFetchTool, webReadTool, searchTool, grepTool, editTool,
-    ttsTool, sttTool, imageTool, subagentTool, checkpointTool, browseTool, jobTrackerTool, createProfileEvalTool(llm),
+    readTool,
+    writeTool,
+    globTool,
+    lsTool,
+    shellTool,
+    webFetchTool,
+    webReadTool,
+    searchTool,
+    grepTool,
+    editTool,
+    ttsTool,
+    sttTool,
+    imageTool,
+    subagentTool,
+    checkpointTool,
+    browseTool,
+    jobTrackerTool,
+    createProfileEvalTool(llm),
   ]) {
     tools.register(enforceToolPolicy(tool, policy));
   }
@@ -156,7 +178,7 @@ export function createAgentConfig(
   infra: AgentInfra,
   config: NtoxConfig,
   sessionId: string,
-  overrides: Partial<AgentConfig> = {}
+  overrides: Partial<AgentConfig> = {},
 ): AgentConfig {
   return {
     llm: infra.llm,
@@ -277,9 +299,17 @@ export class SessionManager implements SessionStore {
 export interface MessageOutput {
   onStart?(): void;
   onToken(token: string): void;
-  onToolCall?(name: string): void;
+  onToolCall?(name: string, args: Record<string, unknown>): void;
+  onToolResult?(name: string, result: import("../types/index.js").ToolResult, args: Record<string, unknown>): void;
   onUsage?(usage: CostUsage): void;
   onThinking?(thought: string): void;
+  onPhase?(phase: Parameters<NonNullable<AgentCallbacks["onPhase"]>>[0]): void;
+  onMemoryRecall?(count: number): void;
+  onMemoryStore?(): void;
+  onStrategy?(type: Parameters<NonNullable<AgentCallbacks["onStrategy"]>>[0]): void;
+  onCorrectionDetected?(topicKey: string, correction: string): void;
+  onSkillTriggered?(skillName: string, confidence: number): void;
+  onAliveAction?(action: Parameters<NonNullable<AgentCallbacks["onAliveAction"]>>[0]): void;
   onEnd?(): void;
   flush(): string;
 }
@@ -290,29 +320,41 @@ export interface MessageResult {
   error: string | null;
 }
 
-export async function runAgentMessage(
-  agent: Agent,
-  text: string,
-  output: MessageOutput
-): Promise<MessageResult> {
+export async function runAgentMessage(agent: Agent, text: string, output: MessageOutput): Promise<MessageResult> {
   output.onStart?.();
   let response = "";
   const toolCalls: string[] = [];
 
   try {
     const callbacks: AgentCallbacks = {
-      onToken: (token) => { response += token; output.onToken(token); },
-      onToolCall: (name) => {
-        toolCalls.push(name);
-        output.onToolCall?.(name);
+      onToken: (token) => {
+        response += token;
+        output.onToken(token);
       },
-      onToolResult: () => {},
-      onUsage: (usage) => { output.onUsage?.(usage); },
-      onThinking: (thought) => { output.onThinking?.(thought); },
+      onToolCall: (name, args) => {
+        toolCalls.push(name);
+        output.onToolCall?.(name, args);
+      },
+      onToolResult: (name, result, args) => output.onToolResult?.(name, result, args),
+      onUsage: (usage) => {
+        output.onUsage?.(usage);
+      },
+      onThinking: (thought) => {
+        output.onThinking?.(thought);
+      },
+      onPhase: (phase) => output.onPhase?.(phase),
+      onMemoryRecall: (count) => output.onMemoryRecall?.(count),
+      onMemoryStore: () => output.onMemoryStore?.(),
+      onStrategy: (type) => output.onStrategy?.(type),
+      onCorrectionDetected: (topicKey, correction) => output.onCorrectionDetected?.(topicKey, correction),
+      onSkillTriggered: (name, confidence) => output.onSkillTriggered?.(name, confidence),
+      onAliveAction: (action) => output.onAliveAction?.(action),
     };
 
     const stream = agent.run(text, callbacks);
-    for await (const _ of stream) { /* drain */ }
+    for await (const _ of stream) {
+      /* drain */
+    }
   } catch (e) {
     output.onEnd?.();
     const msg = e instanceof Error ? e.message : String(e);
@@ -322,9 +364,10 @@ export async function runAgentMessage(
   output.onEnd?.();
   let result = output.flush() || response.trim();
   if (!result) {
-    result = toolCalls.length > 0
-      ? `Ran ${toolCalls.length} tool${toolCalls.length > 1 ? "s" : ""}: ${toolCalls.join(", ")}`
-      : "(no response)";
+    result =
+      toolCalls.length > 0
+        ? `Ran ${toolCalls.length} tool${toolCalls.length > 1 ? "s" : ""}: ${toolCalls.join(", ")}`
+        : "(no response)";
   }
 
   return { response: result, toolCalls, error: null };
@@ -335,11 +378,17 @@ export class GatewayOutput implements MessageOutput {
   private buffer = "";
   private notifyTyping?: () => void;
   private externalOnToken?: (token: string) => void;
+  private externalOnEvent?: (event: Record<string, unknown>) => void;
   private tokenCount = 0;
 
-  constructor(notifyTyping?: () => void, externalOnToken?: (token: string) => void) {
+  constructor(
+    notifyTyping?: () => void,
+    externalOnToken?: (token: string) => void,
+    externalOnEvent?: (event: Record<string, unknown>) => void,
+  ) {
     this.notifyTyping = notifyTyping;
     this.externalOnToken = externalOnToken;
+    this.externalOnEvent = externalOnEvent;
   }
 
   onToken(token: string): void {
@@ -350,9 +399,41 @@ export class GatewayOutput implements MessageOutput {
       this.notifyTyping?.();
     }
   }
-  onToolCall(name: string): void {
+  onToolCall(name: string, args: Record<string, unknown>): void {
     this.toolCalls.push(name);
+    this.externalOnEvent?.({ type: "tool_call", name, args });
     this.notifyTyping?.();
   }
-  flush(): string { return this.buffer.trim(); }
+  onToolResult(name: string, result: import("../types/index.js").ToolResult): void {
+    this.externalOnEvent?.({
+      type: "tool_result",
+      name,
+      success: result.success,
+      error: result.error,
+    });
+  }
+  onPhase(phase: Parameters<NonNullable<AgentCallbacks["onPhase"]>>[0]): void {
+    this.externalOnEvent?.({ type: "phase", phase });
+  }
+  onMemoryRecall(count: number): void {
+    this.externalOnEvent?.({ type: "memory", action: "recalled", count });
+  }
+  onMemoryStore(): void {
+    this.externalOnEvent?.({ type: "memory", action: "stored", count: 1 });
+  }
+  onStrategy(type: Parameters<NonNullable<AgentCallbacks["onStrategy"]>>[0]): void {
+    this.externalOnEvent?.({ type: "strategy", strategy: type });
+  }
+  onCorrectionDetected(topicKey: string, correction: string): void {
+    this.externalOnEvent?.({ type: "correction", topicKey, correction });
+  }
+  onSkillTriggered(skillName: string, confidence: number): void {
+    this.externalOnEvent?.({ type: "skill", skillName, confidence });
+  }
+  onAliveAction(action: Parameters<NonNullable<AgentCallbacks["onAliveAction"]>>[0]): void {
+    this.externalOnEvent?.({ type: "alive", action });
+  }
+  flush(): string {
+    return this.buffer.trim();
+  }
 }

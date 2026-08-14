@@ -21,15 +21,24 @@ describe("GatewayOutput", () => {
   it("calls notifyTyping on tool call", () => {
     const notify = vi.fn();
     const out = new GatewayOutput(notify);
-    out.onToolCall("read");
+    out.onToolCall("read", {});
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
   it("tracks tool calls", () => {
     const out = new GatewayOutput();
-    out.onToolCall("read");
-    out.onToolCall("write");
+    out.onToolCall("read", {});
+    out.onToolCall("write", {});
     expect(out.toolCalls).toEqual(["read", "write"]);
+  });
+
+  it("emits structured UI events", () => {
+    const onEvent = vi.fn();
+    const out = new GatewayOutput(undefined, undefined, onEvent);
+    out.onToolCall("read", { path: "README.md" });
+    out.onPhase("thinking");
+    expect(onEvent).toHaveBeenCalledWith({ type: "tool_call", name: "read", args: { path: "README.md" } });
+    expect(onEvent).toHaveBeenCalledWith({ type: "phase", phase: "thinking" });
   });
 
   it("trims buffer on flush", () => {

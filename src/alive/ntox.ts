@@ -8,6 +8,28 @@ function isTestCommand(args?: Record<string, unknown>): boolean {
   return /\b(?:npm|pnpm|yarn|bun|vitest|jest|pytest)\b.*\b(?:test|check)\b/i.test(command);
 }
 
+export function failedToolNextStep(result: CognitiveToolResult, args?: Record<string, unknown>): string | undefined {
+  if (result.success) return undefined;
+  const command = typeof args?.command === "string" ? args.command : "";
+  const detail = `${result.error ?? ""} ${command}`.toLowerCase();
+  if (/enoent|no such file|cannot find path|not found/.test(detail)) {
+    return "Verify the path or discover the target before retrying.";
+  }
+  if (/permission|access denied|eperm|eacces/.test(detail)) {
+    return "Check permissions or choose an allowed path before retrying.";
+  }
+  if (/parsererror|commandnotfound|not recognized|syntax|unexpected token/.test(detail)) {
+    return "Fix the command syntax for this shell before retrying.";
+  }
+  if (/timeout|timed out|aborted/.test(detail)) {
+    return "Retry with a narrower command or inspect partial output first.";
+  }
+  if (isTestCommand(args) || /test|assert|expect|failed/.test(detail)) {
+    return "Inspect the failing assertion or logs, then change the smallest relevant code path.";
+  }
+  return "Change inputs or use a fallback; do not repeat the same tool call unchanged.";
+}
+
 export function toolOutcomeToAliveEvent(result: CognitiveToolResult, args?: Record<string, unknown>): AliveEventInput {
   const testCommand = result.toolName === "shell" && isTestCommand(args);
   return {
@@ -24,6 +46,7 @@ export function toolOutcomeToAliveEvent(result: CognitiveToolResult, args?: Reco
       toolName: result.toolName,
       status: result.success ? "passed" : "failed",
       error: result.error,
+      nextStep: failedToolNextStep(result, args),
       durationMs: result.durationMs,
       ...result.metadata,
     },
@@ -73,8 +96,23 @@ export class NtoxAliveBridge {
   consumeWakeContext(): string {
     const actions = this.pendingActions.splice(0, this.pendingActions.length);
     if (actions.length === 0) return "";
-    const lines = actions.slice(0, 3).map((action) => `- ${action.reason}`);
+    const events = this.engine.getState().events;
+    const lines = actions.slice(0, 3).map((action) => {
+      const event = action.eventId ? events.find((item) => item.id === action.eventId) : undefined;
+      const nextStep = typeof event?.payload.nextStep === "string" ? ` Next step: ${event.payload.nextStep}` : "";
+      return `- ${action.reason}.${nextStep}`;
+    });
     return `## NTOX Alive\nRecent world events need attention:\n${lines.join("\n")}`;
+  }
+
+  inspect(limit = 8) {
+    const state = this.engine.getState();
+    return {
+      events: state.events.slice(-limit).reverse(),
+      predictions: state.predictions.slice(-limit).reverse(),
+      openLoops: state.openLoops.slice(-limit).reverse(),
+      pendingActions: [...this.pendingActions].slice(-limit).reverse(),
+    };
   }
 
   private handlePulse(pulse: AlivePulse): AlivePulse {

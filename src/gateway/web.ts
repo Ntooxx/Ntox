@@ -10,7 +10,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 interface WebConfig {
   port?: number;
   host?: string;
-  onMessage: (chatId: string, text: string, username: string, onToken?: (token: string) => void) => Promise<string>;
+  onMessage: (
+    chatId: string,
+    text: string,
+    username: string,
+    onToken?: (token: string) => void,
+    onEvent?: (event: Record<string, unknown>) => void,
+  ) => Promise<string>;
   getStatus?: () => unknown;
 }
 
@@ -58,6 +64,7 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
         socket.on("message", async (text: string) => {
           if (!text?.trim() || pending) return;
           pending = true;
+          socket.emit("event", { type: "phase", phase: "queued" });
 
           try {
             const streamedTokens: string[] = [];
@@ -65,7 +72,10 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
               streamedTokens.push(token);
               socket.emit("token", { text: token, done: false });
             };
-            const response = await onMessage(sid, text, WEB_USER, onToken);
+            const onEvent = (event: Record<string, unknown>) => {
+              socket.emit("event", event);
+            };
+            const response = await onMessage(sid, text, WEB_USER, onToken, onEvent);
             if (streamedTokens.length === 0) {
               socket.emit("token", { text: response, done: false });
             }

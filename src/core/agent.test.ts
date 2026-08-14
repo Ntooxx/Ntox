@@ -19,7 +19,9 @@ import { NtoxAliveBridge } from "../alive/ntox.js";
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   const llm = {
     embed: async () => [] as number[],
-    stream: async function* () { yield { delta: "" }; },
+    stream: async function* () {
+      yield { delta: "" };
+    },
   } as unknown as LLMClient;
   const registry = new SkillRegistry();
   return {
@@ -259,13 +261,19 @@ describe("Agent — run() integration", () => {
     let response = "";
     const toolCalls: { name: string }[] = [];
     const stream = agent.run(input, {
-      onToken: (t) => { response += t; },
-      onToolCall: (name) => { toolCalls.push({ name }); },
+      onToken: (t) => {
+        response += t;
+      },
+      onToolCall: (name) => {
+        toolCalls.push({ name });
+      },
       onToolResult: () => {},
       onUsage: () => {},
       onThinking: () => {},
     } as AgentCallbacks);
-    for await (const _ of stream) { /* drain */ }
+    for await (const _ of stream) {
+      /* drain */
+    }
     return { response, toolCalls };
   }
 
@@ -362,13 +370,17 @@ describe("Agent — run() integration", () => {
     };
     const agent = new Agent(cfg);
     const stream = agent.run("test", {
-      onToken: (t) => { tokens.push(t); },
+      onToken: (t) => {
+        tokens.push(t);
+      },
       onToolCall: () => {},
       onToolResult: () => {},
       onUsage: () => {},
       onThinking: () => {},
     } as AgentCallbacks);
-    for await (const _ of stream) { /* drain */ }
+    for await (const _ of stream) {
+      /* drain */
+    }
     expect(tokens).toEqual(["A", "B", "C"]);
   });
 
@@ -397,10 +409,19 @@ describe("Agent — run() integration", () => {
     });
     const cfg = makeConfig({ tools });
     let calls = 0;
-    (cfg.llm as unknown as { stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }> }).stream = async function* () {
+    (
+      cfg.llm as unknown as {
+        stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }>;
+      }
+    ).stream = async function* () {
       calls++;
       if (calls === 1) {
-        yield { delta: "", toolCalls: [{ id: "tc_1", name: "fake", arguments: JSON.stringify({ apiKey: "sk-secret", content: "x".repeat(250) }) }] };
+        yield {
+          delta: "",
+          toolCalls: [
+            { id: "tc_1", name: "fake", arguments: JSON.stringify({ apiKey: "sk-secret", content: "x".repeat(250) }) },
+          ],
+        };
         return;
       }
       yield { delta: "done" };
@@ -428,7 +449,11 @@ describe("Agent — run() integration", () => {
     });
     const cfg = makeConfig({ tools });
     let calls = 0;
-    (cfg.llm as unknown as { stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }> }).stream = async function* () {
+    (
+      cfg.llm as unknown as {
+        stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }>;
+      }
+    ).stream = async function* () {
       calls++;
       if (calls <= 2) {
         yield { delta: "", toolCalls: [{ id: `tc_${calls}`, name: "fake", arguments: JSON.stringify({ q: "same" }) }] };

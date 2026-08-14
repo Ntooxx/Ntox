@@ -6,6 +6,7 @@ ntox — cognitive CLI agent
 Usage:
   ntox              Start the REPL
   ntox gateway      Start multi-channel gateway (Telegram, Discord, WhatsApp, Web)
+  ntox gateway web  Start the local web chat only
   ntox setup        Interactive setup wizard
   ntox doctor       Check config, provider, browser, sandbox, and workspace health
   ntox --help       Show this help
@@ -22,6 +23,7 @@ Examples:
   ntox doctor                   # Diagnose setup problems
   ntox gateway                  # Run as a service
   ntox gateway --channel telegram  # Run Telegram bot only
+  ntox gateway web              # Run the browser chat only
 `;
 
 async function main(): Promise<void> {
@@ -39,7 +41,8 @@ async function main(): Promise<void> {
   }
   if (arg === "gateway") {
     const { runGateway } = await import("./gateway/index.js");
-    await runGateway();
+    const channelArg = process.argv[3] === "--channel" ? process.argv[4] : process.argv[3];
+    await runGateway(channelArg);
   } else if (arg === "setup") {
     const { default: runSetup } = await import("./setup.js");
     await runSetup();

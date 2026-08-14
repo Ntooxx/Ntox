@@ -52,7 +52,10 @@ export interface StreamResult {
   totalOutputTokens: number;
   error: Error | null;
   cancelled: boolean;
+  timedOut: boolean;
 }
+
+const TURN_TIMEOUT_MS = 10 * 60 * 1000;
 
 export async function runAgentStream(
   agent: Agent,
@@ -65,6 +68,18 @@ export async function runAgentStream(
   let outputTokenCount = 0;
   let streamError: Error | null = null;
   let cancelled = false;
+  let timedOut = false;
+
+  const controller = new AbortController();
+  const watchdog = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new Error("turn timeout"));
+  }, TURN_TIMEOUT_MS);
+  const onOuterAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener("abort", onOuterAbort, { once: true });
+  }
 
   const tokenFilter = new TokenFilter();
   const agentCallbacks: AgentCallbacks = {
@@ -100,12 +115,18 @@ export async function runAgentStream(
   };
 
   try {
-    const stream = agent.run(input, agentCallbacks, { signal });
+    const stream = agent.run(input, agentCallbacks, { signal: controller.signal });
     for await (const _ of stream) { void _; }
   } catch (err) {
     streamError = err instanceof Error ? err : new Error(String(err));
-    cancelled = signal?.aborted || streamError.message.includes("cancelled");
+    cancelled = (signal?.aborted || streamError.message.includes("cancelled")) && !timedOut;
+    if (!timedOut && streamError.message.includes("turn timeout")) {
+      timedOut = true;
+    }
+  } finally {
+    clearTimeout(watchdog);
+    if (signal) signal.removeEventListener("abort", onOuterAbort);
   }
 
-  return { outputTokenCount, totalInputTokens, totalOutputTokens, error: streamError, cancelled };
+  return { outputTokenCount, totalInputTokens, totalOutputTokens, error: streamError, cancelled, timedOut };
 }

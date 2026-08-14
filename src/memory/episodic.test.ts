@@ -102,6 +102,37 @@ describe("MemoryStore", () => {
     expect(store.getDurableMemory(memory.id)?.history.length).toBe(2);
   });
 
+  it("rewrites durable memory when a user correction names the old answer", () => {
+    const store = new MemoryStore();
+    const memory = store.addDurableMemory("fact", "harbor=blue-ember", "test", 0.8);
+
+    const corrected = store.applyCorrectionToDurableMemories({
+      topicKey: "harbor",
+      wrongAnswer: "harbor=blue-ember",
+      correction: "harbor=navy-ember",
+    });
+
+    const stored = store.getDurableMemory(memory.id);
+    expect(corrected).toHaveLength(1);
+    expect(stored?.text).toBe("harbor=navy-ember");
+    expect(stored?.confidence).toBeGreaterThanOrEqual(0.95);
+    expect(stored?.history[0].text).toBe("harbor=blue-ember");
+  });
+
+  it("demotes topic-matched durable memories when a correction may supersede them", () => {
+    const store = new MemoryStore();
+    const memory = store.addDurableMemory("fact", "The harbor ledger uses the old deployment value", "test", 0.9);
+
+    store.applyCorrectionToDurableMemories({
+      topicKey: "harbor",
+      correction: "harbor=navy-ember",
+    });
+
+    const stored = store.getDurableMemory(memory.id);
+    expect(stored?.confidence).toBeLessThan(0.4);
+    expect(stored?.contradictionCount).toBe(1);
+  });
+
   it("filters by threshold", () => {
     const store = new MemoryStore();
     store.addEpisode("s1", "random text", "ok", makeEmbedding(1));

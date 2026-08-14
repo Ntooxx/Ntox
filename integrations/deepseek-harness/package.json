@@ -22,7 +22,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "proof": "node scripts/run-proof.mjs",
-    "eval:paired": "node scripts/run-paired-eval.mjs"
+    "eval:paired": "node scripts/run-paired-eval.mjs",
+    "eval:ablation": "node scripts/run-ablation-eval.mjs",
+    "eval:ablation-judge": "node scripts/run-ablation-judge.mjs"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",

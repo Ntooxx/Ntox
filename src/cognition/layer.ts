@@ -95,6 +95,7 @@ export interface CognitiveLayerOptions {
   theoryEnabled?: boolean;
   mistakesEnabled?: boolean;
   strategyEnabled?: boolean;
+  storeEnabled?: boolean;
   memoryRetrievalCount?: number;
   maxToolOutcomesPerTurn?: number;
   embed?: CognitiveEmbedder;
@@ -150,6 +151,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
       theoryEnabled: options.theoryEnabled ?? true,
       mistakesEnabled: options.mistakesEnabled ?? true,
       strategyEnabled: options.strategyEnabled ?? true,
+      storeEnabled: options.storeEnabled ?? true,
       memoryRetrievalCount: Math.max(1, options.memoryRetrievalCount ?? 5),
       maxToolOutcomesPerTurn: Math.max(1, options.maxToolOutcomesPerTurn ?? 20),
     };
@@ -188,7 +190,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     }
 
     let correctionIncluded = false;
-    if (this.options.mistakesEnabled) {
+    if (this.options.mistakesEnabled && this.options.storeEnabled) {
       try {
         const context = this.mistakes.buildMistakesContext(input.userMessage);
         if (context.trim()) {
@@ -209,7 +211,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     }
 
     let memoryIncluded = false;
-    if (this.options.memoryEnabled) {
+    if (this.options.memoryEnabled && this.options.storeEnabled) {
       try {
         const context = this.memory.buildMemoryContext(embedding, this.options.memoryRetrievalCount);
         if (context.trim()) {
@@ -222,7 +224,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     }
 
     let theoryIncluded = false;
-    if (this.options.theoryEnabled) {
+    if (this.options.theoryEnabled && this.options.storeEnabled) {
       try {
         const context = this.theoryMemory.buildTheoryContext(input.userMessage);
         if (context.trim()) {
@@ -282,7 +284,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     let compiledPatterns: { name: string; abstract: boolean }[] = [];
     let review = { ...EMPTY_REVIEW, gaps: [] as string[] };
 
-    if (this.options.memoryEnabled) {
+    if (this.options.memoryEnabled && this.options.storeEnabled) {
       try {
         episode = this.memory.addEpisode(turn.sessionId, userMessage, turn.assistantResponse, embedding ?? []);
         memoryId = episode.id;
@@ -291,7 +293,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
       }
     }
 
-    if (this.options.theoryEnabled) {
+    if (this.options.theoryEnabled && this.options.storeEnabled) {
       try {
         const learningEpisode = episode ?? this.createEpisode(turn, userMessage, embedding);
         this.theoryMemory.processEpisode(learningEpisode);
@@ -301,13 +303,15 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
       }
     }
 
-    if (this.options.cognitionEnabled) {
+    if (this.options.cognitionEnabled && this.options.storeEnabled) {
       try {
         const result = this.kernel.process(userMessage, turn.assistantResponse);
         compiledPatterns = result.compiledPatterns;
       } catch (error) {
         errors.push(errorMessage("cognition", error));
       }
+    }
+    if (this.options.cognitionEnabled) {
       try {
         review = this.kernel.review(userMessage, turn.assistantResponse);
       } catch (error) {
@@ -315,7 +319,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
       }
     }
 
-    if (this.options.mistakesEnabled && turn.correction) {
+    if (this.options.mistakesEnabled && this.options.storeEnabled && turn.correction) {
       try {
         const mistake = this.mistakes.add(
           turn.correction.topicKey ?? userMessage.slice(0, 80),
@@ -324,6 +328,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
           turn.correction.correction,
           "user-correction",
         );
+        this.memory.applyCorrectionToDurableMemories(turn.correction);
         mistakeId = mistake.id;
       } catch (error) {
         errors.push(errorMessage("mistakes", error));
@@ -356,7 +361,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     provided: number[] | null | undefined,
     errors: string[],
   ): Promise<number[] | null> {
-    if (!this.options.memoryEnabled && !this.options.theoryEnabled) return null;
+    if (!this.options.storeEnabled || (!this.options.memoryEnabled && !this.options.theoryEnabled)) return null;
     if (provided !== undefined) return provided;
     try {
       return await this.embed(text);
@@ -381,9 +386,29 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
   private renderToolRecovery(failures: CognitiveToolResult[]): string {
     const lines = failures.map((failure) => {
       const detail = failure.error ? `: ${failure.error.slice(0, 240)}` : "";
-      return `- ${failure.toolName} failed${detail}`;
+      return `- ${failure.toolName} failed${detail}\n  Next step: ${this.nextToolRecoveryStep(failure)}`;
     });
-    return `## Tool Recovery Guidance\n${lines.join("\n")}\nUse a viable fallback or verify the failing input before retrying. Do not repeat the same failing call unchanged.`;
+    return `## Tool Recovery Guidance\n${lines.join("\n")}`;
+  }
+
+  private nextToolRecoveryStep(failure: CognitiveToolResult): string {
+    const error = `${failure.error ?? ""} ${Object.values(failure.metadata ?? {}).join(" ")}`.toLowerCase();
+    if (/enoent|no such file|cannot find path|not found/.test(error)) {
+      return "Verify the path or discover the file before retrying.";
+    }
+    if (/permission|access denied|eperm|eacces/.test(error)) {
+      return "Check permissions or choose an allowed location before retrying.";
+    }
+    if (/timeout|timed out|aborted/.test(error)) {
+      return "Retry with a narrower command or inspect partial output first.";
+    }
+    if (/parsererror|commandnotfound|not recognized|syntax/.test(error)) {
+      return "Correct the command syntax for this shell before retrying.";
+    }
+    if (/test|assert|expect|failed/.test(error)) {
+      return "Inspect the failing assertion or logs, then change the smallest relevant code path.";
+    }
+    return "Change inputs or use a fallback; do not repeat the same call unchanged.";
   }
 }
 

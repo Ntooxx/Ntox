@@ -17,6 +17,7 @@ export interface Config {
   theoryEnabled?: boolean;
   mistakesEnabled?: boolean;
   strategyEnabled?: boolean;
+  storeEnabled?: boolean;
   memoryRetrievalCount?: number;
   maxToolOutcomesPerTurn?: number;
 }
@@ -27,6 +28,7 @@ export const Config: z<Config> = z.object({
   theoryEnabled: z.boolean().default(true),
   mistakesEnabled: z.boolean().default(true),
   strategyEnabled: z.boolean().default(true),
+  storeEnabled: z.boolean().default(true),
   memoryRetrievalCount: z.number().step(1).min(1).default(5),
   maxToolOutcomesPerTurn: z.number().step(1).min(1).default(20),
 });
@@ -88,6 +90,7 @@ function layerOptions(config: Config): CognitiveLayerOptions {
     theoryEnabled: config.theoryEnabled,
     mistakesEnabled: config.mistakesEnabled,
     strategyEnabled: config.strategyEnabled,
+    storeEnabled: config.storeEnabled,
     memoryRetrievalCount: config.memoryRetrievalCount,
     maxToolOutcomesPerTurn: config.maxToolOutcomesPerTurn,
   };
