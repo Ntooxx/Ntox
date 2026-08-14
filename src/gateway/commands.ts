@@ -2,6 +2,10 @@ import type { NtoxAliveBridge } from "../alive/ntox.js";
 
 type AliveSnapshot = ReturnType<NtoxAliveBridge["inspect"]>;
 
+interface GatewayTranscript {
+  addMessage(message: { role: "user" | "assistant"; content: string }): void;
+}
+
 function compact(value: unknown, max = 80): string {
   return String(value ?? "")
     .replace(/\s+/g, " ")
@@ -61,4 +65,9 @@ export function renderAliveStatus(snapshot: AliveSnapshot): string {
   }
 
   return lines.join("\n");
+}
+
+export function recordDirectGatewayResponse(agent: GatewayTranscript, userText: string, response: string): void {
+  agent.addMessage({ role: "user", content: userText });
+  agent.addMessage({ role: "assistant", content: response });
 }

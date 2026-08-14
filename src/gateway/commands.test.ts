@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAliveQuery, renderAliveStatus } from "./commands.js";
+import { isAliveQuery, recordDirectGatewayResponse, renderAliveStatus } from "./commands.js";
 
 describe("gateway commands", () => {
   it("detects explicit and natural Alive status requests", () => {
@@ -30,5 +30,16 @@ describe("gateway commands", () => {
     expect(response).toContain("Pending wake actions");
     expect(response).toContain("file_changed");
     expect(response).toContain("src/core/agent.ts");
+  });
+
+  it("records direct command replies into the conversation transcript", () => {
+    const messages: { role: "user" | "assistant"; content: string }[] = [];
+
+    recordDirectGatewayResponse({ addMessage: (message) => messages.push(message) }, "/alive", "NTOX Alive\n\nNo events.");
+
+    expect(messages).toEqual([
+      { role: "user", content: "/alive" },
+      { role: "assistant", content: "NTOX Alive\n\nNo events." },
+    ]);
   });
 });

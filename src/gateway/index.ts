@@ -7,7 +7,7 @@ import { createTelegramChannel } from "./telegram.js";
 import { createDiscordChannel } from "./discord.js";
 import { createWebChannel } from "./web.js";
 import { createWhatsAppChannel } from "./whatsapp.js";
-import { isAliveQuery, renderAliveStatus } from "./commands.js";
+import { isAliveQuery, recordDirectGatewayResponse, renderAliveStatus } from "./commands.js";
 import type { GatewayChannel } from "./types.js";
 
 const config = loadConfig();
@@ -103,11 +103,18 @@ export async function runGateway(channel?: string): Promise<void> {
         chatId,
         createAgentConfig({ ...shared, ...sessionInfra }, config, `${ctx}_${chatId}`, { skipReflection: true })
       );
+      const direct = (response: string, record = true): string => {
+        if (record) {
+          recordDirectGatewayResponse(agent, text, response);
+          sessions.touch(chatId);
+        }
+        sessions.unlock(chatId);
+        return response;
+      };
 
       if (text === "/new" || text === "/reset") {
         agent.resetConversation();
-        sessions.unlock(chatId);
-        return "Fresh start. Go ahead.";
+        return direct("Fresh start. Go ahead.", false);
       }
       if (text === "/help") {
         sessions.unlock(chatId);
@@ -115,14 +122,12 @@ export async function runGateway(channel?: string): Promise<void> {
       }
 
       if (isAliveQuery(text)) {
-        sessions.unlock(chatId);
-        return renderAliveStatus(shared.alive.inspect(12));
+        return direct(renderAliveStatus(shared.alive.inspect(12)));
       }
 
       const cronResponse = handleCronCommand(text, ctx, chatId);
       if (cronResponse) {
-        sessions.unlock(chatId);
-        return cronResponse;
+        return direct(cronResponse);
       }
 
       sessions.touch(chatId);
