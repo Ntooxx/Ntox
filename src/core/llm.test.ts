@@ -220,3 +220,54 @@ describe("formatCost", () => {
     expect(formatCost(1.5)).toBe("$1.500");
   });
 });
+
+describe("LLMClient.embed", () => {
+  it("returns embeddings from the endpoint", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const client = new LLMClient("key", "openrouter/model", "openrouter/text-embedding-3-small", 1024, 0.7);
+
+    const result = await client.embed("hello world");
+
+    expect(result).toEqual([0.1, 0.2, 0.3]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches embeddings so repeat queries skip the network", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ data: [{ embedding: [0.5, 0.6] }] }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const client = new LLMClient("key", "openrouter/model", "openrouter/text-embedding-3-small", 1024, 0.7);
+
+    await client.embed("repeat me");
+    const second = await client.embed("repeat me");
+
+    expect(second).toEqual([0.5, 0.6]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns null instead of blocking when the endpoint exceeds the budget", async () => {
+    const hang = (_url: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    vi.stubGlobal("fetch", vi.fn(hang));
+    const client = new LLMClient("key", "openrouter/model", "openrouter/text-embedding-3-small", 1024, 0.7);
+
+    const started = Date.now();
+    const result = await client.embed("slow endpoint");
+
+    expect(result).toBeNull();
+    expect(Date.now() - started).toBeLessThan(2500);
+    vi.unstubAllGlobals();
+  });
+});

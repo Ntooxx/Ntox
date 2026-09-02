@@ -151,6 +151,9 @@ function getProviderConfig(provider: string): ProviderConfig | undefined {
 
 const FETCH_TIMEOUT = 120000;
 const EMBED_TIMEOUT = 10000;
+const EMBED_BUDGET_MS = 1200;
+const EMBED_BUDGET_LOCAL_MS = 3000;
+const MIN_FALLBACK_BUDGET_MS = 300;
 const STREAM_STALL_TIMEOUT_MS = 90000;
 
 function resolveProvider(configuredProvider: string, modelId: string): string {
@@ -674,36 +677,49 @@ export class LLMClient {
     return getProviderConfig(provider) || PROVIDERS.openrouter;
   }
 
-  async embed(text: string): Promise<number[]> {
+  async embed(text: string): Promise<number[] | null> {
     const cached = this.embedCache.get(text);
     if (cached) return cached;
 
     const provider = this.getProvider();
     const info = this.getProviderInfo();
+    const isLocal = !!info.embedUrl?.includes("localhost") || provider === "ollama";
+    const startedAt = Date.now();
+    const budget = isLocal ? EMBED_BUDGET_LOCAL_MS : EMBED_BUDGET_MS;
+    const remaining = () => Math.max(0, budget - (Date.now() - startedAt));
 
-    const primary = await this.tryEmbed(provider, info, text, this.embeddingModelId);
+    const primary = await this.tryEmbed(provider, info, text, this.embeddingModelId, remaining());
     if (primary) {
       this.embedCache.set(text, primary);
       return primary;
     }
 
-    if (this.embeddingModelId !== "openai/text-embedding-ada-002" && this.apiKey) {
+    if (
+      this.embeddingModelId !== "openai/text-embedding-ada-002" &&
+      this.apiKey &&
+      remaining() >= MIN_FALLBACK_BUDGET_MS
+    ) {
       console.error(`[embed] primary model failed, trying fallback: openai/text-embedding-ada-002`);
-      const fallback = await this.tryEmbed(provider, info, text, "openai/text-embedding-ada-002");
+      const fallback = await this.tryEmbed(provider, info, text, "openai/text-embedding-ada-002", remaining());
       if (fallback) {
         this.embedCache.set(text, fallback);
         return fallback;
       }
     }
 
-    console.error("[embed] API embedding unavailable, using local fallback");
-    const local = localEmbed(text);
-    if (this.embedCache.size > 100) {
-      const first = this.embedCache.keys().next().value;
-      if (first) this.embedCache.delete(first);
+    if (remaining() >= MIN_FALLBACK_BUDGET_MS) {
+      console.error("[embed] API embedding unavailable, using local fallback");
+      const local = localEmbed(text);
+      if (this.embedCache.size > 100) {
+        const first = this.embedCache.keys().next().value;
+        if (first) this.embedCache.delete(first);
+      }
+      this.embedCache.set(text, local);
+      return local;
     }
-    this.embedCache.set(text, local);
-    return local;
+
+    console.error(`[embed] embedding budget of ${budget}ms exceeded, skipping memory embedding for this query`);
+    return null;
   }
 
   private async tryEmbed(
@@ -711,12 +727,14 @@ export class LLMClient {
     info: ProviderConfig,
     text: string,
     modelId: string,
+    maxMs: number,
   ): Promise<number[] | null> {
+    if (maxMs <= 0) return null;
     const embedModel = stripPrefix(modelId, provider);
 
     if (provider === "ollama") {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), EMBED_TIMEOUT);
+      const timeout = setTimeout(() => controller.abort(), Math.min(EMBED_TIMEOUT, maxMs));
       try {
         const res = await fetch("http://localhost:11434/api/embeddings", {
           method: "POST",
@@ -741,7 +759,7 @@ export class LLMClient {
       const embedUrl = info.embedUrl;
       if (embedUrl) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), EMBED_TIMEOUT);
+        const timeout = setTimeout(() => controller.abort(), Math.min(EMBED_TIMEOUT, maxMs));
         try {
           const res = await fetch(embedUrl, {
             method: "POST",
@@ -765,7 +783,7 @@ export class LLMClient {
 
     if (this.apiKey) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), EMBED_TIMEOUT);
+      const timeout = setTimeout(() => controller.abort(), Math.min(EMBED_TIMEOUT, maxMs));
       try {
         const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
           method: "POST",
