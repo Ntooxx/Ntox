@@ -3,8 +3,13 @@ import type { OpenAITool } from "../tools/registry.js";
 import { localEmbed } from "./local-embed.js";
 import { encode } from "gpt-tokenizer";
 import {
-  ApiError, StreamError, NetworkError, TimeoutError,
-  EmptyResponseError, ConfigError, isRetryableError,
+  ApiError,
+  StreamError,
+  NetworkError,
+  TimeoutError,
+  EmptyResponseError,
+  ConfigError,
+  isRetryableError,
 } from "./errors.js";
 import { StreamLineParser } from "./stream-parser.js";
 
@@ -146,6 +151,10 @@ function getProviderConfig(provider: string): ProviderConfig | undefined {
 
 const FETCH_TIMEOUT = 120000;
 const EMBED_TIMEOUT = 10000;
+const EMBED_BUDGET_MS = 1200;
+const EMBED_BUDGET_LOCAL_MS = 3000;
+const MIN_FALLBACK_BUDGET_MS = 300;
+const STREAM_STALL_TIMEOUT_MS = 90000;
 
 function resolveProvider(configuredProvider: string, modelId: string): string {
   // Model prefix overrides configured provider for local providers
@@ -160,16 +169,61 @@ function resolveProvider(configuredProvider: string, modelId: string): string {
   return "openrouter";
 }
 
+type OpenAIMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_call_id?: string;
+  name?: string;
+  tool_calls?: {
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }[];
+};
+
+export function toOpenAIMessages(messages: Message[], system?: string): OpenAIMessage[] {
+  const out: OpenAIMessage[] = [];
+  if (system) out.push({ role: "system", content: system });
+  for (const m of messages) {
+    if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
+      out.push({
+        role: "assistant",
+        content: m.content === "(tool call)" ? null : m.content || null,
+        tool_calls: m.tool_calls.map((tc, index) => ({
+          id: tc.id || `call_${index}`,
+          type: "function",
+          function: { name: tc.name, arguments: tc.arguments || "{}" },
+        })),
+      });
+      continue;
+    }
+    if (m.role === "tool") {
+      out.push({
+        role: "tool",
+        content: m.content,
+        tool_call_id: m.tool_call_id || "",
+      });
+      continue;
+    }
+    out.push({ role: m.role, content: m.content });
+  }
+  return out;
+}
+
 async function* streamOpenAICompatible(
   baseUrl: string,
   messages: Message[],
   system: string | undefined,
   body: Record<string, unknown>,
   headers: Record<string, string>,
-  client: LLMClient
+  client: LLMClient,
+  signal?: AbortSignal,
 ): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+  const abort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abort();
+  signal?.addEventListener("abort", abort, { once: true });
   let res: Response;
   try {
     res = await fetch(`${baseUrl}/chat/completions`, {
@@ -180,13 +234,19 @@ async function* streamOpenAICompatible(
     });
   } catch (e) {
     clearTimeout(timeout);
+    signal?.removeEventListener("abort", abort);
     const msg = e instanceof Error ? e.message : String(e);
+    if (signal?.aborted) throw new Error("cancelled", { cause: e });
     if (msg.includes("abort") || msg.includes("AbortError")) {
-      throw new TimeoutError(`Request timed out after ${FETCH_TIMEOUT / 1000}s — the model may be overloaded or unavailable`);
+      throw new TimeoutError(
+        `Request timed out after ${FETCH_TIMEOUT / 1000}s — the model may be overloaded or unavailable`,
+        { cause: e },
+      );
     }
     throw new NetworkError(`Network error reaching ${baseUrl}: ${msg}`);
   }
   clearTimeout(timeout);
+  signal?.removeEventListener("abort", abort);
 
   if (!res.ok) {
     let hint = "";
@@ -208,7 +268,7 @@ async function* streamOpenAICompatible(
   let yieldedUsage = false;
   const toolCallAccumulator = new Map<number, { id: string; name: string; args: string }>();
 
-  for await (const line of StreamLineParser.readLines(reader)) {
+  for await (const line of StreamLineParser.readLines(reader, { idleTimeoutMs: STREAM_STALL_TIMEOUT_MS, signal })) {
     if (!line.startsWith("data: ")) continue;
     const data = line.slice(6);
     if (data === "[DONE]") {
@@ -223,7 +283,12 @@ async function* streamOpenAICompatible(
     try {
       const parsed = JSON.parse(data) as {
         error?: { message?: string; code?: string | number };
-        choices?: { delta: { content?: string; tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
+        choices?: {
+          delta: {
+            content?: string;
+            tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[];
+          };
+        }[];
         usage?: { prompt_tokens: number; completion_tokens: number };
       };
 
@@ -271,7 +336,7 @@ async function* streamOpenAICompatible(
   if (!yieldedAnyContent && !yieldedUsage) {
     throw new EmptyResponseError(
       "Model returned no content — the API may not recognize this model. " +
-      `Verify the model is available on this provider (model: "${body.model}").`
+        `Verify the model is available on this provider (model: "${body.model}").`,
     );
   }
 }
@@ -281,7 +346,8 @@ async function* streamAnthropic(
   system: string | undefined,
   body: Record<string, unknown>,
   headers: Record<string, string>,
-  client: LLMClient
+  client: LLMClient,
+  signal?: AbortSignal,
 ): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
   const anthropicBody: Record<string, unknown> = {
     model: body.model,
@@ -318,6 +384,9 @@ async function* streamAnthropic(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+  const abort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abort();
+  signal?.addEventListener("abort", abort, { once: true });
   let res: Response;
   try {
     res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -328,13 +397,16 @@ async function* streamAnthropic(
     });
   } catch (e) {
     clearTimeout(timeout);
+    signal?.removeEventListener("abort", abort);
     const msg = e instanceof Error ? e.message : String(e);
+    if (signal?.aborted) throw new Error("cancelled", { cause: e });
     if (msg.includes("abort") || msg.includes("AbortError")) {
-      throw new TimeoutError(`Anthropic request timed out after ${FETCH_TIMEOUT / 1000}s`);
+      throw new TimeoutError(`Anthropic request timed out after ${FETCH_TIMEOUT / 1000}s`, { cause: e });
     }
     throw new NetworkError(`Network error reaching Anthropic: ${msg}`);
   }
   clearTimeout(timeout);
+  signal?.removeEventListener("abort", abort);
 
   if (!res.ok) {
     let hint = "";
@@ -355,7 +427,7 @@ async function* streamAnthropic(
   let yieldedAnyContent = false;
   const toolUseAcc = new Map<string, { id: string; name: string; args: string }>();
 
-  for await (const line of StreamLineParser.readLines(reader)) {
+  for await (const line of StreamLineParser.readLines(reader, { idleTimeoutMs: STREAM_STALL_TIMEOUT_MS, signal })) {
     if (!line.startsWith("data: ")) continue;
     const data = line.slice(6);
     try {
@@ -368,7 +440,10 @@ async function* streamAnthropic(
       };
 
       if (parsed.type === "error" && parsed.error) {
-        throw new StreamError(`Anthropic stream error [${parsed.error.type || "unknown"}]: ${parsed.error.message || "stream error"}`, parsed.error.type);
+        throw new StreamError(
+          `Anthropic stream error [${parsed.error.type || "unknown"}]: ${parsed.error.message || "stream error"}`,
+          parsed.error.type,
+        );
       }
 
       if (parsed.type === "content_block_start" && parsed.content_block?.type === "tool_use") {
@@ -414,7 +489,7 @@ async function* streamAnthropic(
 
   if (!yieldedAnyContent && toolUseAcc.size === 0) {
     throw new EmptyResponseError(
-      `Anthropic returned no content — model "${body.model}" may not be available or the request was rejected silently.`
+      `Anthropic returned no content — model "${body.model}" may not be available or the request was rejected silently.`,
     );
   }
 }
@@ -423,10 +498,14 @@ async function* streamOllama(
   messages: Message[],
   system: string | undefined,
   body: Record<string, unknown>,
-  _client: LLMClient
+  _client: LLMClient,
+  signal?: AbortSignal,
 ): AsyncGenerator<{ delta: string; usage?: CostUsage }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+  const abort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abort();
+  signal?.addEventListener("abort", abort, { once: true });
   let res: Response;
   try {
     res = await fetch("http://localhost:11434/api/chat", {
@@ -442,13 +521,18 @@ async function* streamOllama(
     });
   } catch (e) {
     clearTimeout(timeout);
+    signal?.removeEventListener("abort", abort);
     const msg = e instanceof Error ? e.message : String(e);
+    if (signal?.aborted) throw new Error("cancelled", { cause: e });
     if (msg.includes("abort") || msg.includes("AbortError")) {
-      throw new TimeoutError(`Ollama request timed out after ${FETCH_TIMEOUT / 1000}s — is the model loaded?`);
+      throw new TimeoutError(`Ollama request timed out after ${FETCH_TIMEOUT / 1000}s — is the model loaded?`, {
+        cause: e,
+      });
     }
     throw new NetworkError(`Ollama connection failed — is Ollama running? (${msg})`);
   }
   clearTimeout(timeout);
+  signal?.removeEventListener("abort", abort);
 
   if (!res.ok) {
     const errBody = await res.text();
@@ -460,7 +544,7 @@ async function* streamOllama(
 
   let yieldedAnyContent = false;
 
-  for await (const line of StreamLineParser.readLines(reader)) {
+  for await (const line of StreamLineParser.readLines(reader, { idleTimeoutMs: STREAM_STALL_TIMEOUT_MS, signal })) {
     try {
       const parsed = JSON.parse(line) as {
         message?: { content: string };
@@ -482,7 +566,7 @@ async function* streamOllama(
 
   if (!yieldedAnyContent) {
     throw new EmptyResponseError(
-      `Ollama returned no content — model "${body.model}" may not be pulled. Run: ollama pull ${body.model}`
+      `Ollama returned no content — model "${body.model}" may not be pulled. Run: ollama pull ${body.model}`,
     );
   }
 }
@@ -559,7 +643,7 @@ export class LLMClient {
     maxTokens: number,
     temperature: number,
     apiBaseUrl: string = "",
-    configuredProvider: string = ""
+    configuredProvider: string = "",
   ) {
     this.apiKey = apiKey;
     this.modelId = modelId;
@@ -570,10 +654,19 @@ export class LLMClient {
     this.configuredProvider = configuredProvider;
   }
 
-  updateModel(modelId: string): void { this.modelId = modelId; }
-  updateProvider(provider: string): void { this.configuredProvider = provider; }
-  updateEmbeddingModel(modelId: string): void { this.embeddingModelId = modelId; }
-  updateParams(maxTokens: number, temperature: number): void { this.maxTokens = maxTokens; this.temperature = temperature; }
+  updateModel(modelId: string): void {
+    this.modelId = modelId;
+  }
+  updateProvider(provider: string): void {
+    this.configuredProvider = provider;
+  }
+  updateEmbeddingModel(modelId: string): void {
+    this.embeddingModelId = modelId;
+  }
+  updateParams(maxTokens: number, temperature: number): void {
+    this.maxTokens = maxTokens;
+    this.temperature = temperature;
+  }
 
   getProvider(): string {
     return resolveProvider(this.configuredProvider, this.modelId);
@@ -584,38 +677,64 @@ export class LLMClient {
     return getProviderConfig(provider) || PROVIDERS.openrouter;
   }
 
-  async embed(text: string): Promise<number[]> {
+  async embed(text: string): Promise<number[] | null> {
     const cached = this.embedCache.get(text);
     if (cached) return cached;
 
     const provider = this.getProvider();
     const info = this.getProviderInfo();
+    const isLocal = !!info.embedUrl?.includes("localhost") || provider === "ollama";
+    const startedAt = Date.now();
+    const budget = isLocal ? EMBED_BUDGET_LOCAL_MS : EMBED_BUDGET_MS;
+    const remaining = () => Math.max(0, budget - (Date.now() - startedAt));
 
-    const primary = await this.tryEmbed(provider, info, text, this.embeddingModelId);
-    if (primary) { this.embedCache.set(text, primary); return primary; }
+    const primary = await this.tryEmbed(provider, info, text, this.embeddingModelId, remaining());
+    if (primary) {
+      this.embedCache.set(text, primary);
+      return primary;
+    }
 
-    if (this.embeddingModelId !== "openai/text-embedding-ada-002" && this.apiKey) {
+    if (
+      this.embeddingModelId !== "openai/text-embedding-ada-002" &&
+      this.apiKey &&
+      remaining() >= MIN_FALLBACK_BUDGET_MS
+    ) {
       console.error(`[embed] primary model failed, trying fallback: openai/text-embedding-ada-002`);
-      const fallback = await this.tryEmbed(provider, info, text, "openai/text-embedding-ada-002");
-      if (fallback) { this.embedCache.set(text, fallback); return fallback; }
+      const fallback = await this.tryEmbed(provider, info, text, "openai/text-embedding-ada-002", remaining());
+      if (fallback) {
+        this.embedCache.set(text, fallback);
+        return fallback;
+      }
     }
 
-    console.error("[embed] API embedding unavailable, using local fallback");
-    const local = localEmbed(text);
-    if (this.embedCache.size > 100) {
-      const first = this.embedCache.keys().next().value;
-      if (first) this.embedCache.delete(first);
+    if (remaining() >= MIN_FALLBACK_BUDGET_MS) {
+      console.error("[embed] API embedding unavailable, using local fallback");
+      const local = localEmbed(text);
+      if (this.embedCache.size > 100) {
+        const first = this.embedCache.keys().next().value;
+        if (first) this.embedCache.delete(first);
+      }
+      this.embedCache.set(text, local);
+      return local;
     }
-    this.embedCache.set(text, local);
-    return local;
+
+    console.error(`[embed] embedding budget of ${budget}ms exceeded, skipping memory embedding for this query`);
+    return null;
   }
 
-  private async tryEmbed(provider: string, info: ProviderConfig, text: string, modelId: string): Promise<number[] | null> {
+  private async tryEmbed(
+    provider: string,
+    info: ProviderConfig,
+    text: string,
+    modelId: string,
+    maxMs: number,
+  ): Promise<number[] | null> {
+    if (maxMs <= 0) return null;
     const embedModel = stripPrefix(modelId, provider);
 
     if (provider === "ollama") {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), EMBED_TIMEOUT);
+      const timeout = setTimeout(() => controller.abort(), Math.min(EMBED_TIMEOUT, maxMs));
       try {
         const res = await fetch("http://localhost:11434/api/embeddings", {
           method: "POST",
@@ -640,7 +759,7 @@ export class LLMClient {
       const embedUrl = info.embedUrl;
       if (embedUrl) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), EMBED_TIMEOUT);
+        const timeout = setTimeout(() => controller.abort(), Math.min(EMBED_TIMEOUT, maxMs));
         try {
           const res = await fetch(embedUrl, {
             method: "POST",
@@ -664,7 +783,7 @@ export class LLMClient {
 
     if (this.apiKey) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), EMBED_TIMEOUT);
+      const timeout = setTimeout(() => controller.abort(), Math.min(EMBED_TIMEOUT, maxMs));
       try {
         const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
           method: "POST",
@@ -695,10 +814,7 @@ export class LLMClient {
   }
 
   async fetchModels(): Promise<ModelInfo[]> {
-    const local = await detectLocalProviders();
-    const openRouterModels = await this.fetchOpenRouterModels();
-    return [...openRouterModels, ...local.ollamaModels, ...local.lmstudioModels]
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.fetchOpenRouterModels();
   }
 
   private async fetchOpenRouterModels(): Promise<ModelInfo[]> {
@@ -706,7 +822,7 @@ export class LLMClient {
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
     try {
       const res = await fetch("https://openrouter.ai/api/v1/models", {
-        headers: { Authorization: `Bearer ${this.apiKey}` },
+        headers: this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {},
         signal: controller.signal,
       });
       if (!res.ok) {
@@ -718,13 +834,19 @@ export class LLMClient {
         return [];
       }
       const body = (await res.json()) as { data: ModelInfo[] };
-      return body.data.map((m) => ({
-        ...m,
-        pricing: {
-          prompt: Number(m.pricing?.prompt ?? 0),
-          completion: Number(m.pricing?.completion ?? 0),
-        },
-      }));
+      return body.data
+        .filter((m) => Boolean(m.id))
+        .map((m) => ({
+          id: m.id,
+          name: m.name || m.id,
+          provider: "openrouter",
+          context_length: Number(m.context_length ?? 0),
+          pricing: {
+            prompt: Number(m.pricing?.prompt ?? 0),
+            completion: Number(m.pricing?.completion ?? 0),
+          },
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (!msg.includes("abort") && !msg.includes("AbortError")) {
@@ -736,14 +858,24 @@ export class LLMClient {
     }
   }
 
-  async *stream(messages: Message[], system?: string, tools?: OpenAITool[]): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
+  async *stream(
+    messages: Message[],
+    system?: string,
+    tools?: OpenAITool[],
+    signal?: AbortSignal,
+  ): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
     const provider = this.getProvider();
     const info = this.getProviderInfo();
     const rawModel = stripPrefix(this.modelId, provider);
 
     const body: Record<string, unknown> = {
       model: rawModel,
-      messages: system ? [{ role: "system", content: system }, ...messages] : messages,
+      messages:
+        info.format === "openai"
+          ? toOpenAIMessages(messages, system)
+          : system
+            ? [{ role: "system", content: system }, ...messages]
+            : messages,
       max_tokens: this.maxTokens,
       temperature: this.temperature,
       stream: true,
@@ -763,7 +895,8 @@ export class LLMClient {
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const inner = this.streamInner(provider, info, messages, system, body);
+        if (signal?.aborted) throw new Error("cancelled");
+        const inner = this.streamInner(provider, info, messages, system, body, signal);
         for await (const chunk of inner) {
           yieldedAny = true;
           yield chunk;
@@ -771,11 +904,22 @@ export class LLMClient {
         return;
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e));
+        if (signal?.aborted || /cancell/i.test(lastError.message)) throw new Error("cancelled", { cause: e });
         if (yieldedAny) throw lastError;
         if (attempt === MAX_RETRIES) break;
         if (isRetryableError(lastError)) {
           const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
-          await new Promise((r) => setTimeout(r, delay));
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(resolve, delay);
+            signal?.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer);
+                reject(new Error("cancelled"));
+              },
+              { once: true },
+            );
+          });
           continue;
         }
         break;
@@ -783,9 +927,7 @@ export class LLMClient {
     }
 
     // Enrich the final error with provider/model context
-    const enriched = new Error(
-      `[${info.name}/${rawModel}] ${lastError?.message || "Unknown error"}`
-    );
+    const enriched = new Error(`[${info.name}/${rawModel}] ${lastError?.message || "Unknown error"}`);
     throw enriched;
   }
 
@@ -794,22 +936,23 @@ export class LLMClient {
     info: ProviderConfig,
     messages: Message[],
     system: string | undefined,
-    body: Record<string, unknown>
+    body: Record<string, unknown>,
+    signal?: AbortSignal,
   ): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
     if (provider === "ollama") {
-      yield* streamOllama(messages, system, body, this);
+      yield* streamOllama(messages, system, body, this, signal);
       return;
     }
 
     if (info.format === "anthropic") {
-      yield* streamAnthropic(messages, system, body, info.headers(this.apiKey), this);
+      yield* streamAnthropic(messages, system, body, info.headers(this.apiKey), this, signal);
       return;
     }
 
     if (info.format === "openai") {
       const baseUrl = this.apiBaseUrl || info.chatUrl?.replace("/chat/completions", "") || "";
       if (!baseUrl) throw new ConfigError(`No API base URL configured for ${provider}`);
-      yield* streamOpenAICompatible(baseUrl, messages, system, body, info.headers(this.apiKey), this);
+      yield* streamOpenAICompatible(baseUrl, messages, system, body, info.headers(this.apiKey), this, signal);
       return;
     }
 

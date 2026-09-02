@@ -10,6 +10,7 @@ export const CORRECTION_PATTERNS = [
   /you([\u2019']re| are)\s+(wrong|incorrect|mistaken)/i,
   /i\s+think\s+you([\u2019']re| are)\s+(wrong|confused)/i,
   /not\s+(quite|exactly)\s+(right|correct)/i,
+  /^(?:please\s+)?(?:correct|update|replace)\b/i,
 ];
 
 export function isUserCorrection(message: string): boolean {
@@ -18,21 +19,18 @@ export function isUserCorrection(message: string): boolean {
 
 export function extractCorrection(
   userMessage: string,
-  _previousAssistantMessage: string
+  _previousAssistantMessage: string,
 ): { topicKey: string; correction: string } {
   const lower = userMessage.toLowerCase();
   const topicMatch = lower.match(/(?:about|regarding|re:|on)\s+["']?([^"'.!?]+)["']?/i);
   const topicKey = topicMatch ? topicMatch[1].trim() : userMessage.slice(0, 80);
 
-  // Try to extract the corrected statement
   const correctionSentences = userMessage
     .split(/[.!?]+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 10 && !CORRECTION_PATTERNS.some((p) => p.test(s)));
 
-  const correction = correctionSentences.length > 0
-    ? correctionSentences.join(". ")
-    : userMessage.slice(0, 200);
+  const correction = correctionSentences.length > 0 ? correctionSentences.join(". ") : userMessage.slice(0, 200);
 
   return { topicKey, correction };
 }
@@ -65,7 +63,7 @@ export class MistakeJournal {
     query: string,
     wrongAnswer: string,
     correction: string,
-    source: "user-correction" | "self-reflection"
+    source: "user-correction" | "self-reflection",
   ): MistakeEntry {
     this.load();
     const existing = this.mistakes.findIndex((m) => m.topicKey === topicKey);
@@ -102,15 +100,22 @@ export class MistakeJournal {
       let score = 0;
       const topic = m.topicKey.toLowerCase();
       const correction = m.correction.toLowerCase();
+      const queryText = m.query.toLowerCase();
+
+      if (topic && lower.includes(topic)) score += 8;
+      if (correction && lower.includes(correction)) score += 5;
 
       for (const word of queryWords) {
         if (topic.includes(word)) score += 3;
         if (correction.includes(word)) score += 2;
-        if (m.query.toLowerCase().includes(word)) score += 1;
+        if (queryText.includes(word)) score += 1;
       }
 
       if (score > 0) {
-        scored.push({ mistake: m, score });
+        const ageMs = Math.max(0, Date.now() - (m.timestamp || 0));
+        const recency = Math.max(0, 2 - ageMs / (30 * 24 * 60 * 60 * 1000));
+        const authority = m.source === "user-correction" ? 3 : 1;
+        scored.push({ mistake: m, score: score + recency + authority });
       }
     }
 
@@ -126,10 +131,10 @@ export class MistakeJournal {
     if (relevant.length === 0) return "";
 
     const lines = relevant.map(
-      (m) => `- Correction [${new Date(m.timestamp).toISOString().slice(0, 10)}]: ${m.topicKey} — ${m.correction}`
+      (m) => `- Correction [${new Date(m.timestamp).toISOString().slice(0, 10)}]: ${m.topicKey} — ${m.correction}`,
     );
 
-    return `\n\n## Previous Corrections to Remember\n${lines.join("\n")}`;
+    return `## Previous Corrections: Authoritative\nUse these corrections over conflicting older memories.\n${lines.join("\n")}`;
   }
 
   getAll(): MistakeEntry[] {

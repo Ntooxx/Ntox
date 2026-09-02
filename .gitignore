@@ -10,5 +10,6 @@ shell-audit.log
 coverage/
 .env
 .ntox/
+.external/
 !skills/
 Horizon.md

@@ -24,6 +24,7 @@ describe("validateConfig", () => {
     soundEnabled: false,
     soundVolume: 50,
     animationLevel: "minimal",
+    uiMode: "normal",
     telegramToken: "",
     telegramAllowedUsers: [],
     discordToken: "",
@@ -34,6 +35,21 @@ describe("validateConfig", () => {
     whatsappPort: 3001,
     dockerEnabled: false,
     webPort: 3000,
+    webHost: "127.0.0.1",
+    introEnabled: true,
+    verboseCallbacks: false,
+    defaultProfileId: "default",
+    profiles: [{
+      id: "default",
+      name: "Default Workspace",
+      workspaceRoot: process.cwd(),
+      readRoots: [process.cwd()],
+      writeRoots: [process.cwd()],
+      allowedTools: ["read", "write", "shell"],
+      shellPolicy: "approval-required",
+      networkPolicy: "browser-allowed",
+      autoCheckpoint: true,
+    }],
   };
 
   it("passes valid config", () => {
@@ -65,6 +81,14 @@ describe("validateConfig", () => {
     expect(validateConfig({ ...valid, soundVolume: -10 }).valid).toBe(false);
   });
 
+  it("rejects invalid UI mode", () => {
+    expect(validateConfig({ ...valid, uiMode: "loud" as NtoxConfig["uiMode"] }).valid).toBe(false);
+  });
+
+  it("rejects empty web host", () => {
+    expect(validateConfig({ ...valid, webHost: "" }).valid).toBe(false);
+  });
+
   it("returns error messages for invalid config", () => {
     const r = validateConfig({ ...valid, model: "", maxTokens: -5 });
     expect(r.valid).toBe(false);
@@ -92,6 +116,9 @@ describe("config", () => {
     expect(config.maxTokens).toBe(4096);
     expect(config.temperature).toBe(0.7);
     expect(config.memoryEnabled).toBe(true);
+    expect(config.uiMode).toBe("normal");
+    expect(config.defaultProfileId).toBe("default");
+    expect(config.profiles[0].workspaceRoot).toBeTruthy();
   });
 
   it("loads with cognitive kernel enabled by default", () => {

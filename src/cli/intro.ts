@@ -1,7 +1,3 @@
-import { exec } from "node:child_process";
-import { writeFileSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import * as readline from "node:readline";
 
 // ── Timing ────────────────────────────────────────────────
@@ -268,61 +264,7 @@ function renderFrame(phase: string, progress: number, layout: Layout, frameTime:
   return renderGrid(grid, globalBr);
 }
 
-// ── Sound ─────────────────────────────────────────────────
-function generateChimeWav(): Buffer {
-  const sr = 22050;
-  const dur = 0.7;
-  const n = Math.floor(sr * dur);
-  const dataSize = n * 2;
-  const buf = Buffer.alloc(44 + dataSize);
-
-  buf.write("RIFF", 0, "ascii");
-  buf.writeUInt32LE(36 + dataSize, 4);
-  buf.write("WAVE", 8, "ascii");
-  buf.write("fmt ", 12, "ascii");
-  buf.writeUInt32LE(16, 16);
-  buf.writeUInt16LE(1, 20);
-  buf.writeUInt16LE(1, 22);
-  buf.writeUInt32LE(sr, 24);
-  buf.writeUInt32LE(sr * 2, 28);
-  buf.writeUInt16LE(2, 32);
-  buf.writeUInt16LE(16, 34);
-  buf.write("data", 36, "ascii");
-  buf.writeUInt32LE(dataSize, 40);
-
-  for (let i = 0; i < n; i++) {
-    const t = i / sr;
-    const env = Math.exp(-t * 5) * (1 - Math.exp(-t * 120));
-    const s =
-      Math.sin(2 * Math.PI * 440 * t) * 0.18 +
-      Math.sin(2 * Math.PI * 554 * t) * 0.11 +
-      Math.sin(2 * Math.PI * 659 * t) * 0.07 +
-      Math.sin(2 * Math.PI * 880 * t) * 0.03;
-    const v = Math.floor(s * env * 32767);
-    buf.writeInt16LE(Math.max(-32768, Math.min(32767, v)), 44 + i * 2);
-  }
-  return buf;
-}
-
-function playChimeAsync(): void {
-  try {
-    const wav = generateChimeWav();
-    const tmpPath = join(tmpdir(), `ntox-chime-${Date.now()}.wav`);
-    writeFileSync(tmpPath, wav);
-
-    const cleanup = () => { try { unlinkSync(tmpPath); } catch { /* ok */ } };
-    const callback = () => cleanup();
-
-    if (process.platform === "win32") {
-      exec(`powershell -c "(New-Object Media.SoundPlayer '${tmpPath}').PlaySync()"`, callback);
-    } else if (process.platform === "darwin") {
-      exec(`afplay "${tmpPath}"`, callback);
-    } else {
-      exec(`aplay "${tmpPath}" 2>/dev/null || paplay "${tmpPath}" 2>/dev/null || true`, callback);
-    }
-  } catch { /* sound is optional */ }
-}
-
+// ── Sound ─────────────────────────────────────────────────`r`n
 // ── Main ──────────────────────────────────────────────────
 export async function playIntro(): Promise<void> {
   const cols = process.stdout.columns || 80;
@@ -348,7 +290,6 @@ export async function playIntro(): Promise<void> {
   }
 
   const startTime = Date.now();
-  let chimePlayed = false;
 
   try {
     await new Promise<void>((resolve) => {
@@ -367,10 +308,6 @@ export async function playIntro(): Promise<void> {
 
         const { phase, progress } = getPhase(elapsed);
 
-        if (phase === "contact" && !chimePlayed) {
-          chimePlayed = true;
-          playChimeAsync();
-        }
 
         try {
           const frame = renderFrame(phase, progress, layout, elapsed);

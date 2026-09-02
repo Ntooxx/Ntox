@@ -104,3 +104,15 @@ LLM Research + Reinforcement Learning + Evolution + Meta Learning + Information 
 
 ### For Complex Analysis
 First Principles + Systems Thinking + Complexity Science + Information Theory + Mathematical Thinking + Meta Cognition
+
+### Career (5 skills)
+| # | Skill | Purpose | Importance |
+|---|-------|---------|------------|
+| 01 | LinkedIn Profile Evaluation | Evaluate and optimize professional profiles | 9/10 |
+| 02 | Job Search & Application | Search job boards, evaluate matches, track pipeline | 10/10 |
+| 03 | Application Tracking | Dashboard, follow-ups, status management | 10/10 |
+| 04 | Interview Preparation | Technical + behavioral prep, company research | 9/10 |
+| 05 | Career Automation | Cron-driven daily scans, follow-ups, reminders | 9/10 |
+
+### For Career Management
+Job Search & Application + Application Tracking + Interview Preparation + LinkedIn Profile Evaluation + Career Automation

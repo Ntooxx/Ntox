@@ -7,6 +7,7 @@ import { createTelegramChannel } from "./telegram.js";
 import { createDiscordChannel } from "./discord.js";
 import { createWebChannel } from "./web.js";
 import { createWhatsAppChannel } from "./whatsapp.js";
+import { isAliveQuery, recordDirectGatewayResponse, renderAliveStatus } from "./commands.js";
 import type { GatewayChannel } from "./types.js";
 
 const config = loadConfig();
@@ -77,8 +78,15 @@ function handleCronCommand(text: string, ctx: string, chatId: string): string | 
 
 export async function runGateway(channel?: string): Promise<void> {
   const sessions = new SessionManager();
+  const channelsByName = new Map<string, GatewayChannel>();
   const makeHandler = (ctx: string) =>
-    async (chatId: string, text: string, username: string): Promise<string> => {
+    async (
+      chatId: string,
+      text: string,
+      username: string,
+      onToken?: (token: string) => void,
+      onEvent?: (event: Record<string, unknown>) => void,
+    ): Promise<string> => {
       const allowed = ctx === "telegram" ? config.telegramAllowedUsers
         : ctx === "discord" ? config.discordAllowedUsers
         : [];
@@ -95,26 +103,38 @@ export async function runGateway(channel?: string): Promise<void> {
         chatId,
         createAgentConfig({ ...shared, ...sessionInfra }, config, `${ctx}_${chatId}`, { skipReflection: true })
       );
+      const direct = (response: string, record = true): string => {
+        if (record) {
+          recordDirectGatewayResponse(agent, text, response);
+          sessions.touch(chatId);
+        }
+        sessions.unlock(chatId);
+        return response;
+      };
 
       if (text === "/new" || text === "/reset") {
         agent.resetConversation();
-        sessions.unlock(chatId);
-        return "Fresh start. Go ahead.";
+        return direct("Fresh start. Go ahead.", false);
       }
       if (text === "/help") {
         sessions.unlock(chatId);
         return `Ntox on ${ctx}.\n\nSend any message. I can read/write files, run commands, search the web, and code.\n\n/new — reset conversation\n/cron — scheduled automations\n/help — this message`;
       }
 
+      if (isAliveQuery(text)) {
+        return direct(renderAliveStatus(shared.alive.inspect(12)));
+      }
+
       const cronResponse = handleCronCommand(text, ctx, chatId);
       if (cronResponse) {
-        sessions.unlock(chatId);
-        return cronResponse;
+        return direct(cronResponse);
       }
 
       sessions.touch(chatId);
+      const channel = channelsByName.get(ctx);
+      const notifyTyping = channel ? () => channel.notifyTyping(chatId) : undefined;
       try {
-        const output = new GatewayOutput();
+        const output = new GatewayOutput(notifyTyping, onToken, onEvent);
         const result = await runAgentMessage(agent, text, output);
         if (result.error) return `Error: ${result.error.slice(0, 400)}`;
         const safe = sanitizeOutput(result.response);
@@ -188,7 +208,26 @@ export async function runGateway(channel?: string): Promise<void> {
     if (sender) channelSenders.set("whatsapp", sender);
   }
   if ((!channel || channel === "web")) {
-    channels.push(createWebChannel({ port: config.webPort || 3000, onMessage: makeHandler("web") }));
+    channels.push(createWebChannel({
+      port: config.webPort || 3000,
+      host: config.webHost || "127.0.0.1",
+      onMessage: makeHandler("web"),
+      getStatus: () => ({
+        model: config.model,
+        provider: config.provider,
+        memoryEnabled: config.memoryEnabled,
+        theoryEnabled: config.theoryEnabled,
+        metaEnabled: {
+          strategy: config.metaStrategyEnabled,
+          mistakes: config.metaMistakesEnabled,
+          reflection: config.metaReflectionEnabled,
+        },
+        profile: shared.policy.profile,
+        sessions: sessions.status(),
+        policyDenials: shared.policy.decisions.filter((d) => !d.allowed).slice(-20),
+        lastPolicyDecisions: shared.policy.decisions.slice(-20),
+      }),
+    }));
   }
 
   if (channels.length === 0) {
@@ -217,7 +256,19 @@ export async function runGateway(channel?: string): Promise<void> {
 
   cron.setDelivery(async (channel, chatId, message) => {
     const sender = channelSenders.get(channel);
-    if (sender) await sender(chatId, message);
+    if (sender) {
+      try {
+        await sender(chatId, message);
+      } catch (e) {
+        console.error(`[cron] delivery to ${channel} failed: ${e instanceof Error ? e.message : e}, retrying once`);
+        try {
+          await new Promise((r) => setTimeout(r, 1000));
+          await sender(chatId, message);
+        } catch (e2) {
+          console.error(`[cron] delivery to ${channel} failed again: ${e2 instanceof Error ? e2.message : e2}`);
+        }
+      }
+    }
   });
 
   cron.start();

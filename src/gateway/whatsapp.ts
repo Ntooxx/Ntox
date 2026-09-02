@@ -82,7 +82,7 @@ async function sendWhatsAppMessage(token: string, phoneNumberId: string, to: str
   }
 }
 
-async function sendTypingIndicator(token: string, phoneNumberId: string, messageId: string): Promise<void> {
+async function markAsRead(token: string, phoneNumberId: string, messageId: string): Promise<void> {
   try {
     await fetch(`${WHATSAPP_API}/${phoneNumberId}/messages`, {
       method: "POST",
@@ -111,7 +111,6 @@ function readBody(req: IncomingMessage): Promise<string> {
 export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
   const { token, phoneNumberId, verifyToken, port, onMessage } = config;
   let server: ReturnType<typeof createServer> | null = null;
-  let _running = false;
 
   function handleVerify(req: IncomingMessage, res: ServerResponse): void {
     const url = new URL(req.url || "/", `http://localhost:${port}`);
@@ -157,15 +156,14 @@ export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
             const username = getContactName(contacts, chatId);
 
             try {
-              sendTypingIndicator(token, phoneNumberId, msg.id);
-              onMessage(chatId, text, username).then(async (response) => {
-                await sendWhatsAppMessage(token, phoneNumberId, chatId, response);
-              }).catch(async (e) => {
-                const errMsg = e instanceof Error ? e.message : String(e);
-                console.error(`[whatsapp] processing error: ${errMsg}`);
-                await sendWhatsAppMessage(token, phoneNumberId, chatId, `Error: ${errMsg.slice(0, 200)}`).catch(() => {});
-              });
-            } catch { /* ignore */ }
+              markAsRead(token, phoneNumberId, msg.id);
+              const response = await onMessage(chatId, text, username);
+              await sendWhatsAppMessage(token, phoneNumberId, chatId, response);
+            } catch (e) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              console.error(`[whatsapp] processing error: ${errMsg}`);
+              await sendWhatsAppMessage(token, phoneNumberId, chatId, `Error: ${errMsg.slice(0, 200)}`).catch(() => {});
+            }
           }
         }
       }
@@ -182,13 +180,10 @@ export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
   return {
     name: "whatsapp",
 
-    notifyTyping: async (chatId: string) => {
-      await sendTypingIndicator(token, phoneNumberId, chatId);
+    notifyTyping: async () => {
     },
 
     async start() {
-      _running = true;
-
       const verifyRes = await fetch(`${WHATSAPP_API}/${phoneNumberId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -217,7 +212,6 @@ export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
     },
 
     async stop() {
-      _running = false;
       if (server) {
         await new Promise<void>((r) => server!.close(() => r()));
         server = null;

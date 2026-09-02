@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { LLMClient } from "./llm.js";
 import type { AgentConfig, AgentCallbacks } from "./agent.js";
 import { Agent } from "./agent.js";
@@ -7,12 +8,16 @@ import { shellTool } from "../tools/shell.js";
 import { readTool, writeTool, globTool, lsTool, editTool } from "../tools/filesystem.js";
 import { grepTool } from "../tools/grep.js";
 import { webFetchTool } from "../tools/web.js";
+import { webReadTool } from "../tools/web-read.js";
 import { searchTool } from "../tools/search.js";
 import { ttsTool } from "../tools/voice.js";
 import { sttTool } from "../tools/stt.js";
 import { imageTool } from "../tools/image.js";
 import { subagentTool } from "../tools/subagent.js";
 import { checkpointTool } from "../tools/checkpoint.js";
+import { browseTool } from "../tools/browse.js";
+import { jobTrackerTool } from "../tools/job-tracker.js";
+import { createProfileEvalTool } from "../tools/profile-eval.js";
 import { MemoryStore } from "../memory/episodic.js";
 import { UserModel } from "../memory/user-model.js";
 import { Reflector } from "../meta/reflector.js";
@@ -28,7 +33,14 @@ import { Executive } from "../meta/executive.js";
 import { InterventionEngine } from "../meta/intervention.js";
 import { DisagreementEngine } from "../meta/disagreement.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
-import type { NtoxConfig, CostUsage } from "../types/index.js";
+import { AliveEngine } from "../alive/engine.js";
+import { NtoxAliveHostAdapters } from "../alive/host.js";
+import { JsonFileAliveStore } from "../alive/store.js";
+import { NtoxAliveBridge } from "../alive/ntox.js";
+import type { NtoxConfig, CostUsage, WorkspaceProfile } from "../types/index.js";
+import type { SessionStore } from "../gateway/types.js";
+import { createPolicyRuntime, enforceToolPolicy, getDefaultProfile, type PolicyRuntime } from "./policy.js";
+import { getNtoxDir } from "./config.js";
 
 export interface AgentInfra {
   llm: LLMClient;
@@ -47,6 +59,9 @@ export interface AgentInfra {
   intervention: InterventionEngine;
   disagreement: DisagreementEngine;
   cognitiveKernel: CognitiveKernel;
+  policy: PolicyRuntime;
+  alive?: NtoxAliveBridge;
+  aliveHosts?: NtoxAliveHostAdapters;
 }
 
 export interface SharedInfra {
@@ -55,6 +70,9 @@ export interface SharedInfra {
   skillRegistry: SkillRegistry;
   skillExecutor: SkillExecutor;
   skillLibrary: SkillLibrary;
+  policy: PolicyRuntime;
+  alive: NtoxAliveBridge;
+  aliveHosts: NtoxAliveHostAdapters;
 }
 
 export interface SessionInfra {
@@ -71,33 +89,66 @@ export interface SessionInfra {
   cognitiveKernel: CognitiveKernel;
 }
 
-export function createSharedInfra(config: NtoxConfig): SharedInfra {
+export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile): SharedInfra {
   const llm = new LLMClient(
-    config.apiKey, config.model, config.embeddingModel,
-    config.maxTokens, config.temperature, config.apiBaseUrl, config.provider
+    config.apiKey,
+    config.model,
+    config.embeddingModel,
+    config.maxTokens,
+    config.temperature,
+    config.apiBaseUrl,
+    config.provider,
   );
 
+  const selectedProfile = profile || getDefaultProfile(config.profiles, config.defaultProfileId);
+  const runtimeProfile =
+    selectedProfile.id === "default" && selectedProfile.name === "Default Workspace"
+      ? {
+          ...selectedProfile,
+          workspaceRoot: process.cwd(),
+          readRoots: [process.cwd()],
+          writeRoots: [process.cwd()],
+        }
+      : selectedProfile;
+  const policy = createPolicyRuntime(runtimeProfile);
   const tools = new ToolRegistry();
-  tools.register(readTool);
-  tools.register(writeTool);
-  tools.register(globTool);
-  tools.register(lsTool);
-  tools.register(shellTool);
-  tools.register(webFetchTool);
-  tools.register(searchTool);
-  tools.register(grepTool);
-  tools.register(editTool);
-  tools.register(ttsTool);
-  tools.register(sttTool);
-  tools.register(imageTool);
-  tools.register(subagentTool);
-  tools.register(checkpointTool);
+  for (const tool of [
+    readTool,
+    writeTool,
+    globTool,
+    lsTool,
+    shellTool,
+    webFetchTool,
+    webReadTool,
+    searchTool,
+    grepTool,
+    editTool,
+    ttsTool,
+    sttTool,
+    imageTool,
+    subagentTool,
+    checkpointTool,
+    browseTool,
+    jobTrackerTool,
+    createProfileEvalTool(llm),
+  ]) {
+    tools.register(enforceToolPolicy(tool, policy));
+  }
 
   const skillRegistry = new SkillRegistry();
-  const skillExecutor = new SkillExecutor(skillRegistry, true);
   const skillLibrary = new SkillLibrary();
+  const skillExecutor = new SkillExecutor(skillRegistry, skillLibrary, true);
+  const alive = new NtoxAliveBridge(
+    new AliveEngine({
+      store: new JsonFileAliveStore(join(getNtoxDir(), "alive.json")),
+    }),
+  );
+  const aliveHosts = new NtoxAliveHostAdapters({
+    bridge: alive,
+    workspaceRoot: runtimeProfile.workspaceRoot,
+  });
 
-  return { llm, tools, skillRegistry, skillExecutor, skillLibrary };
+  return { llm, tools, skillRegistry, skillExecutor, skillLibrary, policy, alive, aliveHosts };
 }
 
 export function createSessionInfra(shared: SharedInfra): SessionInfra {
@@ -127,7 +178,7 @@ export function createAgentConfig(
   infra: AgentInfra,
   config: NtoxConfig,
   sessionId: string,
-  overrides: Partial<AgentConfig> = {}
+  overrides: Partial<AgentConfig> = {},
 ): AgentConfig {
   return {
     llm: infra.llm,
@@ -146,7 +197,9 @@ export function createAgentConfig(
     intervention: infra.intervention,
     disagreement: infra.disagreement,
     cognitiveKernel: infra.cognitiveKernel,
-    kernelEnabled: false,
+    policy: infra.policy,
+    alive: infra.alive,
+    kernelEnabled: true,
     kernelBasePath: homedir(),
     sessionId,
     systemPrompt: config.systemPrompt,
@@ -162,7 +215,7 @@ export function createAgentConfig(
   };
 }
 
-export class SessionManager {
+export class SessionManager implements SessionStore {
   private agents = new Map<string, Agent>();
   private lastActive = new Map<string, number>();
   private locks = new Map<string, boolean>();
@@ -197,6 +250,11 @@ export class SessionManager {
     return agent;
   }
 
+  set(id: string, agent: Agent): void {
+    this.agents.set(id, agent);
+    this.lastActive.set(id, Date.now());
+  }
+
   delete(id: string): void {
     this.agents.delete(id);
     this.lastActive.delete(id);
@@ -224,14 +282,34 @@ export class SessionManager {
   touch(id: string): void {
     this.lastActive.set(id, Date.now());
   }
+
+  getLastActivity(id: string): number {
+    return this.lastActive.get(id) ?? 0;
+  }
+
+  getActiveChats(): string[] {
+    return Array.from(this.agents.keys());
+  }
+
+  status(): { sessions: number; locked: number; ids: string[] } {
+    return { sessions: this.agents.size, locked: this.locks.size, ids: this.getActiveChats() };
+  }
 }
 
 export interface MessageOutput {
   onStart?(): void;
   onToken(token: string): void;
-  onToolCall?(name: string): void;
+  onToolCall?(name: string, args: Record<string, unknown>): void;
+  onToolResult?(name: string, result: import("../types/index.js").ToolResult, args: Record<string, unknown>): void;
   onUsage?(usage: CostUsage): void;
   onThinking?(thought: string): void;
+  onPhase?(phase: Parameters<NonNullable<AgentCallbacks["onPhase"]>>[0]): void;
+  onMemoryRecall?(count: number): void;
+  onMemoryStore?(): void;
+  onStrategy?(type: Parameters<NonNullable<AgentCallbacks["onStrategy"]>>[0]): void;
+  onCorrectionDetected?(topicKey: string, correction: string): void;
+  onSkillTriggered?(skillName: string, confidence: number): void;
+  onAliveAction?(action: Parameters<NonNullable<AgentCallbacks["onAliveAction"]>>[0]): void;
   onEnd?(): void;
   flush(): string;
 }
@@ -242,29 +320,41 @@ export interface MessageResult {
   error: string | null;
 }
 
-export async function runAgentMessage(
-  agent: Agent,
-  text: string,
-  output: MessageOutput
-): Promise<MessageResult> {
+export async function runAgentMessage(agent: Agent, text: string, output: MessageOutput): Promise<MessageResult> {
   output.onStart?.();
   let response = "";
   const toolCalls: string[] = [];
 
   try {
     const callbacks: AgentCallbacks = {
-      onToken: (token) => { response += token; output.onToken(token); },
-      onToolCall: (name) => {
-        toolCalls.push(name);
-        output.onToolCall?.(name);
+      onToken: (token) => {
+        response += token;
+        output.onToken(token);
       },
-      onToolResult: () => {},
-      onUsage: (usage) => { output.onUsage?.(usage); },
-      onThinking: (thought) => { output.onThinking?.(thought); },
+      onToolCall: (name, args) => {
+        toolCalls.push(name);
+        output.onToolCall?.(name, args);
+      },
+      onToolResult: (name, result, args) => output.onToolResult?.(name, result, args),
+      onUsage: (usage) => {
+        output.onUsage?.(usage);
+      },
+      onThinking: (thought) => {
+        output.onThinking?.(thought);
+      },
+      onPhase: (phase) => output.onPhase?.(phase),
+      onMemoryRecall: (count) => output.onMemoryRecall?.(count),
+      onMemoryStore: () => output.onMemoryStore?.(),
+      onStrategy: (type) => output.onStrategy?.(type),
+      onCorrectionDetected: (topicKey, correction) => output.onCorrectionDetected?.(topicKey, correction),
+      onSkillTriggered: (name, confidence) => output.onSkillTriggered?.(name, confidence),
+      onAliveAction: (action) => output.onAliveAction?.(action),
     };
 
     const stream = agent.run(text, callbacks);
-    for await (const _ of stream) { /* drain */ }
+    for await (const _ of stream) {
+      /* drain */
+    }
   } catch (e) {
     output.onEnd?.();
     const msg = e instanceof Error ? e.message : String(e);
@@ -274,9 +364,10 @@ export async function runAgentMessage(
   output.onEnd?.();
   let result = output.flush() || response.trim();
   if (!result) {
-    result = toolCalls.length > 0
-      ? `Ran ${toolCalls.length} tool${toolCalls.length > 1 ? "s" : ""}: ${toolCalls.join(", ")}`
-      : "(no response)";
+    result =
+      toolCalls.length > 0
+        ? `Ran ${toolCalls.length} tool${toolCalls.length > 1 ? "s" : ""}: ${toolCalls.join(", ")}`
+        : "(no response)";
   }
 
   return { response: result, toolCalls, error: null };
@@ -286,15 +377,63 @@ export class GatewayOutput implements MessageOutput {
   public toolCalls: string[] = [];
   private buffer = "";
   private notifyTyping?: () => void;
+  private externalOnToken?: (token: string) => void;
+  private externalOnEvent?: (event: Record<string, unknown>) => void;
+  private tokenCount = 0;
 
-  constructor(notifyTyping?: () => void) {
+  constructor(
+    notifyTyping?: () => void,
+    externalOnToken?: (token: string) => void,
+    externalOnEvent?: (event: Record<string, unknown>) => void,
+  ) {
     this.notifyTyping = notifyTyping;
+    this.externalOnToken = externalOnToken;
+    this.externalOnEvent = externalOnEvent;
   }
 
-  onToken(token: string): void { this.buffer += token; }
-  onToolCall(name: string): void {
+  onToken(token: string): void {
+    this.buffer += token;
+    this.tokenCount++;
+    this.externalOnToken?.(token);
+    if (this.tokenCount % 50 === 0) {
+      this.notifyTyping?.();
+    }
+  }
+  onToolCall(name: string, args: Record<string, unknown>): void {
     this.toolCalls.push(name);
+    this.externalOnEvent?.({ type: "tool_call", name, args });
     this.notifyTyping?.();
   }
-  flush(): string { return this.buffer.trim(); }
+  onToolResult(name: string, result: import("../types/index.js").ToolResult): void {
+    this.externalOnEvent?.({
+      type: "tool_result",
+      name,
+      success: result.success,
+      error: result.error,
+    });
+  }
+  onPhase(phase: Parameters<NonNullable<AgentCallbacks["onPhase"]>>[0]): void {
+    this.externalOnEvent?.({ type: "phase", phase });
+  }
+  onMemoryRecall(count: number): void {
+    this.externalOnEvent?.({ type: "memory", action: "recalled", count });
+  }
+  onMemoryStore(): void {
+    this.externalOnEvent?.({ type: "memory", action: "stored", count: 1 });
+  }
+  onStrategy(type: Parameters<NonNullable<AgentCallbacks["onStrategy"]>>[0]): void {
+    this.externalOnEvent?.({ type: "strategy", strategy: type });
+  }
+  onCorrectionDetected(topicKey: string, correction: string): void {
+    this.externalOnEvent?.({ type: "correction", topicKey, correction });
+  }
+  onSkillTriggered(skillName: string, confidence: number): void {
+    this.externalOnEvent?.({ type: "skill", skillName, confidence });
+  }
+  onAliveAction(action: Parameters<NonNullable<AgentCallbacks["onAliveAction"]>>[0]): void {
+    this.externalOnEvent?.({ type: "alive", action });
+  }
+  flush(): string {
+    return this.buffer.trim();
+  }
 }

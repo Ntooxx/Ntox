@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, unlinkSync } from "node:fs";
 import { MemoryStore, cosineSimilarity } from "./episodic.js";
-import { EPISODES_PATH } from "../core/config.js";
+import { DURABLE_MEMORY_PATH, EPISODES_PATH } from "../core/config.js";
 
 describe("cosineSimilarity", () => {
   it("returns 1 for identical vectors", () => {
@@ -33,6 +33,7 @@ describe("cosineSimilarity", () => {
 describe("MemoryStore", () => {
   afterEach(() => {
     if (existsSync(EPISODES_PATH)) unlinkSync(EPISODES_PATH);
+    if (existsSync(DURABLE_MEMORY_PATH)) unlinkSync(DURABLE_MEMORY_PATH);
   });
 
   const makeEmbedding = (seed: number): number[] => {
@@ -73,6 +74,63 @@ describe("MemoryStore", () => {
     const results = store.search("project", 5);
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0].userMessage).toContain("Alpha");
+  });
+
+  it("stores searchable durable memories by lane", () => {
+    const store = new MemoryStore();
+    const memory = store.addDurableMemory("preference", "Anton prefers concise summaries", "test");
+
+    expect(store.listDurableMemories("preference")[0].id).toBe(memory.id);
+    expect(store.searchDurableMemories("concise")[0].id).toBe(memory.id);
+    expect(store.getDurableMemory(memory.id)?.provenance).toBe("test");
+    expect(store.buildMemoryContext(null)).toContain("preference: Anton prefers concise summaries");
+    expect(store.deleteDurableMemory(memory.id)).toBe(true);
+    expect(store.listDurableMemories()).toHaveLength(0);
+  });
+
+  it("updates durable memories with history and contradiction tracking", () => {
+    const store = new MemoryStore();
+    const memory = store.addDurableMemory("fact", "Ntox uses plain fetch", "test", 0.9);
+
+    const updated = store.updateDurableMemory(memory.id, "Ntox uses web_read for reliable URL reading", "better fact");
+    expect(updated?.text).toContain("web_read");
+    expect(updated?.history[0].text).toBe("Ntox uses plain fetch");
+
+    const contradicted = store.markDurableMemoryContradicted(memory.id, "old fact was incomplete");
+    expect(contradicted?.contradictionCount).toBe(1);
+    expect(contradicted?.confidence).toBeLessThan(0.9);
+    expect(store.getDurableMemory(memory.id)?.history.length).toBe(2);
+  });
+
+  it("rewrites durable memory when a user correction names the old answer", () => {
+    const store = new MemoryStore();
+    const memory = store.addDurableMemory("fact", "harbor=blue-ember", "test", 0.8);
+
+    const corrected = store.applyCorrectionToDurableMemories({
+      topicKey: "harbor",
+      wrongAnswer: "harbor=blue-ember",
+      correction: "harbor=navy-ember",
+    });
+
+    const stored = store.getDurableMemory(memory.id);
+    expect(corrected).toHaveLength(1);
+    expect(stored?.text).toBe("harbor=navy-ember");
+    expect(stored?.confidence).toBeGreaterThanOrEqual(0.95);
+    expect(stored?.history[0].text).toBe("harbor=blue-ember");
+  });
+
+  it("demotes topic-matched durable memories when a correction may supersede them", () => {
+    const store = new MemoryStore();
+    const memory = store.addDurableMemory("fact", "The harbor ledger uses the old deployment value", "test", 0.9);
+
+    store.applyCorrectionToDurableMemories({
+      topicKey: "harbor",
+      correction: "harbor=navy-ember",
+    });
+
+    const stored = store.getDurableMemory(memory.id);
+    expect(stored?.confidence).toBeLessThan(0.4);
+    expect(stored?.contradictionCount).toBe(1);
   });
 
   it("filters by threshold", () => {

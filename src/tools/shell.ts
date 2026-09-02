@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { exec } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import type { Tool } from "../types/index.js";
 import { getBaseDir, loadConfig } from "../core/config.js";
@@ -39,6 +39,37 @@ const BLOCKED_PATTERNS = [
   /\bStart-Process\b.*-FilePath.*-WindowStyle\s+Hidden/i,
 ];
 
+const CODE_FRAGMENT_PATTERNS = [
+  /^\s*[<>{}]/,
+  /<\/?[a-z_][\w:-]*>/i,
+  /```/,
+  /<tool_call/i,
+  /\bfunction\s+\w+\s*\(/,
+  /^\s*(import|export)\s+/m,
+];
+
+const WINDOWS_UNIX_COMMAND_PATTERNS = [
+  /\|\s*head\b/i,
+  /\|\s*tail\b/i,
+  /\|\s*grep\b/i,
+  /\bls\s+-[a-z]*[la][a-z]*\b/i,
+  /\bcat\s+[^|>]+/i,
+  /\bsed\s+['"-]/i,
+  /\bawk\s+['"-]/i,
+];
+
+export function validateShellCommand(command: string): string | null {
+  const trimmed = command.trim();
+  if (!trimmed) return "Command is empty";
+  if (CODE_FRAGMENT_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+    return "Rejected shell command because it looks like code or malformed tool XML, not a command";
+  }
+  if (IS_WINDOWS && WINDOWS_UNIX_COMMAND_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+    return "Rejected Unix-style command on Windows. Use PowerShell equivalents such as Get-ChildItem, Select-String, or Select-Object -First.";
+  }
+  return null;
+}
+
 function audit(command: string, blocked: boolean): void {
   try {
     const line = `[${new Date().toISOString()}]${blocked ? " [BLOCKED]" : ""} ${command}\n`;
@@ -46,18 +77,36 @@ function audit(command: string, blocked: boolean): void {
   } catch { /* best effort */ }
 }
 
-function dockerExec(command: string, workdir: string, timeout: number): string {
+function execAsync(command: string, options: { cwd?: string; timeout?: number; maxBuffer?: number }): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    exec(command, {
+      cwd: options.cwd,
+      timeout: options.timeout,
+      maxBuffer: options.maxBuffer,
+      windowsHide: true,
+      encoding: "utf-8",
+    }, (error, stdout, stderr) => {
+      if (error) {
+        (error as NodeJS.ErrnoException & { stdout: string; stderr: string }).stdout = stdout || "";
+        (error as NodeJS.ErrnoException & { stdout: string; stderr: string }).stderr = stderr || "";
+        reject(error);
+      } else {
+        resolve({ stdout: stdout || "", stderr: stderr || "" });
+      }
+    });
+  });
+}
+
+function dockerExec(command: string, workdir: string, timeout: number): Promise<{ stdout: string; stderr: string }> {
   const absWorkdir = workdir.replace(/\\/g, "/");
   const escaped = command.replace(/"/g, '\\"');
   const dockerCmd = IS_WINDOWS
     ? `docker run --rm -v "${absWorkdir}:/workspace" -w /workspace --network none alpine:latest sh -c "${escaped}"`
     : `docker run --rm -v "${absWorkdir}:/workspace" -w /workspace --network none alpine:latest sh -c '${command.replace(/'/g, "'\\''")}'`;
 
-  return execSync(dockerCmd, {
+  return execAsync(dockerCmd, {
     timeout,
-    encoding: "utf-8",
     maxBuffer: 10 * 1024 * 1024,
-    windowsHide: true,
   });
 }
 
@@ -77,6 +126,12 @@ export const shellTool: Tool = {
     const command = String(args.command);
     const workdir = args.workdir ? String(args.workdir) : process.cwd();
     const timeout = args.timeout ? Number(args.timeout) : 30000;
+
+    const invalidReason = validateShellCommand(command);
+    if (invalidReason) {
+      audit(command, true);
+      return { success: false, error: invalidReason };
+    }
 
     const hit = BLOCKED_PATTERNS.find((p) => p.test(command));
     if (hit) {
@@ -99,8 +154,8 @@ export const shellTool: Tool = {
     const config = loadConfig();
     if (config.dockerEnabled) {
       try {
-        const output = dockerExec(command, workdir, timeout);
-        return { success: true, data: output };
+        const { stdout } = await dockerExec(command, workdir, timeout);
+        return { success: true, data: stdout };
       } catch (e: unknown) {
         if (e instanceof Error && "stdout" in e && "stderr" in e) {
           const execErr = e as Error & { stdout: string; stderr: string; status?: number };
@@ -117,17 +172,17 @@ export const shellTool: Tool = {
     try {
       if (IS_WINDOWS) {
         const escaped = command.replace(/"/g, '`"');
-        const output = execSync(
+        const { stdout } = await execAsync(
           `powershell -NoProfile -ExecutionPolicy Bypass -Command "${escaped}"`,
-          { cwd: workdir, timeout, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, windowsHide: true }
+          { cwd: workdir, timeout, maxBuffer: 10 * 1024 * 1024 }
         );
-        return { success: true, data: output };
+        return { success: true, data: stdout };
       }
 
-      const output = execSync(command, {
-        cwd: workdir, timeout, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024,
+      const { stdout } = await execAsync(command, {
+        cwd: workdir, timeout, maxBuffer: 10 * 1024 * 1024,
       });
-      return { success: true, data: output };
+      return { success: true, data: stdout };
     } catch (e: unknown) {
       if (e instanceof Error && "stdout" in e && "stderr" in e) {
         const execErr = e as Error & { stdout: string; stderr: string; status?: number };

@@ -26,14 +26,9 @@ export class FounderIntelligence {
 
     const patterns: FounderPattern[] = [];
 
-    const sessionByDay = this.groupByDay(observations);
     const morningSessions = observations.filter((o) => {
       const hour = new Date(o.timestamp).getHours();
       return hour >= 6 && hour < 12;
-    });
-    const afternoonSessions = observations.filter((o) => {
-      const hour = new Date(o.timestamp).getHours();
-      return hour >= 12 && hour < 18;
     });
     const eveningSessions = observations.filter((o) => {
       const hour = new Date(o.timestamp).getHours();

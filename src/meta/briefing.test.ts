@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { BriefingEngine } from "./briefing.js";
-import type { BriefingContext, Briefing } from "./briefing.js";
+import type { BriefingContext } from "./briefing.js";
 import type { ObservedSession } from "./observation.js";
 import type { MentalModelEntry } from "./mental-model.js";
-import type { ExecGoal, Risk, Constraint } from "./executive.js";
+import type { ExecGoal, Risk } from "./executive.js";
 
 const TEST_PATH = join(tmpdir(), `ntox-brief-test-${randomUUID().slice(0, 8)}.json`);
 

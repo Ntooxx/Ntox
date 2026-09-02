@@ -74,6 +74,79 @@ export default async function setup(): Promise<void> {
   }
   console.log("");
 
+  // Step 4: Discord bot
+  console.log("  4. Discord Bot (optional)");
+  console.log("     To chat with NTOX on Discord:");
+  console.log("     - Create app at https://discord.com/developers/applications");
+  console.log("     - Go to Bot > Reset Token and copy it");
+  console.log("     - Enable MESSAGE CONTENT INTENT under Privileged Gateway Intents");
+  console.log("     - Invite with: https://discord.com/api/oauth2/authorize?client_id=YOUR_ID&permissions=3072&scope=bot");
+  console.log("");
+
+  const hasDiscord = !!config.discordToken;
+  if (hasDiscord) {
+    console.log(`     Current token: ${config.discordToken.slice(0, 20)}...`);
+    const change = await confirm("     Change it?");
+    if (change) {
+      const token = await ask("     Paste your bot token");
+      if (token) config.discordToken = token;
+    }
+  } else {
+    const wantDiscord = await confirm("     Do you want to set up a Discord bot?");
+    if (wantDiscord) {
+      const token = await ask("     Paste your bot token from Developer Portal");
+      if (token) config.discordToken = token;
+    }
+  }
+  console.log("");
+
+  // Step 5: WhatsApp Business
+  console.log("  5. WhatsApp Business API (optional)");
+  console.log("     To chat with NTOX on WhatsApp:");
+  console.log("     - Go to https://developers.facebook.com/apps/");
+  console.log("     - Create a Business app with WhatsApp integration");
+  console.log("     - Copy the Phone Number ID, Token, and create a Verify Token");
+  console.log("     - Set up webhook URL: https://YOUR_DOMAIN/webhook (requires HTTPS)");
+  console.log("");
+
+  const hasWhatsApp = !!config.whatsappToken;
+  if (hasWhatsApp) {
+    console.log(`     Current token: ${config.whatsappToken.slice(0, 20)}...`);
+    const change = await confirm("     Change WhatsApp settings?");
+    if (change) {
+      const token = await ask("     Paste your WhatsApp token");
+      if (token) config.whatsappToken = token;
+      const phoneNumberId = await ask("     Paste your Phone Number ID");
+      if (phoneNumberId) config.whatsappPhoneNumberId = phoneNumberId;
+      const verifyToken = await ask("     Create a Verify Token");
+      if (verifyToken) config.whatsappVerifyToken = verifyToken;
+      const port = await ask(`     Webhook port [${config.whatsappPort || 3001}]`);
+      if (port) config.whatsappPort = parseInt(port, 10) || 3001;
+    }
+  } else {
+    const wantWhatsApp = await confirm("     Do you want to set up WhatsApp?");
+    if (wantWhatsApp) {
+      const token = await ask("     Paste your WhatsApp token");
+      if (token) config.whatsappToken = token;
+      const phoneNumberId = await ask("     Paste your Phone Number ID");
+      if (phoneNumberId) config.whatsappPhoneNumberId = phoneNumberId;
+      const verifyToken = await ask("     Create a Verify Token");
+      if (verifyToken) config.whatsappVerifyToken = verifyToken;
+    }
+  }
+  console.log("");
+
+  // Step 6: Web UI
+  console.log("  6. Web UI (optional)");
+  console.log("     NTOX comes with a built-in web chat interface.");
+  console.log("");
+
+  const webPort = await ask(`     Web UI port [${config.webPort || 3000}]`);
+  if (webPort) config.webPort = parseInt(webPort, 10) || 3000;
+  const webHost = await ask(`     Web UI host [${config.webHost || "127.0.0.1"}]`);
+  if (webHost) config.webHost = webHost;
+  console.log("");
+
   // Save
   saveConfig(config);
   console.log("  Config saved to ~/.ntox/config.json");
@@ -84,8 +157,15 @@ export default async function setup(): Promise<void> {
   console.log("");
   console.log("    npx ntox              — Start the REPL (chat in terminal)");
   if (config.telegramToken) {
-    console.log("    npx ntox gateway      — Start the Telegram bot");
+    console.log("    npx ntox gateway      — Start all configured channels");
   }
+  if (config.discordToken) {
+    console.log("    npx ntox gateway discord — Start Discord bot only");
+  }
+  if (config.whatsappToken) {
+    console.log("    npx ntox gateway      — WhatsApp included in gateway");
+  }
+  console.log(`    npx ntox gateway web  — Web UI at http://${config.webHost || "127.0.0.1"}:${config.webPort || 3000}`);
   console.log("    npx ntox setup        — Run this wizard again");
   console.log("");
 
