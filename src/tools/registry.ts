@@ -43,7 +43,7 @@ export class ToolRegistry {
 export async function executeToolCall(
   registry: ToolRegistry,
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
 ): Promise<ToolResult> {
   const tool = registry.get(name);
   if (!tool) {

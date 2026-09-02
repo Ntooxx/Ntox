@@ -24,26 +24,48 @@ const COMPARISON_PATTERNS = [
   /(.+?)\s+(?:beats|outperforms|outshines)\s+(.+?)(?:\.|,|$)/i,
 ];
 
-const ASSUMPTION_PATTERNS = [
-  /(?:assuming|given that|given)\s+(.+?)(?:\.|,|$)/i,
-];
+const ASSUMPTION_PATTERNS = [/(?:assuming|given that|given)\s+(.+?)(?:\.|,|$)/i];
 
 const CONTRADICTION_PAIRS: [string, string][] = [
-  ["hate", "like"], ["hate", "love"], ["hate", "prefer"],
-  ["bad", "good"], ["worst", "best"], ["hard", "easy"],
-  ["slow", "fast"], ["complex", "simple"],
-  ["expensive", "cheap"], ["useless", "useful"],
-  ["never", "always"], ["nobody", "everyone"],
-  ["broken", "works"], ["wrong", "right"],
-  ["ugly", "beautiful"], ["waste", "worth"],
-  ["don't", "do"], ["doesn't", "does"], ["won't", "will"],
-  ["isn't", "is"], ["can't", "can"],
+  ["hate", "like"],
+  ["hate", "love"],
+  ["hate", "prefer"],
+  ["bad", "good"],
+  ["worst", "best"],
+  ["hard", "easy"],
+  ["slow", "fast"],
+  ["complex", "simple"],
+  ["expensive", "cheap"],
+  ["useless", "useful"],
+  ["never", "always"],
+  ["nobody", "everyone"],
+  ["broken", "works"],
+  ["wrong", "right"],
+  ["ugly", "beautiful"],
+  ["waste", "worth"],
+  ["don't", "do"],
+  ["doesn't", "does"],
+  ["won't", "will"],
+  ["isn't", "is"],
+  ["can't", "can"],
 ];
 
 const NEGATION_WORDS = new Set([
-  "never", "not", "nobody", "nothing", "no", "cannot",
-  "don't", "doesn't", "didn't", "won't", "can't", "couldn't",
-  "shouldn't", "isn't", "aren't",
+  "never",
+  "not",
+  "nobody",
+  "nothing",
+  "no",
+  "cannot",
+  "don't",
+  "doesn't",
+  "didn't",
+  "won't",
+  "can't",
+  "couldn't",
+  "shouldn't",
+  "isn't",
+  "aren't",
 ]);
 
 export type MentalModelStatus = "active" | "challenged" | "evolved" | "abandoned";
@@ -85,12 +107,17 @@ export class MentalModel {
     try {
       writeFileSync(tmp, JSON.stringify(this.entries, null, 2));
       writeFileSync(this.path, readFileSync(tmp, "utf-8"));
-    } catch { }
-    try { unlinkSync(tmp); } catch { }
+    } catch {}
+    try {
+      unlinkSync(tmp);
+    } catch {}
   }
 
   private persist(): void {
-    if (this.dirty) { this.save(); this.dirty = false; }
+    if (this.dirty) {
+      this.save();
+      this.dirty = false;
+    }
   }
 
   flush(): void {
@@ -159,7 +186,17 @@ export class MentalModel {
     const existing = this.findSimilar(normalized);
 
     if (existing) {
-      const temp = { id: "", statement, category, firstSeen: 0, lastSeen: 0, mentionCount: 0, sourceContext: "", contradictions: [], status: "active" as MentalModelStatus };
+      const temp = {
+        id: "",
+        statement,
+        category,
+        firstSeen: 0,
+        lastSeen: 0,
+        mentionCount: 0,
+        sourceContext: "",
+        contradictions: [],
+        status: "active" as MentalModelStatus,
+      };
       if (this.isContradicting(temp, existing)) {
         const entry: MentalModelEntry = {
           id: `mm_${randomUUID().slice(0, 8)}`,
@@ -266,7 +303,11 @@ export class MentalModel {
   }
 
   private normalize(text: string): string {
-    return text.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   getActiveEntries(): MentalModelEntry[] {

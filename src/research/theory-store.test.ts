@@ -1,5 +1,18 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { recordObservation, getTheoryStats, getTheoryHierarchy, confirmTheory, disconfirmTheory, addTheoryEvidence, getTheoryEvidence, resetTheoryStore, makeTheoryPrediction, resolvePrediction, penalizeTheoriesForFalseSuccess, getAllPredictions } from "./theory-store.js";
+import {
+  recordObservation,
+  getTheoryStats,
+  getTheoryHierarchy,
+  confirmTheory,
+  disconfirmTheory,
+  addTheoryEvidence,
+  getTheoryEvidence,
+  resetTheoryStore,
+  makeTheoryPrediction,
+  resolvePrediction,
+  penalizeTheoriesForFalseSuccess,
+  getAllPredictions,
+} from "./theory-store.js";
 
 describe("theory-store", () => {
   beforeEach(() => {
@@ -203,7 +216,10 @@ describe("theory predictions", () => {
   it("penalizes theories tied to shallow reasoning and falsifies their predictions", () => {
     const id = seedTheory(progPair, ["programming", "architecture"]);
     makeTheoryPrediction(id, "This approach should work");
-    const penalized = penalizeTheoriesForFalseSuccess("seed code pattern design approach", "Surface reasoning detected");
+    const penalized = penalizeTheoriesForFalseSuccess(
+      "seed code pattern design approach",
+      "Surface reasoning detected",
+    );
     expect(penalized).toContain(id);
     const pred = getAllPredictions()[0];
     expect(pred.outcome).toBe("falsified");

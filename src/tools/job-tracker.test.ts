@@ -165,8 +165,13 @@ describe("job-tracker", () => {
     const result = await tool.execute({ action: "stats" });
     expect(result.success).toBe(true);
     const data = result.data as {
-      total: number; byStatus: Record<string, number>; avgMatchScore: number;
-      thisWeek: number; interviewing: number; offered: number; pendingFollowups: number;
+      total: number;
+      byStatus: Record<string, number>;
+      avgMatchScore: number;
+      thisWeek: number;
+      interviewing: number;
+      offered: number;
+      pendingFollowups: number;
     };
     expect(data.total).toBe(2);
     expect(data.byStatus.applied).toBe(1);

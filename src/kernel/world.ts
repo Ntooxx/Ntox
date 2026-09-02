@@ -39,7 +39,9 @@ export class FileSystemWorldModel {
           content: readFileSync(path, "utf-8"),
         };
       }
-    } catch { /* not accessible */ }
+    } catch {
+      /* not accessible */
+    }
     return { path, exists: false, isFile: false, isDir: false, size: 0 };
   }
 
@@ -56,7 +58,9 @@ export class FileSystemWorldModel {
           size: 0,
         };
       }
-    } catch { /* not accessible */ }
+    } catch {
+      /* not accessible */
+    }
     return { path, exists: false, isFile: false, isDir: false, size: 0 };
   }
 

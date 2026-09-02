@@ -12,9 +12,20 @@ function defaultProfile(overrides: Partial<UserProfile> = {}): UserProfile {
   return {
     name: "",
     expertise: {},
-    preferences: { verbosity: "balanced", technicalLevel: "intermediate", tone: "adaptive", codeExamples: "when-helpful" },
+    preferences: {
+      verbosity: "balanced",
+      technicalLevel: "intermediate",
+      tone: "adaptive",
+      codeExamples: "when-helpful",
+    },
     goals: [],
-    patterns: { averageMessageLength: 0, totalMessages: 0, correctionsReceived: 0, prefersCodeBlocks: false, prefersBulletPoints: false },
+    patterns: {
+      averageMessageLength: 0,
+      totalMessages: 0,
+      correctionsReceived: 0,
+      prefersCodeBlocks: false,
+      prefersBulletPoints: false,
+    },
     domains: [],
     lastActive: Date.now(),
     sessionsCount: 0,
@@ -39,12 +50,16 @@ describe("ObservationEngine", () => {
   let engine: ObservationEngine;
 
   beforeEach(() => {
-    try { if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH); } catch { }
+    try {
+      if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH);
+    } catch {}
     engine = new ObservationEngine(TEST_PATH);
   });
 
   afterAll(() => {
-    try { if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH); } catch { }
+    try {
+      if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH);
+    } catch {}
   });
 
   it("starts with empty observations", () => {
@@ -53,7 +68,9 @@ describe("ObservationEngine", () => {
   });
 
   it("records a session and returns observation", () => {
-    const profile = defaultProfile({ moodHistory: [{ timestamp: Date.now(), sentiment: "neutral", energy: "medium", score: 0 }] });
+    const profile = defaultProfile({
+      moodHistory: [{ timestamp: Date.now(), sentiment: "neutral", energy: "medium", score: 0 }],
+    });
     const messages = makeMessages(["fix the login bug in the auth module"]);
     const obs = engine.recordSession({
       sessionId: "test-001",
@@ -97,12 +114,22 @@ describe("ObservationEngine", () => {
   it("returns recent observations in insertion order", () => {
     const profile = defaultProfile();
     engine.recordSession({
-      sessionId: "s1", messages: makeMessages(["first task"]), toolUsage: {},
-      sessionIntent: "casual", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+      sessionId: "s1",
+      messages: makeMessages(["first task"]),
+      toolUsage: {},
+      sessionIntent: "casual",
+      correctionsCount: 0,
+      sessionStartTime: Date.now(),
+      userProfile: profile,
     });
     engine.recordSession({
-      sessionId: "s2", messages: makeMessages(["second task"]), toolUsage: {},
-      sessionIntent: "casual", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+      sessionId: "s2",
+      messages: makeMessages(["second task"]),
+      toolUsage: {},
+      sessionIntent: "casual",
+      correctionsCount: 0,
+      sessionStartTime: Date.now(),
+      userProfile: profile,
     });
 
     const recent = engine.getRecent(2);
@@ -114,12 +141,22 @@ describe("ObservationEngine", () => {
   it("filters by topic", () => {
     const profile = defaultProfile();
     engine.recordSession({
-      sessionId: "s1", messages: makeMessages(["debugging the database connection"]), toolUsage: {},
-      sessionIntent: "debugging", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+      sessionId: "s1",
+      messages: makeMessages(["debugging the database connection"]),
+      toolUsage: {},
+      sessionIntent: "debugging",
+      correctionsCount: 0,
+      sessionStartTime: Date.now(),
+      userProfile: profile,
     });
     engine.recordSession({
-      sessionId: "s2", messages: makeMessages(["designing the landing page layout"]), toolUsage: {},
-      sessionIntent: "deep-work", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+      sessionId: "s2",
+      messages: makeMessages(["designing the landing page layout"]),
+      toolUsage: {},
+      sessionIntent: "deep-work",
+      correctionsCount: 0,
+      sessionStartTime: Date.now(),
+      userProfile: profile,
     });
 
     const results = engine.getByTopic("database");
@@ -132,8 +169,13 @@ describe("ObservationEngine", () => {
     for (let i = 0; i < 10; i++) {
       const text = i < 6 ? "working on the parser module" : "designing the landing page";
       engine.recordSession({
-        sessionId: `s${i}`, messages: makeMessages([text]), toolUsage: {},
-        sessionIntent: "deep-work", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+        sessionId: `s${i}`,
+        messages: makeMessages([text]),
+        toolUsage: {},
+        sessionIntent: "deep-work",
+        correctionsCount: 0,
+        sessionStartTime: Date.now(),
+        userProfile: profile,
       });
     }
 
@@ -146,18 +188,33 @@ describe("ObservationEngine", () => {
     const profile = defaultProfile();
     for (let i = 0; i < 4; i++) {
       engine.recordSession({
-        sessionId: `s${i}`, messages: makeMessages(["building the database schema"]), toolUsage: {},
-        sessionIntent: "deep-work", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+        sessionId: `s${i}`,
+        messages: makeMessages(["building the database schema"]),
+        toolUsage: {},
+        sessionIntent: "deep-work",
+        correctionsCount: 0,
+        sessionStartTime: Date.now(),
+        userProfile: profile,
       });
     }
     engine.recordSession({
-      sessionId: "break", messages: makeMessages(["designing the landing page"]), toolUsage: {},
-      sessionIntent: "deep-work", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+      sessionId: "break",
+      messages: makeMessages(["designing the landing page"]),
+      toolUsage: {},
+      sessionIntent: "deep-work",
+      correctionsCount: 0,
+      sessionStartTime: Date.now(),
+      userProfile: profile,
     });
     for (let i = 0; i < 2; i++) {
       engine.recordSession({
-        sessionId: `s${i + 5}`, messages: makeMessages(["back to the database work"]), toolUsage: {},
-        sessionIntent: "deep-work", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+        sessionId: `s${i + 5}`,
+        messages: makeMessages(["back to the database work"]),
+        toolUsage: {},
+        sessionIntent: "deep-work",
+        correctionsCount: 0,
+        sessionStartTime: Date.now(),
+        userProfile: profile,
       });
     }
 
@@ -168,8 +225,13 @@ describe("ObservationEngine", () => {
   it("returns stats", () => {
     const profile = defaultProfile();
     engine.recordSession({
-      sessionId: "s1", messages: makeMessages(["debugging the auth flow"]), toolUsage: {},
-      sessionIntent: "debugging", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+      sessionId: "s1",
+      messages: makeMessages(["debugging the auth flow"]),
+      toolUsage: {},
+      sessionIntent: "debugging",
+      correctionsCount: 0,
+      sessionStartTime: Date.now(),
+      userProfile: profile,
     });
 
     const stats = engine.getStats();
@@ -180,8 +242,13 @@ describe("ObservationEngine", () => {
   it("clears all observations", () => {
     const profile = defaultProfile();
     engine.recordSession({
-      sessionId: "s1", messages: makeMessages(["something"]), toolUsage: {},
-      sessionIntent: "casual", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+      sessionId: "s1",
+      messages: makeMessages(["something"]),
+      toolUsage: {},
+      sessionIntent: "casual",
+      correctionsCount: 0,
+      sessionStartTime: Date.now(),
+      userProfile: profile,
     });
     expect(engine.getRecent()).toHaveLength(1);
 
@@ -193,8 +260,13 @@ describe("ObservationEngine", () => {
     const profile = defaultProfile();
     const e1 = new ObservationEngine(TEST_PATH);
     e1.recordSession({
-      sessionId: "persist-test", messages: makeMessages(["testing persistence"]), toolUsage: {},
-      sessionIntent: "casual", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+      sessionId: "persist-test",
+      messages: makeMessages(["testing persistence"]),
+      toolUsage: {},
+      sessionIntent: "casual",
+      correctionsCount: 0,
+      sessionStartTime: Date.now(),
+      userProfile: profile,
     });
 
     const e2 = new ObservationEngine(TEST_PATH);
@@ -204,10 +276,17 @@ describe("ObservationEngine", () => {
   });
 
   it("records wasCorrection true when corrections exist", () => {
-    const profile = defaultProfile({ moodHistory: [{ timestamp: Date.now(), sentiment: "neutral", energy: "medium", score: 0 }] });
+    const profile = defaultProfile({
+      moodHistory: [{ timestamp: Date.now(), sentiment: "neutral", energy: "medium", score: 0 }],
+    });
     const obs = engine.recordSession({
-      sessionId: "corr-test", messages: makeMessages(["no, that is wrong"]), toolUsage: {},
-      sessionIntent: "debugging", correctionsCount: 2, sessionStartTime: Date.now(), userProfile: profile,
+      sessionId: "corr-test",
+      messages: makeMessages(["no, that is wrong"]),
+      toolUsage: {},
+      sessionIntent: "debugging",
+      correctionsCount: 2,
+      sessionStartTime: Date.now(),
+      userProfile: profile,
     });
 
     expect(obs.correctionsCount).toBe(2);
@@ -223,8 +302,13 @@ describe("ObservationEngine", () => {
       ],
     });
     const obs = engine.recordSession({
-      sessionId: "mood-test", messages: makeMessages(["this is not working"]), toolUsage: {},
-      sessionIntent: "debugging", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+      sessionId: "mood-test",
+      messages: makeMessages(["this is not working"]),
+      toolUsage: {},
+      sessionIntent: "debugging",
+      correctionsCount: 0,
+      sessionStartTime: Date.now(),
+      userProfile: profile,
     });
 
     expect(obs.sentiment).toBe("frustrated");
@@ -234,8 +318,13 @@ describe("ObservationEngine", () => {
     const profile = defaultProfile();
     for (let i = 0; i < 1010; i++) {
       engine.recordSession({
-        sessionId: `s${i}`, messages: makeMessages([`session ${i}`]), toolUsage: {},
-        sessionIntent: "casual", correctionsCount: 0, sessionStartTime: Date.now(), userProfile: profile,
+        sessionId: `s${i}`,
+        messages: makeMessages([`session ${i}`]),
+        toolUsage: {},
+        sessionIntent: "casual",
+        correctionsCount: 0,
+        sessionStartTime: Date.now(),
+        userProfile: profile,
       });
     }
     expect(engine.getStats().total).toBe(1000);

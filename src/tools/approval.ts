@@ -35,7 +35,10 @@ function persistApprovals(approvals: StoredApproval[]): void {
 }
 
 function patternToRegex(pattern: string): RegExp {
-  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
   return new RegExp(`^${escaped}$`, "i");
 }
 
@@ -47,7 +50,7 @@ export class ApprovalStore {
     const key = `${toolName}:${command}`;
 
     const sessionMatch = this.sessionApprovals.find(
-      (a) => a.toolName === toolName && patternToRegex(a.pattern).test(key)
+      (a) => a.toolName === toolName && patternToRegex(a.pattern).test(key),
     );
     if (sessionMatch) {
       if (sessionMatch.decision === "allow-once") {
@@ -58,9 +61,7 @@ export class ApprovalStore {
     }
 
     const persisted = loadPersisted();
-    const persistMatch = persisted.find(
-      (a) => a.toolName === toolName && patternToRegex(a.pattern).test(key)
-    );
+    const persistMatch = persisted.find((a) => a.toolName === toolName && patternToRegex(a.pattern).test(key));
     if (persistMatch) return persistMatch.decision;
 
     return null;
@@ -78,9 +79,7 @@ export class ApprovalStore {
     }
 
     const persisted = loadPersisted();
-    const existing = persisted.findIndex(
-      (a) => a.toolName === toolName && a.pattern === pattern
-    );
+    const existing = persisted.findIndex((a) => a.toolName === toolName && a.pattern === pattern);
     const entry: StoredApproval = {
       toolName,
       pattern,

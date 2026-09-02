@@ -21,8 +21,6 @@ const ConfigSchema = z.object({
   metaMinConfidence: z.number().min(0).max(1),
   cognitiveEnabled: z.boolean(),
   theoryEnabled: z.boolean(),
-  soundEnabled: z.boolean(),
-  soundVolume: z.number().int().min(0).max(100),
   animationLevel: z.enum(["off", "minimal", "full"]),
   uiMode: z.enum(["minimal", "normal", "debug"]),
   telegramToken: z.string(),
@@ -36,25 +34,44 @@ const ConfigSchema = z.object({
   dockerEnabled: z.boolean(),
   webPort: z.number().int().min(1024).max(65535),
   webHost: z.string().min(1),
+  webAuthToken: z.string(),
   introEnabled: z.boolean(),
   verboseCallbacks: z.boolean(),
   defaultProfileId: z.string().min(1),
-  profiles: z.array(z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    workspaceRoot: z.string().min(1),
-    readRoots: z.array(z.string()),
-    writeRoots: z.array(z.string()),
-    allowedTools: z.array(z.string()),
-    shellPolicy: z.enum(["disabled", "workspace", "approval-required"]),
-    networkPolicy: z.enum(["disabled", "fetch-only", "browser-allowed"]),
-    autoCheckpoint: z.boolean(),
-  })),
+  profiles: z.array(
+    z.object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      workspaceRoot: z.string().min(1),
+      readRoots: z.array(z.string()),
+      writeRoots: z.array(z.string()),
+      allowedTools: z.array(z.string()),
+      shellPolicy: z.enum(["disabled", "workspace", "approval-required"]),
+      networkPolicy: z.enum(["disabled", "fetch-only", "browser-allowed"]),
+      autoCheckpoint: z.boolean(),
+    }),
+  ),
 });
 
 const DEFAULT_ALLOWED_TOOLS = [
-  "read", "write", "glob", "ls", "shell", "web_fetch", "web_read", "search", "grep", "edit",
-  "tts", "stt", "image", "subagent", "checkpoint", "browse", "job_tracker", "profile_eval",
+  "read",
+  "write",
+  "glob",
+  "ls",
+  "shell",
+  "web_fetch",
+  "web_read",
+  "search",
+  "grep",
+  "edit",
+  "tts",
+  "stt",
+  "image",
+  "subagent",
+  "checkpoint",
+  "browse",
+  "job_tracker",
+  "profile_eval",
 ];
 
 export function validateConfig(config: NtoxConfig): { valid: boolean; errors: string[] } {
@@ -170,8 +187,6 @@ const DEFAULT_CONFIG: NtoxConfig = {
   metaMinConfidence: 0.5,
   cognitiveEnabled: true,
   theoryEnabled: true,
-  soundEnabled: false,
-  soundVolume: 50,
   animationLevel: "minimal" as const,
   uiMode: "normal" as const,
   telegramToken: "",
@@ -185,20 +200,23 @@ const DEFAULT_CONFIG: NtoxConfig = {
   dockerEnabled: false,
   webPort: 3000,
   webHost: "127.0.0.1",
+  webAuthToken: "",
   introEnabled: true,
   verboseCallbacks: false,
   defaultProfileId: "default",
-  profiles: [{
-    id: "default",
-    name: "Default Workspace",
-    workspaceRoot: resolve(process.cwd()),
-    readRoots: [resolve(process.cwd())],
-    writeRoots: [resolve(process.cwd())],
-    allowedTools: DEFAULT_ALLOWED_TOOLS,
-    shellPolicy: "approval-required",
-    networkPolicy: "browser-allowed",
-    autoCheckpoint: true,
-  }],
+  profiles: [
+    {
+      id: "default",
+      name: "Default Workspace",
+      workspaceRoot: resolve(process.cwd()),
+      readRoots: [resolve(process.cwd())],
+      writeRoots: [resolve(process.cwd())],
+      allowedTools: DEFAULT_ALLOWED_TOOLS,
+      shellPolicy: "approval-required",
+      networkPolicy: "browser-allowed",
+      autoCheckpoint: true,
+    },
+  ],
 };
 
 export function getNtoxDir(): string {
@@ -229,9 +247,8 @@ export function loadConfig(): NtoxConfig {
 }
 
 export function normalizeConfig(config: NtoxConfig): NtoxConfig {
-  const profiles = Array.isArray(config.profiles) && config.profiles.length > 0
-    ? config.profiles
-    : DEFAULT_CONFIG.profiles;
+  const profiles =
+    Array.isArray(config.profiles) && config.profiles.length > 0 ? config.profiles : DEFAULT_CONFIG.profiles;
   const normalizedProfiles = profiles.map((profile) => {
     const workspaceRoot = resolve(profile.workspaceRoot || process.cwd());
     return {
@@ -251,7 +268,9 @@ export function normalizeConfig(config: NtoxConfig): NtoxConfig {
 export function saveConfig(config: NtoxConfig): void {
   getNtoxDir();
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
-  try { chmodSync(CONFIG_PATH, 0o600); } catch { }
+  try {
+    chmodSync(CONFIG_PATH, 0o600);
+  } catch {}
 }
 
 export function loadCosts(): { totalInputTokens: number; totalOutputTokens: number; totalCost: number } {

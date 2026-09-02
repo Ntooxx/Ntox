@@ -11,12 +11,16 @@ describe("Executive", () => {
   let exec: Executive;
 
   beforeEach(() => {
-    try { if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH); } catch { }
+    try {
+      if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH);
+    } catch {}
     exec = new Executive(TEST_PATH);
   });
 
   afterAll(() => {
-    try { if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH); } catch { }
+    try {
+      if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH);
+    } catch {}
   });
 
   it("starts with no goals, constraints, or risks", () => {

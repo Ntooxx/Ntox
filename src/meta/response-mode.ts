@@ -1,18 +1,15 @@
 export type ResponseMode =
-  | "profile-update"
-  | "tool-execute"
-  | "emotional-moment"
-  | "simple-query"
-  | "tool-build"
-  | "complex-reasoning";
+  "profile-update" | "tool-execute" | "emotional-moment" | "simple-query" | "tool-build" | "complex-reasoning";
 
 const PROFILE_UPDATE_PATTERNS = [
-  /my name is\s+\w+/i, /\bcall me\s+\w+/i,
+  /my name is\s+\w+/i,
+  /\bcall me\s+\w+/i,
   /i(?:'m| am)\s+\w+\s*,\s*(your|the|a)\s+(creator|maker|builder|founder)/i,
   /set my (name|preference|verbosity|technical|goal)/i,
   /(save|remember|store)\s+(my|this)\s+(name|as)\b/i,
   /(change|update|fix)\s+(my|the)\s+(name|profile)/i,
-  /i work as\b/i, /my (job|role|title) is\b/i,
+  /i work as\b/i,
+  /my (job|role|title) is\b/i,
   /i(?:'m| am)\s+(your|the|a)\s+(creator|founder|maker|builder|developer)/i,
   /\w+\s+is\s+(YOUR|my)\s+(creator|maker|builder)/i,
 ];
@@ -20,7 +17,8 @@ const PROFILE_UPDATE_PATTERNS = [
 const TOOL_EXECUTE_PATTERNS = [
   /^(open|start|launch|run)\s+\w+/i,
   /(open|go\s+to)\s+(https?:\/\/|www\.)/i,
-  /search\s+(for\s+)?/i, /play\s+/i,
+  /search\s+(for\s+)?/i,
+  /play\s+/i,
   /^(stop|close|kill)\s+/i,
 ];
 
@@ -57,7 +55,8 @@ export function classifyMode(input: string): ResponseMode {
   if (TOOL_EXECUTE_PATTERNS.some((p) => p.test(input))) return "tool-execute";
 
   if (input.length < 80 && input.includes("?")) return "simple-query";
-  if (input.length < 40 && !/\b(code|write|build|create|implement|debug|fix|error|bug)\b/i.test(input)) return "simple-query";
+  if (input.length < 40 && !/\b(code|write|build|create|implement|debug|fix|error|bug)\b/i.test(input))
+    return "simple-query";
 
   return "complex-reasoning";
 }

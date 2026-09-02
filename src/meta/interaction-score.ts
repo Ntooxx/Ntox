@@ -28,7 +28,7 @@ const CONTINUATION_PATTERNS = [
 export function scoreInteraction(
   userMessage: string,
   assistantResponse: string,
-  nextUserMessage?: string
+  nextUserMessage?: string,
 ): InteractionScore {
   if (!nextUserMessage) {
     // No feedback yet — neutral score based on response quality

@@ -34,7 +34,9 @@ export class CronManager {
     try {
       if (!existsSync(NTOX_DIR)) mkdirSync(NTOX_DIR, { recursive: true });
       writeFileSync(CRON_PATH, JSON.stringify({ jobs: this.jobs, nextId: this.nextId }, null, 2));
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
   }
 
   setExecutor(executor: (prompt: string) => Promise<string>): void {

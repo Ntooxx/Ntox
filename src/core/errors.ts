@@ -20,17 +20,12 @@ export class ApiError extends NtoxError {
   public readonly httpStatus: number;
   public readonly provider: string;
 
-  constructor(
-    message: string,
-    httpStatus: number,
-    provider: string,
-    retryable?: boolean
-  ) {
+  constructor(message: string, httpStatus: number, provider: string, retryable?: boolean) {
     super(
       message,
       "API_ERROR",
       retryable ?? (httpStatus === 429 || httpStatus === 502 || httpStatus === 503),
-      httpStatus
+      httpStatus,
     );
     this.httpStatus = httpStatus;
     this.provider = provider;
@@ -88,13 +83,19 @@ export function describeError(e: unknown): {
     return {
       message: e.message,
       hint:
-        e.httpStatus === 401 ? "Check your API key (/config) and provider settings (/provider)" :
-        e.httpStatus === 402 ? "Insufficient credits or quota exceeded" :
-        e.httpStatus === 404 ? "Model may not be available on this provider. Try /model to list available models, or check /provider" :
-        e.httpStatus === 429 ? "Rate limited. Wait a moment and try again" :
-        e.httpStatus === 400 ? "Bad request. Model may not support these parameters" :
-        e.httpStatus === 502 || e.httpStatus === 503 ? "Provider temporarily unavailable. Try again in a moment" :
-        null,
+        e.httpStatus === 401
+          ? "Check your API key (/config) and provider settings (/provider)"
+          : e.httpStatus === 402
+            ? "Insufficient credits or quota exceeded"
+            : e.httpStatus === 404
+              ? "Model may not be available on this provider. Try /model to list available models, or check /provider"
+              : e.httpStatus === 429
+                ? "Rate limited. Wait a moment and try again"
+                : e.httpStatus === 400
+                  ? "Bad request. Model may not support these parameters"
+                  : e.httpStatus === 502 || e.httpStatus === 503
+                    ? "Provider temporarily unavailable. Try again in a moment"
+                    : null,
       isAuth: e.httpStatus === 401 || e.httpStatus === 403,
       isNotFound: e.httpStatus === 404,
       isRateLimited: e.httpStatus === 429,

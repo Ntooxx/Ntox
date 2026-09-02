@@ -20,10 +20,7 @@ Extract the skill definition as valid JSON. Return ONLY the JSON object, no extr
 Make the triggers specific enough to avoid false matches but general enough to catch variations.
 The prompt should be detailed step-by-step instructions for the AI.`;
 
-export async function learnSkillFromDescription(
-  llm: LLMClient,
-  description: string
-): Promise<SkillDefinition> {
+export async function learnSkillFromDescription(llm: LLMClient, description: string): Promise<SkillDefinition> {
   const prompt = LEARN_PROMPT.replace("{DESCRIPTION}", description);
 
   const messages = [{ role: "user" as const, content: prompt }];

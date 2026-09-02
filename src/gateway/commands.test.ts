@@ -35,7 +35,11 @@ describe("gateway commands", () => {
   it("records direct command replies into the conversation transcript", () => {
     const messages: { role: "user" | "assistant"; content: string }[] = [];
 
-    recordDirectGatewayResponse({ addMessage: (message) => messages.push(message) }, "/alive", "NTOX Alive\n\nNo events.");
+    recordDirectGatewayResponse(
+      { addMessage: (message) => messages.push(message) },
+      "/alive",
+      "NTOX Alive\n\nNo events.",
+    );
 
     expect(messages).toEqual([
       { role: "user", content: "/alive" },

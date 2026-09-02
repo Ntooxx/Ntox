@@ -16,8 +16,13 @@ async function runForModel(modelId: string, label: string) {
   console.log(`${"=".repeat(60)}\n`);
 
   const judgeLLM = new LLMClient(
-    config.apiKey, "openai/gpt-4o-mini", config.embeddingModel,
-    config.maxTokens, config.temperature, config.apiBaseUrl, config.provider
+    config.apiKey,
+    "openai/gpt-4o-mini",
+    config.embeddingModel,
+    config.maxTokens,
+    config.temperature,
+    config.apiBaseUrl,
+    config.provider,
   );
 
   const report = await runBenchmark(judgeLLM, (msg) => {

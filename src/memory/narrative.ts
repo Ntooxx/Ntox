@@ -13,7 +13,10 @@ function formatDate(ts: number): string {
 function detectTopicRepeated(episodes: Episode[]): string | null {
   const topics = new Map<string, number>();
   for (const ep of episodes) {
-    const words = ep.summary.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
+    const words = ep.summary
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 4);
     for (const w of words) {
       topics.set(w, (topics.get(w) || 0) + 1);
     }

@@ -3,12 +3,13 @@ import type { Tool } from "../types/index.js";
 const SEARCH_URL = "https://lite.duckduckgo.com/lite/";
 
 const HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
   "Accept-Encoding": "gzip, deflate, br",
   "Cache-Control": "no-cache",
-  "Pragma": "no-cache",
+  Pragma: "no-cache",
   "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
   "Sec-Ch-Ua-Mobile": "?0",
   "Sec-Ch-Ua-Platform": '"Windows"',
@@ -20,7 +21,14 @@ const HEADERS = {
 };
 
 function decodeEntities(text: string): string {
-  return text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ").replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)));
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)));
 }
 
 function extractRealUrl(href: string): string {
@@ -40,7 +48,12 @@ function extractSnippets(html: string): string[] {
   let expectSnippet = false;
 
   for (const row of rows) {
-    const text = decodeEntities(row.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+    const text = decodeEntities(
+      row
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim(),
+    );
     if (!text || text.length < 3) continue;
     if (text.includes("Sponsored link")) continue;
 
@@ -80,7 +93,8 @@ function extractSnippets(html: string): string[] {
 
 export const searchTool: Tool = {
   name: "search",
-  description: "Search the web for information. Use this when you need up-to-date information about a topic, product, person, or anything you're unsure about.",
+  description:
+    "Search the web for information. Use this when you need up-to-date information about a topic, product, person, or anything you're unsure about.",
   parameters: {
     type: "object",
     properties: {
@@ -107,7 +121,10 @@ export const searchTool: Tool = {
       const snippets = extractSnippets(html);
       if (snippets.length === 0) {
         if (html.length > 500 && !html.includes("no results")) {
-          return { success: false, error: "Search returned results but parsing failed — DuckDuckGo HTML structure may have changed" };
+          return {
+            success: false,
+            error: "Search returned results but parsing failed — DuckDuckGo HTML structure may have changed",
+          };
         }
         return { success: false, error: "No results found", data: "" };
       }

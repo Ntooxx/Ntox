@@ -10,12 +10,13 @@ const BLOCKED_CIDR = [
   /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/,
   /^192\.168\.\d+\.\d+$/,
   /^169\.254\.\d+\.\d+$/,
-  /^fc00:/, /^fe80:/,
+  /^fc00:/,
+  /^fe80:/,
 ];
 
 const FETCH_HEADERS = {
   "User-Agent": "Mozilla/5.0 (compatible; Ntox/1.0; +https://github.com/Ntooxx/Ntox)",
-  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
   "Accept-Language": "en-US,en;q=0.9",
 };
 
@@ -32,7 +33,11 @@ const BOT_WALL_PATTERNS = [
 export function validateHttpUrl(raw: string): string | null {
   if (raw.length > MAX_URL_LENGTH) return "URL exceeds maximum length";
   let url: URL;
-  try { url = new URL(raw); } catch { return "Invalid URL format"; }
+  try {
+    url = new URL(raw);
+  } catch {
+    return "Invalid URL format";
+  }
   if (!["http:", "https:"].includes(url.protocol)) return `Blocked protocol: ${url.protocol}`;
   const host = url.hostname.toLowerCase();
   if (BLOCKED_HOSTS.includes(host) || BLOCKED_HOSTS.some((h) => host.endsWith(`.${h}`))) {
@@ -49,7 +54,7 @@ function decodeEntities(text: string): string {
     gt: ">",
     lt: "<",
     nbsp: " ",
-    quot: "\"",
+    quot: '"',
   };
   return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (_, entity: string) => {
     const key = entity.toLowerCase();
@@ -96,7 +101,10 @@ export function htmlToBasicMarkdown(html: string): string {
     .replace(/\n{3,}/g, "\n\n");
 }
 
-export function htmlToReadableMarkdown(html: string, url: string): { title: string; content: string; extractor: "readability" | "basic" } {
+export function htmlToReadableMarkdown(
+  html: string,
+  url: string,
+): { title: string; content: string; extractor: "readability" | "basic" } {
   try {
     const { document } = parseHTML(html);
     const parsed = new Readability(document, { charThreshold: 100 }).parse();
@@ -108,8 +116,7 @@ export function htmlToReadableMarkdown(html: string, url: string): { title: stri
         extractor: "readability",
       };
     }
-  } catch {
-  }
+  } catch {}
   return {
     title: extractHtmlTitle(html),
     content: normalizeWhitespace(htmlToBasicMarkdown(html)),
@@ -148,12 +155,17 @@ async function readLimitedResponse(res: Response): Promise<string> {
 
 export const webFetchTool: Tool = {
   name: "web_fetch",
-  description: "Fetch content from a URL with 30s timeout. Returns the content as text, markdown (converted from HTML), or raw HTML.",
+  description:
+    "Fetch content from a URL with 30s timeout. Returns the content as text, markdown (converted from HTML), or raw HTML.",
   parameters: {
     type: "object",
     properties: {
       url: { type: "string", description: "URL to fetch" },
-      format: { type: "string", enum: ["markdown", "text", "html"], description: "Format: text (raw), markdown (HTML→MD), html (raw). Default: markdown" },
+      format: {
+        type: "string",
+        enum: ["markdown", "text", "html"],
+        description: "Format: text (raw), markdown (HTML→MD), html (raw). Default: markdown",
+      },
     },
     required: ["url"],
   },

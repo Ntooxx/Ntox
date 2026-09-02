@@ -6,5 +6,15 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
     setupFiles: ["./src/core/test-setup.ts"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary"],
+      include: ["src/**/*.ts"],
+      exclude: ["src/**/*.test.ts", "src/**/__tests__/**"],
+      thresholds: {
+        lines: 40,
+        functions: 45,
+      },
+    },
   },
 });

@@ -11,11 +11,7 @@ export class Critic {
     this.enabled = val;
   }
 
-  critique(
-    query: string,
-    response: string,
-    primitive: PrimitiveRepresentation
-  ): CritiqueResult {
+  critique(query: string, response: string, primitive: PrimitiveRepresentation): CritiqueResult {
     if (!this.enabled) {
       return {
         completeness: 0.5,
@@ -36,15 +32,13 @@ export class Critic {
     const lower = response.toLowerCase();
     const totalWords = response.split(/\s+/).length;
 
-    const strongHedging = (lower.match(/\b(i'm not sure|not certain|don't know|can't determine|unable to answer)\b/g) || []).length;
+    const strongHedging = (
+      lower.match(/\b(i'm not sure|not certain|don't know|can't determine|unable to answer)\b/g) || []
+    ).length;
     const accuracy = Math.max(0.3, 1 - (strongHedging / Math.max(1, totalWords)) * 10);
 
-    const avgWordsPerSentence = responseSentences > 0
-      ? totalWords / responseSentences
-      : 0;
-    const clarity = avgWordsPerSentence > 5 && avgWordsPerSentence < 40
-      ? 0.8
-      : avgWordsPerSentence > 40 ? 0.5 : 0.7;
+    const avgWordsPerSentence = responseSentences > 0 ? totalWords / responseSentences : 0;
+    const clarity = avgWordsPerSentence > 5 && avgWordsPerSentence < 40 ? 0.8 : avgWordsPerSentence > 40 ? 0.5 : 0.7;
 
     const gaps: string[] = [];
 
@@ -62,7 +56,10 @@ export class Critic {
       }
     }
 
-    if (primitive.action === "code" && !/\b(code|function|class|impl|def|const|let|var|return|import)\b/i.test(response)) {
+    if (
+      primitive.action === "code" &&
+      !/\b(code|function|class|impl|def|const|let|var|return|import)\b/i.test(response)
+    ) {
       gaps.push("Action type is 'code' but response contains no code");
     }
     if (primitive.action === "explain" && responseSentences < 3) {

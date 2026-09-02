@@ -72,10 +72,15 @@ export class SkillLibrary {
           count += this.scanDirectory(fullPath, domain, entry.name);
         } else if (entry.name.endsWith(".md") && !/^(INDEX|README)/i.test(entry.name)) {
           const skill = this.indexFile(fullPath, domain, subdomain);
-          if (skill) { this.index.set(skill.name, skill); count++; }
+          if (skill) {
+            this.index.set(skill.name, skill);
+            count++;
+          }
         }
       }
-    } catch { /* skip unreadable */ }
+    } catch {
+      /* skip unreadable */
+    }
     return count;
   }
 
@@ -136,7 +141,8 @@ export class SkillLibrary {
   private extractTriggers(name: string, title: string, purpose: string, firstLines: string, content: string): string[] {
     const triggerSection = this.extractSection(content, "Triggers");
     if (triggerSection) {
-      const curated = triggerSection.split("\n")
+      const curated = triggerSection
+        .split("\n")
         .map((l) => l.replace(/^[-*\s"]+|"$/g, "").trim())
         .filter((l) => l.length > 0);
       if (curated.length > 0) return curated;
@@ -163,7 +169,10 @@ export class SkillLibrary {
     const voiceMatch = content.match(/\| \*\*(\w+)\*\* \|/g);
     if (voiceMatch) {
       for (const m of voiceMatch) {
-        const v = m.replace(/\| \*\*/, "").replace(/\*\* \|/, "").trim();
+        const v = m
+          .replace(/\| \*\*/, "")
+          .replace(/\*\* \|/, "")
+          .trim();
         voices.push(v);
       }
     }
@@ -187,7 +196,7 @@ export class SkillLibrary {
     const impMatch = content.match(/importance["':\s]*(\d+(?:\.\d+)?)/i);
     if (impMatch) return parseFloat(impMatch[1]);
     // Fallback: higher numbers tend to be more important in the ordering
-    return Math.min(10, Math.max(5, Math.round(5 + (45 - number) / 45 * 5)));
+    return Math.min(10, Math.max(5, Math.round(5 + ((45 - number) / 45) * 5)));
   }
 
   private persistIndex(): void {
@@ -203,7 +212,9 @@ export class SkillLibrary {
       for (const s of data) this.index.set(s.name, s);
       this.loaded = true;
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 
   ensureLoaded(): void {
@@ -263,7 +274,7 @@ export class SkillLibrary {
     for (let i = 0; i < words.length; i++) {
       let hash = 0;
       for (let j = 0; j < words[i].length; j++) {
-        hash = ((hash << 5) - hash) + words[i].charCodeAt(j);
+        hash = (hash << 5) - hash + words[i].charCodeAt(j);
         hash |= 0;
       }
       const idx = Math.abs(hash) % dimensions;
@@ -288,7 +299,7 @@ export class SkillLibrary {
     this.ensureLoaded();
     const lower = name.toLowerCase();
     return Array.from(this.index.values()).find(
-      (s) => s.name.toLowerCase() === lower || s.fileName.toLowerCase() === lower
+      (s) => s.name.toLowerCase() === lower || s.fileName.toLowerCase() === lower,
     );
   }
 
@@ -340,7 +351,9 @@ export class SkillLibrary {
       // No section match — return purpose + principles + first matching content
       const purpose = this.extractSection(content, "Purpose");
       const principle = this.extractSection(content, "Core Principle");
-      const parts = [`# ${skill.name}`, purpose ? `\n\n${purpose}` : "", principle ? `\n\n${principle}` : ""].filter(Boolean);
+      const parts = [`# ${skill.name}`, purpose ? `\n\n${purpose}` : "", principle ? `\n\n${principle}` : ""].filter(
+        Boolean,
+      );
       return parts.join("\n");
     }
 

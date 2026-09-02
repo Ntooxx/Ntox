@@ -39,7 +39,8 @@ describe("classifyMode", () => {
   });
 
   it("returns complex-reasoning for longer messages", () => {
-    const longMsg = "I need you to thoroughly analyze the architecture of a distributed system that handles millions of requests per second, considering fault tolerance, consistency models, and operational complexity";
+    const longMsg =
+      "I need you to thoroughly analyze the architecture of a distributed system that handles millions of requests per second, considering fault tolerance, consistency models, and operational complexity";
     expect(classifyMode(longMsg)).toBe("complex-reasoning");
   });
 });

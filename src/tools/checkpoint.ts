@@ -19,13 +19,15 @@ function checkpointPath(id: string): string {
 function loadAll(): { id: string; originalPath: string; timestamp: number; content: string }[] {
   ensureDir();
   const files = readdirSync(CHECKPOINTS_DIR).filter((f) => f.endsWith(".json"));
-  return files.map((f) => {
-    try {
-      return JSON.parse(readFileSync(join(CHECKPOINTS_DIR, f), "utf-8"));
-    } catch {
-      return null;
-    }
-  }).filter(Boolean);
+  return files
+    .map((f) => {
+      try {
+        return JSON.parse(readFileSync(join(CHECKPOINTS_DIR, f), "utf-8"));
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
 }
 
 function evictOldest(filePath: string): void {
@@ -36,17 +38,26 @@ function evictOldest(filePath: string): void {
     const oldest = all.shift();
     if (!oldest) break;
     const p = checkpointPath(oldest.id);
-    try { if (existsSync(p)) writeFileSync(p, ""); } catch { /* evict best effort */ }
+    try {
+      if (existsSync(p)) writeFileSync(p, "");
+    } catch {
+      /* evict best effort */
+    }
   }
 }
 
 export const checkpointTool: Tool = {
   name: "checkpoint",
-  description: "Create file snapshots, list checkpoints, or rollback to a previous snapshot. Use 'create' before risky edits, 'rollback' to restore, 'list' to see available checkpoints.",
+  description:
+    "Create file snapshots, list checkpoints, or rollback to a previous snapshot. Use 'create' before risky edits, 'rollback' to restore, 'list' to see available checkpoints.",
   parameters: {
     type: "object",
     properties: {
-      action: { type: "string", enum: ["create", "list", "rollback"], description: "Action: create, list, or rollback" },
+      action: {
+        type: "string",
+        enum: ["create", "list", "rollback"],
+        description: "Action: create, list, or rollback",
+      },
       path: { type: "string", description: "File path (required for create and list)" },
       checkpointId: { type: "string", description: "Checkpoint ID (required for rollback)" },
     },
@@ -95,7 +106,10 @@ export const checkpointTool: Tool = {
       const before = existsSync(checkpoint.originalPath) ? readFileSync(checkpoint.originalPath, "utf-8") : null;
       writeFileSync(checkpoint.originalPath, checkpoint.content);
       recordFileChange({ path: checkpoint.originalPath, action: "rollback", before, after: checkpoint.content });
-      return { success: true, data: { restoredTo: checkpoint.originalPath, checkpointId, size: checkpoint.content.length } };
+      return {
+        success: true,
+        data: { restoredTo: checkpoint.originalPath, checkpointId, size: checkpoint.content.length },
+      };
     }
 
     return { success: false, error: `Unknown action: ${action}. Use create, list, or rollback.` };

@@ -58,8 +58,7 @@ export function renderAliveStatus(snapshot: AliveSnapshot): string {
   if (snapshot.predictions.length > 0) {
     lines.push("", "Predictions:");
     for (const prediction of snapshot.predictions.slice(0, 5)) {
-      const error =
-        prediction.predictionError === undefined ? "" : ` error=${prediction.predictionError.toFixed(2)}`;
+      const error = prediction.predictionError === undefined ? "" : ` error=${prediction.predictionError.toFixed(2)}`;
       lines.push(`- ${prediction.status}${error}: ${compact(prediction.statement)}`);
     }
   }

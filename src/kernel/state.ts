@@ -1,12 +1,18 @@
 export const TRAIT_NAMES = [
-  "curiosity", "analytical", "creative", "empathetic",
-  "humor", "directness", "patience", "adaptability",
+  "curiosity",
+  "analytical",
+  "creative",
+  "empathetic",
+  "humor",
+  "directness",
+  "patience",
+  "adaptability",
 ] as const;
 
 export const META_STATES = ["confidence", "energy", "engagement"] as const;
 
-export type TraitName = typeof TRAIT_NAMES[number];
-export type MetaStateName = typeof META_STATES[number];
+export type TraitName = (typeof TRAIT_NAMES)[number];
+export type MetaStateName = (typeof META_STATES)[number];
 
 export class InternalState {
   curiosity: number = 0.7;
@@ -63,22 +69,33 @@ export class WorldState {
 
 export class Action {
   readonly type: string;
-  constructor(type: string) { this.type = type; }
+  constructor(type: string) {
+    this.type = type;
+  }
 }
 
 export class SurfaceToUser extends Action {
   reason: string;
-  constructor(reason: string) { super("SurfaceToUser"); this.reason = reason; }
+  constructor(reason: string) {
+    super("SurfaceToUser");
+    this.reason = reason;
+  }
 }
 
 export class Defer extends Action {
   reason: string;
-  constructor(reason: string) { super("Defer"); this.reason = reason; }
+  constructor(reason: string) {
+    super("Defer");
+    this.reason = reason;
+  }
 }
 
 export class Explore extends Action {
   target: unknown;
-  constructor(target: unknown) { super("Explore"); this.target = target; }
+  constructor(target: unknown) {
+    super("Explore");
+    this.target = target;
+  }
 }
 
 export class ExecuteAction extends Action {
@@ -93,10 +110,16 @@ export class ExecuteAction extends Action {
 
 export class Reflect extends Action {
   topic?: string;
-  constructor(topic?: string) { super("Reflect"); this.topic = topic; }
+  constructor(topic?: string) {
+    super("Reflect");
+    this.topic = topic;
+  }
 }
 
 export class DecomposeGoal extends Action {
   goal: unknown;
-  constructor(goal: unknown) { super("DecomposeGoal"); this.goal = goal; }
+  constructor(goal: unknown) {
+    super("DecomposeGoal");
+    this.goal = goal;
+  }
 }

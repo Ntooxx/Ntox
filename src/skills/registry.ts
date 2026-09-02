@@ -8,7 +8,8 @@ const BUILT_IN_SKILLS: SkillDefinition[] = [
     name: "summarize-file",
     description: "Read and summarize any file with key points",
     category: "utility",
-    prompt: "When asked to summarize a file, first use the read tool to get its contents, then provide a concise summary with 3-5 bullet points covering the main purpose, key functions, and notable patterns.",
+    prompt:
+      "When asked to summarize a file, first use the read tool to get its contents, then provide a concise summary with 3-5 bullet points covering the main purpose, key functions, and notable patterns.",
     triggers: ["summarize", "summary of", "tl;dr"],
     tools: ["read"],
     examples: ["summarize src/index.ts", "can you summarize the main file?"],
@@ -20,7 +21,8 @@ const BUILT_IN_SKILLS: SkillDefinition[] = [
     name: "explain-code",
     description: "Explain what a piece of code does in plain language",
     category: "learning",
-    prompt: "When asked to explain code, first read the file if a path is given, then explain what the code does section by section. Cover: purpose, input/output, key algorithms, edge cases.",
+    prompt:
+      "When asked to explain code, first read the file if a path is given, then explain what the code does section by section. Cover: purpose, input/output, key algorithms, edge cases.",
     triggers: ["explain code", "what does this code do", "explain this"],
     tools: ["read"],
     examples: ["explain the agent.ts file", "what does this function do?"],
@@ -32,7 +34,8 @@ const BUILT_IN_SKILLS: SkillDefinition[] = [
     name: "find-bugs",
     description: "Analyze code for potential bugs and issues",
     category: "coding",
-    prompt: "When asked to find bugs, read the file, then analyze for: null reference risks, type mismatches, race conditions, memory leaks, logic errors, security issues. Rate severity as low/medium/high/critical and suggest fixes.",
+    prompt:
+      "When asked to find bugs, read the file, then analyze for: null reference risks, type mismatches, race conditions, memory leaks, logic errors, security issues. Rate severity as low/medium/high/critical and suggest fixes.",
     triggers: ["find bugs", "bug hunt", "code review", "find issues"],
     tools: ["read", "grep"],
     examples: ["find bugs in src/core/agent.ts", "code review the tools directory"],

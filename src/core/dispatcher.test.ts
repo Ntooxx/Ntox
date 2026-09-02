@@ -118,7 +118,14 @@ describe("SessionManager", () => {
 
 describe("runAgentMessage", () => {
   it("returns error when agent.run throws", async () => {
-    const agent = { run: vi.fn().mockReturnValue((async function*() { yield "x"; throw new Error("fail"); })()) } as unknown as Agent;
+    const agent = {
+      run: vi.fn().mockReturnValue(
+        (async function* () {
+          yield "x";
+          throw new Error("fail");
+        })(),
+      ),
+    } as unknown as Agent;
     const output = new GatewayOutput();
     const result = await runAgentMessage(agent, "hello", output);
     expect(result.error).toBe("fail");

@@ -1,12 +1,22 @@
-import { InternalState, WorldState, Action, SurfaceToUser, Defer, Explore, ExecuteAction, Reflect, DecomposeGoal } from "./state.js";
+import {
+  InternalState,
+  WorldState,
+  Action,
+  SurfaceToUser,
+  Defer,
+  Explore,
+  ExecuteAction,
+  Reflect,
+  DecomposeGoal,
+} from "./state.js";
 import { GoalQueue } from "./goals.js";
 
 export class Thresholds {
-  confidenceFloor: number = 0.30;
-  energyFloor: number = 0.20;
-  curiosityExplore: number = 0.70;
-  patienceFloor: number = 0.30;
-  analyticalVerify: number = 0.70;
+  confidenceFloor: number = 0.3;
+  energyFloor: number = 0.2;
+  curiosityExplore: number = 0.7;
+  patienceFloor: number = 0.3;
+  analyticalVerify: number = 0.7;
 
   constructor(init?: Partial<Thresholds>) {
     if (init) Object.assign(this, init);
@@ -19,12 +29,7 @@ export class DecisionKernel {
   world: WorldState;
   thresholds: Thresholds;
 
-  constructor(
-    goalQueue: GoalQueue,
-    internalState: InternalState,
-    world?: WorldState,
-    thresholds?: Thresholds,
-  ) {
+  constructor(goalQueue: GoalQueue, internalState: InternalState, world?: WorldState, thresholds?: Thresholds) {
     this.goalQueue = goalQueue;
     this.state = internalState;
     this.world = world ?? new WorldState();
@@ -37,14 +42,12 @@ export class DecisionKernel {
 
     if (s.confidence < t.confidenceFloor) {
       return new SurfaceToUser(
-        `confidence too low (${s.confidence.toFixed(2)} < ${t.confidenceFloor.toFixed(2)}) to proceed autonomously`
+        `confidence too low (${s.confidence.toFixed(2)} < ${t.confidenceFloor.toFixed(2)}) to proceed autonomously`,
       );
     }
 
     if (s.energy < t.energyFloor) {
-      return new Defer(
-        `energy depleted (${s.energy.toFixed(2)} < ${t.energyFloor.toFixed(2)}) — resuming next cycle`
-      );
+      return new Defer(`energy depleted (${s.energy.toFixed(2)} < ${t.energyFloor.toFixed(2)}) — resuming next cycle`);
     }
 
     if (this.goalQueue.empty()) {

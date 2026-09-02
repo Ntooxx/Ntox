@@ -27,17 +27,26 @@ export class CognitiveKernel {
     this.space = new CognitiveSpace();
     this.compressor = new MeaningCompressor();
     this.patterns = new PatternStore(this.space);
-    this.activator = new SparseActivator(registry, this.space);
+    this.activator = new SparseActivator();
     this.critic = new Critic(true);
     this.registry = registry;
     this.enabled = false;
   }
 
-  setEnabled(val: boolean): void { this.enabled = val; }
-  isEnabled(): boolean { return this.enabled; }
+  setEnabled(val: boolean): void {
+    this.enabled = val;
+  }
+  isEnabled(): boolean {
+    return this.enabled;
+  }
 
   private patternToSkill(pattern: CognitivePattern): SkillDefinition {
-    const name = pattern.name.toLowerCase().replace(/[^a-z0-9-]/gi, "_").replace(/_+/g, "-").replace(/^-|-$/g, "") || "compiled-pattern";
+    const name =
+      pattern.name
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/gi, "_")
+        .replace(/_+/g, "-")
+        .replace(/^-|-$/g, "") || "compiled-pattern";
     const template = pattern.compiledTemplate || pattern.reasoningTemplate || "";
     return {
       name: name.slice(0, 50),
@@ -62,7 +71,9 @@ export class CognitiveKernel {
 
     if (!this.enabled) {
       return {
-        primitive, patterns: [], cognitiveContext: "",
+        primitive,
+        patterns: [],
+        cognitiveContext: "",
         critique: { completeness: 0.5, accuracy: 0.5, clarity: 0.5, gaps: [], strengthened: true },
         compiledPatterns,
       };
@@ -77,9 +88,7 @@ export class CognitiveKernel {
     let critique: CritiqueResult;
     if (response) {
       critique = this.critic.critique(query, response, primitive);
-      const strongPatterns = retrievedPatterns.filter(
-        (p) => p.strength >= 0.5 && p.compileCount >= 3
-      );
+      const strongPatterns = retrievedPatterns.filter((p) => p.strength >= 0.5 && p.compileCount >= 3);
       const primaryPattern = strongPatterns[0] || retrievedPatterns[0];
 
       if (primaryPattern) {
@@ -126,8 +135,16 @@ export class CognitiveKernel {
     return { gaps, shouldRetry, correctionPrompt };
   }
 
-  getSpace(): CognitiveSpace { return this.space; }
-  getPatterns(): PatternStore { return this.patterns; }
-  getCompressor(): MeaningCompressor { return this.compressor; }
-  getCritic(): Critic { return this.critic; }
+  getSpace(): CognitiveSpace {
+    return this.space;
+  }
+  getPatterns(): PatternStore {
+    return this.patterns;
+  }
+  getCompressor(): MeaningCompressor {
+    return this.compressor;
+  }
+  getCritic(): Critic {
+    return this.critic;
+  }
 }

@@ -86,7 +86,11 @@ export class StyleOptimizer {
     if (!this.lastResponseStyle) return;
     this.totalSamples++;
 
-    const rate = effectiveness.isPositive ? ADJUSTMENT_RATE : effectiveness.isNegative ? -ADJUSTMENT_RATE * 1.5 : ADJUSTMENT_RATE * 0.2;
+    const rate = effectiveness.isPositive
+      ? ADJUSTMENT_RATE
+      : effectiveness.isNegative
+        ? -ADJUSTMENT_RATE * 1.5
+        : ADJUSTMENT_RATE * 0.2;
 
     // Helper to softmax in-place
     const softmaxInPlace = (obj: Record<string, number>): void => {
@@ -104,7 +108,10 @@ export class StyleOptimizer {
     let directnessKey: keyof StyleWeights["directness"] = "balanced";
     if (this.lastResponseStyle.length < 200 && !this.lastResponseStyle.hasCode) directnessKey = "direct";
     else if (this.lastResponseStyle.hasExamples) directnessKey = "narrative";
-    this.weights.directness[directnessKey] = Math.max(0.05, Math.min(0.9, this.weights.directness[directnessKey] + rate * 0.5));
+    this.weights.directness[directnessKey] = Math.max(
+      0.05,
+      Math.min(0.9, this.weights.directness[directnessKey] + rate * 0.5),
+    );
     softmaxInPlace(this.weights.directness);
     this.dirty = true;
 
@@ -195,7 +202,8 @@ export function classifyResponseStyle(response: string): ResponseStyle {
 
   return {
     verbosity,
-    hasCode: lower.includes("```") || lower.includes("<tool_call>") || lower.includes("function") && lower.includes("{"),
+    hasCode:
+      lower.includes("```") || lower.includes("<tool_call>") || (lower.includes("function") && lower.includes("{")),
     hasBullets: /^[-*]\s/m.test(lower),
     hasExamples: /\b(for example|for instance|e\.g\.|like|such as)\b/i.test(lower),
     length: len,
@@ -208,7 +216,9 @@ const AB_PATH = join(NTOX_DIR, "ab-tests.json");
 function loadABTests(): Record<string, { variantA: number; variantB: number; wins: number; total: number }> {
   try {
     if (existsSync(AB_PATH)) return JSON.parse(readFileSync(AB_PATH, "utf-8"));
-  } catch { /* start fresh */ }
+  } catch {
+    /* start fresh */
+  }
   return {};
 }
 
@@ -250,4 +260,3 @@ export function recordABResult(testKey: string, variant: "A" | "B", positive: bo
   if (positive) tests[testKey].wins++;
   saveABTests(tests);
 }
-

@@ -30,7 +30,10 @@ export class BlockBuffer {
   }
 
   forceFlush(): void {
-    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
     if (this.buffer.length === 0) return;
     const chunk = this.buffer;
     this.buffer = "";

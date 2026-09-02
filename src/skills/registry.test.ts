@@ -9,7 +9,11 @@ const skillsDir = join(getBaseDir(), "skills");
 
 describe("SkillRegistry", () => {
   afterEach(() => {
-    try { rmSync(skillsDir, { recursive: true, force: true }); } catch { /* cleanup */ }
+    try {
+      rmSync(skillsDir, { recursive: true, force: true });
+    } catch {
+      /* cleanup */
+    }
   });
 
   const testSkill: SkillDefinition = {

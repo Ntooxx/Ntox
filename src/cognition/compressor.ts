@@ -20,16 +20,20 @@ export class MeaningCompressor {
     let maxMatches = 0;
     for (const [actionType, patterns] of Object.entries(ACTION_TYPES)) {
       const matches = patterns.filter((p) => p.test(lower)).length;
-      if (matches > maxMatches) { maxMatches = matches; action = actionType; }
+      if (matches > maxMatches) {
+        maxMatches = matches;
+        action = actionType;
+      }
     }
 
     const sentences = query.split(/[.!?]+/).filter((s) => s.trim().length > 0);
     const avgWordsPerSentence = sentences.length > 0 ? query.split(/\s+/).length / sentences.length : 0;
-    const complexity = Math.min(1, (avgWordsPerSentence / 30) * 0.5 + (domains.length * 0.1) * 0.5);
+    const complexity = Math.min(1, (avgWordsPerSentence / 30) * 0.5 + domains.length * 0.1 * 0.5);
 
-    const conceptualSummary = domains.length > 0
-      ? `${action} problem involving ${domains.slice(0, 3).join(", ")}${domains.length > 3 ? " and others" : ""}`
-      : `${action} query`;
+    const conceptualSummary =
+      domains.length > 0
+        ? `${action} problem involving ${domains.slice(0, 3).join(", ")}${domains.length > 3 ? " and others" : ""}`
+        : `${action} query`;
 
     return { domains, action, complexity, conceptualSummary };
   }

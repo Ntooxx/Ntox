@@ -82,12 +82,7 @@ export class MemoryStore {
     writeFileSync(DURABLE_MEMORY_PATH, JSON.stringify(this.durable, null, 2));
   }
 
-  addEpisode(
-    sessionId: string,
-    userMessage: string,
-    assistantResponse: string,
-    embedding: number[]
-  ): Episode {
+  addEpisode(sessionId: string, userMessage: string, assistantResponse: string, embedding: number[]): Episode {
     this.load();
     const episode: Episode = {
       id: `ep_${randomUUID().slice(0, 8)}`,
@@ -168,7 +163,7 @@ export class MemoryStore {
     text: string,
     provenance = "manual",
     confidence = 0.95,
-    source: "user" | "agent" = "user"
+    source: "user" | "agent" = "user",
   ): DurableMemory {
     this.loadDurable();
     const now = Date.now();
@@ -302,10 +297,7 @@ export class MemoryStore {
     return this.episodes.length;
   }
 
-  buildMemoryContext(
-    queryEmbedding: number[] | null,
-    maxMemories: number = 5
-  ): string {
+  buildMemoryContext(queryEmbedding: number[] | null, maxMemories: number = 5): string {
     this.load();
 
     let relevant: Episode[];

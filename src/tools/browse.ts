@@ -11,7 +11,9 @@ async function launchBrowser(): Promise<any> {
     try {
       chromium = (await import("playwright-core")).chromium;
     } catch {
-      const runtimeImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<any>;
+      const runtimeImport = new Function("specifier", "return import(specifier)") as (
+        specifier: string,
+      ) => Promise<any>;
       chromium = (await runtimeImport("playwright")).chromium;
     }
     return await chromium.launch({
@@ -78,7 +80,8 @@ export const browseTool: Tool = {
       action: {
         type: "string",
         enum: ["snapshot", "extract", "click", "scroll", "markdown"],
-        description: "snapshot (get page text), markdown (page HTML as markdown), extract (get text from selector), click (click element), scroll (scroll down and snapshot)",
+        description:
+          "snapshot (get page text), markdown (page HTML as markdown), extract (get text from selector), click (click element), scroll (scroll down and snapshot)",
       },
       selector: { type: "string", description: "CSS selector for extract/click actions" },
       waitMs: { type: "number", description: "Milliseconds to wait after page load (default: 3000)" },
@@ -118,14 +121,36 @@ export const browseTool: Tool = {
           await scrollPage(page, args.scrollTimes != null ? Number(args.scrollTimes) : 3);
           const text: string = await page.innerText("body");
           const truncated = text.length > 15000 ? text.slice(0, 15000) + "\n\n... (truncated)" : text;
-          return { success: true, data: { url: page.url(), action, title: await page.title(), content: truncated, length: text.length, diagnostics: diagnoseFetchedContent(text, false), method: "browser" } };
+          return {
+            success: true,
+            data: {
+              url: page.url(),
+              action,
+              title: await page.title(),
+              content: truncated,
+              length: text.length,
+              diagnostics: diagnoseFetchedContent(text, false),
+              method: "browser",
+            },
+          };
         }
         case "markdown": {
           await scrollPage(page, args.scrollTimes != null ? Number(args.scrollTimes) : 1);
           const html: string = await page.content();
           const content = htmlToBasicMarkdown(html).trim();
           const truncated = content.length > 15000 ? content.slice(0, 15000) + "\n\n... (truncated)" : content;
-          return { success: true, data: { url: page.url(), action, title: await page.title(), content: truncated, length: content.length, diagnostics: diagnoseFetchedContent(html, true), method: "browser" } };
+          return {
+            success: true,
+            data: {
+              url: page.url(),
+              action,
+              title: await page.title(),
+              content: truncated,
+              length: content.length,
+              diagnostics: diagnoseFetchedContent(html, true),
+              method: "browser",
+            },
+          };
         }
         case "extract": {
           const selector = String(args.selector || "body");
@@ -145,7 +170,17 @@ export const browseTool: Tool = {
         case "scroll": {
           await scrollPage(page, args.scrollTimes != null ? Number(args.scrollTimes) : 3);
           const text: string = await page.innerText("body");
-          return { success: true, data: { url: page.url(), action, content: text.slice(0, 15000), length: text.length, diagnostics: diagnoseFetchedContent(text, false), method: "browser" } };
+          return {
+            success: true,
+            data: {
+              url: page.url(),
+              action,
+              content: text.slice(0, 15000),
+              length: text.length,
+              diagnostics: diagnoseFetchedContent(text, false),
+              method: "browser",
+            },
+          };
         }
         default:
           return { success: false, error: `Unknown action: ${action}` };

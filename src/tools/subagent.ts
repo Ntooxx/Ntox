@@ -30,7 +30,11 @@ const RUNS_PATH = join(NTOX_DIR, "subagent-runs.json");
 
 function loadRuns(): SubagentRun[] {
   if (!existsSync(RUNS_PATH)) return [];
-  try { return JSON.parse(readFileSync(RUNS_PATH, "utf-8")) as SubagentRun[]; } catch { return []; }
+  try {
+    return JSON.parse(readFileSync(RUNS_PATH, "utf-8")) as SubagentRun[];
+  } catch {
+    return [];
+  }
 }
 
 function saveRuns(runs: SubagentRun[]): void {
@@ -47,17 +51,23 @@ function upsertRun(run: SubagentRun): void {
 }
 
 export function getSubagentRuns(limit = 20): SubagentRun[] {
-  return loadRuns().sort((a, b) => b.startedAt - a.startedAt).slice(0, limit);
+  return loadRuns()
+    .sort((a, b) => b.startedAt - a.startedAt)
+    .slice(0, limit);
 }
 
 export const subagentTool: Tool = {
   name: "subagent",
-  description: "Spawn an isolated subagent to handle a task independently. The subagent has its own message history and can use a filtered set of tools. Use for parallel or isolated work.",
+  description:
+    "Spawn an isolated subagent to handle a task independently. The subagent has its own message history and can use a filtered set of tools. Use for parallel or isolated work.",
   parameters: {
     type: "object",
     properties: {
       task: { type: "string", description: "Task description or prompt for the subagent" },
-      tools: { type: "string", description: "Comma-separated list of tool names the subagent can use (default: all available tools)" },
+      tools: {
+        type: "string",
+        description: "Comma-separated list of tool names the subagent can use (default: all available tools)",
+      },
     },
     required: ["task"],
   },
@@ -72,7 +82,10 @@ export const subagentTool: Tool = {
     activeCount++;
     const sessionId = `subagent-${randomUUID().slice(0, 8)}`;
     const requestedTools = args.tools
-      ? String(args.tools).split(",").map((t) => t.trim()).filter(Boolean)
+      ? String(args.tools)
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
       : [];
     const run: SubagentRun = {
       id: `run_${randomUUID().slice(0, 8)}`,
@@ -116,13 +129,17 @@ export const subagentTool: Tool = {
 
       const workPromise = (async () => {
         const stream = agent.run(task, {
-          onToken: (t) => { response += t; },
+          onToken: (t) => {
+            response += t;
+          },
           onToolCall: () => {},
           onToolResult: () => {},
           onUsage: () => {},
           onThinking: () => {},
         });
-        for await (const _ of stream) { /* drain */ }
+        for await (const _ of stream) {
+          /* drain */
+        }
         return response.trim();
       })();
 

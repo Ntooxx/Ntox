@@ -7,16 +7,18 @@ describe("inspect formatters", () => {
     const snapshot = {
       observations: [{ id: "obs_1", description: "observation", domain: "programming", confidence: 0.4, timestamp: 0 }],
       patterns: [{ id: "pat_1", name: "pattern", generalization: "general", confidence: 0.3, timestamp: 0 }],
-      theories: [{
-        id: "theory_1",
-        name: "Theory one",
-        explanation: "This explains a repeated behavior.",
-        predictions: ["future behavior repeats"],
-        falsificationCriteria: "counterexample",
-        confirmed: false,
-        confidence: 0.25,
-        timestamp: 0,
-      }],
+      theories: [
+        {
+          id: "theory_1",
+          name: "Theory one",
+          explanation: "This explains a repeated behavior.",
+          predictions: ["future behavior repeats"],
+          falsificationCriteria: "counterexample",
+          confirmed: false,
+          confidence: 0.25,
+          timestamp: 0,
+        },
+      ],
       metaTheories: [],
     };
 
@@ -25,20 +27,22 @@ describe("inspect formatters", () => {
   });
 
   it("formats pattern overview and detail", () => {
-    const patterns: CognitivePattern[] = [{
-      id: "pat_1",
-      name: "software-dev",
-      domains: ["programming"],
-      vector: [],
-      activatedRules: [],
-      reasoningTemplate: "test and verify",
-      strength: 0.5,
-      hitCount: 2,
-      compileCount: 1,
-      compiledTemplate: "",
-      lastActivated: 0,
-      created: 0,
-    }];
+    const patterns: CognitivePattern[] = [
+      {
+        id: "pat_1",
+        name: "software-dev",
+        domains: ["programming"],
+        vector: [],
+        activatedRules: [],
+        reasoningTemplate: "test and verify",
+        strength: 0.5,
+        hitCount: 2,
+        compileCount: 1,
+        compiledTemplate: "",
+        lastActivated: 0,
+        created: 0,
+      },
+    ];
 
     expect(formatPatternOverview(patterns)).toContain("software-dev");
     expect(formatPatternDetail(patterns, "pat_1")).toContain("test and verify");

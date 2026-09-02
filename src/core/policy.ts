@@ -94,9 +94,8 @@ function checkNetwork(runtime: PolicyRuntime, tool: string, args: Record<string,
 
 function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, unknown>): ToolResult | null {
   const keys = PATH_KEYS[tool] || [];
-  const fallback = tool === "shell" || tool === "ls" || tool === "glob" || tool === "grep"
-    ? runtime.profile.workspaceRoot
-    : "";
+  const fallback =
+    tool === "shell" || tool === "ls" || tool === "glob" || tool === "grep" ? runtime.profile.workspaceRoot : "";
   for (const key of keys) {
     if (!args[key] && !fallback) {
       if (tool === "checkpoint") continue;
@@ -104,8 +103,10 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
     }
     const path = argPath(args, key, fallback);
     if (tool === "shell") {
-      if (runtime.profile.shellPolicy === "disabled") return deny(runtime, tool, `Shell disabled for profile ${runtime.profile.id}`, path);
-      if (!isWithinRoot(path, [runtime.profile.workspaceRoot])) return deny(runtime, tool, `Shell workdir outside workspace`, path);
+      if (runtime.profile.shellPolicy === "disabled")
+        return deny(runtime, tool, `Shell disabled for profile ${runtime.profile.id}`, path);
+      if (!isWithinRoot(path, [runtime.profile.workspaceRoot]))
+        return deny(runtime, tool, `Shell workdir outside workspace`, path);
       record(runtime, tool, true, `Shell allowed in workspace`, path);
       args.workdir = path;
       continue;
@@ -116,7 +117,9 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
         const checkpointId = String(args.checkpointId || "");
         if (!checkpointId) return deny(runtime, tool, "checkpointId is required for rollback");
         try {
-          const cp = JSON.parse(readFileSync(join(NTOX_DIR, "checkpoints", `${checkpointId}.json`), "utf-8")) as { originalPath?: string };
+          const cp = JSON.parse(readFileSync(join(NTOX_DIR, "checkpoints", `${checkpointId}.json`), "utf-8")) as {
+            originalPath?: string;
+          };
           if (!cp.originalPath || !isWithinRoot(cp.originalPath, runtime.profile.writeRoots)) {
             return deny(runtime, tool, "Checkpoint rollback target outside write roots", cp.originalPath);
           }
@@ -126,7 +129,8 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
       }
       if (action === "rollback" || action === "create") {
         const roots = action === "rollback" ? runtime.profile.writeRoots : runtime.profile.readRoots;
-        if (args.path && !isWithinRoot(path, roots)) return deny(runtime, tool, `Checkpoint ${action} outside allowed roots`, path);
+        if (args.path && !isWithinRoot(path, roots))
+          return deny(runtime, tool, `Checkpoint ${action} outside allowed roots`, path);
       }
       record(runtime, tool, true, `Checkpoint allowed`, path);
       continue;
@@ -139,7 +143,11 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
   return null;
 }
 
-async function maybeCheckpoint(runtime: PolicyRuntime, tool: string, args: Record<string, unknown>): Promise<string | null> {
+async function maybeCheckpoint(
+  runtime: PolicyRuntime,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<string | null> {
   if (!runtime.profile.autoCheckpoint || !WRITE_TOOLS.has(tool)) return null;
   const path = tool === "edit" ? String(args.filePath || "") : String(args.path || "");
   if (!path || !existsSync(path)) return null;
@@ -158,9 +166,10 @@ async function maybeCheckpoint(runtime: PolicyRuntime, tool: string, args: Recor
 
 function attachCheckpoint(result: ToolResult, checkpointId: string | null): ToolResult {
   if (!checkpointId || !result.success) return result;
-  const data = result.data && typeof result.data === "object" && !Array.isArray(result.data)
-    ? { ...result.data as Record<string, unknown>, autoCheckpointId: checkpointId }
-    : { result: result.data, autoCheckpointId: checkpointId };
+  const data =
+    result.data && typeof result.data === "object" && !Array.isArray(result.data)
+      ? { ...(result.data as Record<string, unknown>), autoCheckpointId: checkpointId }
+      : { result: result.data, autoCheckpointId: checkpointId };
   return { ...result, data };
 }
 

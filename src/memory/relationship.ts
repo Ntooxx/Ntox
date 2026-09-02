@@ -196,11 +196,19 @@ export class RelationshipTracker {
     return lines.join("\n");
   }
 
-  getBondLevel(): number { return this.data.bondLevel; }
-  getStreak(): number { return this.data.streakDays; }
+  getBondLevel(): number {
+    return this.data.bondLevel;
+  }
+  getStreak(): number {
+    return this.data.streakDays;
+  }
 
   reset(): void {
-    this.data = { ...DEFAULT_DATA, currentWeek: getWeekNumber(), lastActiveDate: new Date().toISOString().slice(0, 10) };
+    this.data = {
+      ...DEFAULT_DATA,
+      currentWeek: getWeekNumber(),
+      lastActiveDate: new Date().toISOString().slice(0, 10),
+    };
     this.dirty = true;
     this.persist();
   }

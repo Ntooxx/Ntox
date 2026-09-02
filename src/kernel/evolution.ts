@@ -60,8 +60,23 @@ export class StateTransition {
 
   valuesChanged(): string[] {
     const changed: string[] = [];
-    for (const key of ["curiosity", "analytical", "creative", "empathetic", "humor", "directness", "patience", "adaptability", "confidence", "energy", "engagement"]) {
-      if ((this.before as unknown as Record<string, number>)[key] !== (this.after as unknown as Record<string, number>)[key]) {
+    for (const key of [
+      "curiosity",
+      "analytical",
+      "creative",
+      "empathetic",
+      "humor",
+      "directness",
+      "patience",
+      "adaptability",
+      "confidence",
+      "energy",
+      "engagement",
+    ]) {
+      if (
+        (this.before as unknown as Record<string, number>)[key] !==
+        (this.after as unknown as Record<string, number>)[key]
+      ) {
         changed.push(key);
       }
     }
@@ -227,7 +242,7 @@ export class IdentityLog {
     if (this.transitions.length === 0) return [];
     const result: Array<{ cycle: number; value: number }> = [];
     const first = this.transitions[0];
-      result.push({ cycle: first.cycle, value: (first.before as unknown as Record<string, number>)[field] });
+    result.push({ cycle: first.cycle, value: (first.before as unknown as Record<string, number>)[field] });
     for (const t of this.transitions) {
       result.push({ cycle: t.cycle, value: (t.after as unknown as Record<string, number>)[field] });
     }
@@ -259,7 +274,9 @@ export class IdentityLog {
     if (existsSync(filePath)) {
       try {
         existing = JSON.parse(readFileSync(filePath, "utf-8"));
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
 
     const existingCount = Array.isArray(existing) ? existing.length : 0;
@@ -270,7 +287,13 @@ export class IdentityLog {
     const tmp = filePath + ".tmp";
     writeFileSync(tmp, JSON.stringify(all, null, 2), "utf-8");
     writeFileSync(filePath, JSON.stringify(all, null, 2), "utf-8");
-    try { if (existsSync(tmp)) { unlinkSync(tmp); } } catch { /* ignore */ }
+    try {
+      if (existsSync(tmp)) {
+        unlinkSync(tmp);
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   static load(filePath: string): IdentityLog {
@@ -283,9 +306,13 @@ export class IdentityLog {
         if (!entry || typeof entry !== "object") continue;
         try {
           log.append(StateTransition.fromJSON(entry as Record<string, unknown>));
-        } catch { /* skip malformed */ }
+        } catch {
+          /* skip malformed */
+        }
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return log;
   }
 
@@ -308,11 +335,7 @@ export class EvolutionConfig {
   }
 }
 
-export function evolveState(
-  state: InternalState,
-  actionResult: ActionResult,
-  config?: EvolutionConfig,
-): InternalState {
+export function evolveState(state: InternalState, actionResult: ActionResult, config?: EvolutionConfig): InternalState {
   const cfg = config ?? new EvolutionConfig();
   const newState = state.clone();
 

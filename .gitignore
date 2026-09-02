@@ -13,3 +13,7 @@ coverage/
 .external/
 !skills/
 Horizon.md
+/_part*.txt
+/part*.js
+/ledger*.txt
+/*.html

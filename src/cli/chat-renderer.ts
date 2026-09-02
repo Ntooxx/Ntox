@@ -182,7 +182,9 @@ export class ChatRenderer {
     this.prose.flush();
     const w = this.codeWidth();
     const label = lang ? `${chalk.cyan(lang)}` : "";
-    const title = label ? `${label} ${chalk.dim("\u2500".repeat(Math.max(0, w - label.length - 1)))}` : chalk.dim("\u2500".repeat(w));
+    const title = label
+      ? `${label} ${chalk.dim("\u2500".repeat(Math.max(0, w - label.length - 1)))}`
+      : chalk.dim("\u2500".repeat(w));
     this.out.write(`${this.prefix}${chalk.dim(`\u250c ${title} \u2510`)}\n`);
   }
 

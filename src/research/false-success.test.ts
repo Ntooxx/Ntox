@@ -2,7 +2,11 @@ import { describe, it, expect } from "vitest";
 import { checkForSurfaceReasoning } from "./false-success.js";
 import type { CognitiveTrace } from "../types/index.js";
 
-function makeTrace(finalAnswer: string, selfCritique: string = "", assumptions: string[] = ["some assumption"]): CognitiveTrace {
+function makeTrace(
+  finalAnswer: string,
+  selfCritique: string = "",
+  assumptions: string[] = ["some assumption"],
+): CognitiveTrace {
   return {
     problemRepresentation: "test question",
     assumptions,
@@ -29,7 +33,7 @@ describe("checkForSurfaceReasoning", () => {
 
   it("passes answers with deep reasoning", () => {
     const deep = makeTrace(
-      "The reason is because the underlying mechanism involves feedback loops. However, we must consider the counterargument. Fundamentally, this implies a first-principles approach."
+      "The reason is because the underlying mechanism involves feedback loops. However, we must consider the counterargument. Fundamentally, this implies a first-principles approach.",
     );
     const result = checkForSurfaceReasoning(deep);
     expect(result.isSurface).toBe(false);

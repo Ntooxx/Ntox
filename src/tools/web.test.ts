@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { diagnoseFetchedContent, extractHtmlTitle, htmlToBasicMarkdown, htmlToReadableMarkdown, webFetchTool } from "./web.js";
+import {
+  diagnoseFetchedContent,
+  extractHtmlTitle,
+  htmlToBasicMarkdown,
+  htmlToReadableMarkdown,
+  webFetchTool,
+} from "./web.js";
 
 describe("webFetchTool — URL validation", () => {
   it("blocks file:// protocol", async () => {

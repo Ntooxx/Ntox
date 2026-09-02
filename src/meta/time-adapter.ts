@@ -36,9 +36,7 @@ export function buildTimeContext(lastActiveTimestamp: number): TimeContext {
     isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
     isQuietHours: hour >= QUIET_HOURS_START || hour < QUIET_HOURS_END,
     timeOfDay: getTimeOfDay(hour),
-    minutesSinceLastActive: lastActiveTimestamp > 0
-      ? Math.floor((now.getTime() - lastActiveTimestamp) / 60000)
-      : 9999,
+    minutesSinceLastActive: lastActiveTimestamp > 0 ? Math.floor((now.getTime() - lastActiveTimestamp) / 60000) : 9999,
   };
 }
 

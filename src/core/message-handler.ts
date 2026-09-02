@@ -61,7 +61,7 @@ export async function runAgentStream(
   agent: Agent,
   input: string,
   callbacks: Partial<AgentCallbacks>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<StreamResult> {
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -116,7 +116,9 @@ export async function runAgentStream(
 
   try {
     const stream = agent.run(input, agentCallbacks, { signal: controller.signal });
-    for await (const _ of stream) { void _; }
+    for await (const _ of stream) {
+      void _;
+    }
   } catch (err) {
     streamError = err instanceof Error ? err : new Error(String(err));
     cancelled = (signal?.aborted || streamError.message.includes("cancelled")) && !timedOut;

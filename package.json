@@ -97,6 +97,7 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.14.1",
     "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.7.0",
     "prettier": "^3.3.3",
     "tsx": "^4.19.4",

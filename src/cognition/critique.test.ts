@@ -26,7 +26,7 @@ describe("Critic", () => {
     const result = critic.critique(
       "Explain the entire architecture of a distributed system with consensus protocols",
       "Yes.",
-      primitive
+      primitive,
     );
     expect(result.completeness).toBeLessThan(0.5);
     expect(result.gaps.some((g) => g.includes("too brief"))).toBe(true);
@@ -35,11 +35,7 @@ describe("Critic", () => {
   it("flags missing domain coverage", () => {
     const critic = new Critic();
     const primitive = makePrimitive({ domains: ["python", "database"] });
-    const result = critic.critique(
-      "How do I use Python with PostgreSQL?",
-      "You should use a computer.",
-      primitive
-    );
+    const result = critic.critique("How do I use Python with PostgreSQL?", "You should use a computer.", primitive);
     expect(result.gaps.some((g) => g.includes("domains"))).toBe(true);
   });
 
@@ -49,7 +45,7 @@ describe("Critic", () => {
     const result = critic.critique(
       "Write code to sort a list",
       "The quick brown fox jumps over the lazy dog. This is a simple sentence about nothing relevant.",
-      primitive
+      primitive,
     );
     expect(result.gaps.some((g) => g.includes("code"))).toBe(true);
   });
@@ -57,11 +53,7 @@ describe("Critic", () => {
   it("flags explain action with too few sentences", () => {
     const critic = new Critic();
     const primitive = makePrimitive({ action: "explain" });
-    const result = critic.critique(
-      "Explain how TCP works",
-      "TCP is a protocol.",
-      primitive
-    );
+    const result = critic.critique("Explain how TCP works", "TCP is a protocol.", primitive);
     expect(result.gaps.some((g) => g.includes("explain"))).toBe(true);
   });
 
@@ -71,7 +63,7 @@ describe("Critic", () => {
     const result = critic.critique(
       "What is Python?",
       "Python is a high-level programming language known for its simplicity and readability. It supports multiple paradigms including object-oriented, functional, and procedural programming. Python is widely used in web development, data science, and automation.",
-      primitive
+      primitive,
     );
     expect(result.completeness).toBeGreaterThan(0.3);
     expect(result.accuracy).toBeGreaterThan(0.5);
@@ -84,7 +76,7 @@ describe("Critic", () => {
     const result = critic.critique(
       "What is X?",
       "I'm not sure, but I don't know, I can't determine the answer.",
-      makePrimitive()
+      makePrimitive(),
     );
     expect(result.accuracy).toBeLessThan(0.5);
   });
@@ -94,7 +86,7 @@ describe("Critic", () => {
     const result = critic.critique(
       "query",
       "This is a clear and concise sentence. Another sentence that is well structured. A third sentence to round things out.",
-      makePrimitive()
+      makePrimitive(),
     );
     expect(result.clarity).toBeGreaterThanOrEqual(0.7);
   });

@@ -114,9 +114,7 @@ export class Goal {
   }
 
   readySubtasks(): Subtask[] {
-    return this.subtasks.filter(
-      (s) => !s.isVerified && !this.isBlocked(s.id)
-    );
+    return this.subtasks.filter((s) => !s.isVerified && !this.isBlocked(s.id));
   }
 
   nextSubtasks(): Subtask[] {
@@ -149,7 +147,7 @@ export class GoalQueue {
 
   highestPriority(): Goal | null {
     if (this.goals.length === 0) return null;
-    return this.goals.reduce((best, g) => g.priority > best.priority ? g : best);
+    return this.goals.reduce((best, g) => (g.priority > best.priority ? g : best));
   }
 
   add(goal: Goal): void {

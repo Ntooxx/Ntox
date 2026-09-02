@@ -73,12 +73,17 @@ export class BriefingEngine {
     try {
       writeFileSync(tmp, JSON.stringify(this.state, null, 2));
       writeFileSync(this.path, readFileSync(tmp, "utf-8"));
-    } catch { }
-    try { unlinkSync(tmp); } catch { }
+    } catch {}
+    try {
+      unlinkSync(tmp);
+    } catch {}
   }
 
   private persist(): void {
-    if (this.dirty) { this.save(); this.dirty = false; }
+    if (this.dirty) {
+      this.save();
+      this.dirty = false;
+    }
   }
 
   flush(): void {
@@ -148,15 +153,20 @@ export class BriefingEngine {
 
     const activeGoals = ctx.goals.filter((g) => g.status === "active");
     if (activeGoals.length > 0) {
-      const goalLines = activeGoals.map((g) => {
-        const bar = g.progress > 0 ? ` (${g.progress}%)` : "";
-        return `- ${g.description}${bar}`;
-      }).join("\n");
+      const goalLines = activeGoals
+        .map((g) => {
+          const bar = g.progress > 0 ? ` (${g.progress}%)` : "";
+          return `- ${g.description}${bar}`;
+        })
+        .join("\n");
       sections.push({ label: "Goals", content: goalLines });
     }
 
     if (ctx.risks.length > 0) {
-      const riskLines = ctx.risks.slice(0, 3).map((r) => `- [${r.severity}] ${r.description}`).join("\n");
+      const riskLines = ctx.risks
+        .slice(0, 3)
+        .map((r) => `- [${r.severity}] ${r.description}`)
+        .join("\n");
       sections.push({ label: "Risks", content: riskLines });
     }
 

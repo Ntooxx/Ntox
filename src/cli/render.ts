@@ -241,12 +241,19 @@ export function renderCosts(
   totalIn: number,
   totalOut: number,
   totalCost: number,
+  embeddingFallbacks = 0,
 ): string {
-  return [
+  const lines = [
     `${chalk.bold("costs")}`,
     `  ${chalk.dim("session")}   in ${formatTokenCount(inT)}  out ${formatTokenCount(outT)}  ${chalk.yellow(formatCost(cost))}`,
     `  ${chalk.dim("lifetime")}  in ${formatTokenCount(totalIn)}  out ${formatTokenCount(totalOut)}  ${chalk.yellow(formatCost(totalCost))}`,
-  ].join("\n");
+  ];
+  if (embeddingFallbacks > 0) {
+    lines.push(
+      `  ${chalk.dim("embedding")} ${chalk.yellow(`API unavailable — ${embeddingFallbacks} fallback${embeddingFallbacks === 1 ? "" : "s"} to local hashing`)}`,
+    );
+  }
+  return lines.join("\n");
 }
 
 export function renderUsageBar(

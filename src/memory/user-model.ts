@@ -4,10 +4,7 @@ import { join } from "node:path";
 import { NTOX_DIR } from "../core/config.js";
 import { DOMAIN_KEYWORDS } from "../cognition/domains.js";
 import { analyzeMood } from "../meta/mood.js";
-import type {
-  UserProfile, UserGoal, Expertise, MoodEntry,
-  CommunicationStyle, LearningStyle,
-} from "../types/index.js";
+import type { UserProfile, UserGoal, Expertise, MoodEntry, CommunicationStyle, LearningStyle } from "../types/index.js";
 
 const PROFILE_PATH = join(NTOX_DIR, "user-model.json");
 
@@ -45,15 +42,27 @@ const DEFAULT_PROFILE: UserProfile = {
 
 const COMMUNICATION_STYLE_PATTERNS: Record<CommunicationStyle, RegExp[]> = {
   direct: [/^(fix|show|give|make|run|do|find|tell)\b/i, /^[^-*\s]{1,10}$/],
-  narrative: [/^(so |i was |i've been |let me tell|the thing is|basically|actually)/i, /\b(because|since|after|before|while)\b.{20,}/],
-  visual: [/\b(diagram|chart|graph|draw|visualize|layout|sketch|map|flow)\b/i, /\b(show me|looks like|appear|display)\b/i],
+  narrative: [
+    /^(so |i was |i've been |let me tell|the thing is|basically|actually)/i,
+    /\b(because|since|after|before|while)\b.{20,}/,
+  ],
+  visual: [
+    /\b(diagram|chart|graph|draw|visualize|layout|sketch|map|flow)\b/i,
+    /\b(show me|looks like|appear|display)\b/i,
+  ],
   adaptive: [],
 };
 
 const LEARNING_STYLE_PATTERNS: Record<LearningStyle, RegExp[]> = {
   "example-driven": [/\b(example|sample|instance|demo|show me|like)\b/i, /\b(give me an|for instance|e\.?g\.?)\b/i],
-  conceptual: [/\b(explain|why|how does|principle|concept|theory|understand|reason)\b/i, /\b(what is|define|meaning|mechanics)\b/i],
-  "hands-on": [/\b(try|step|walk me through|how to|guide|tutorial|practice|do it)\b/i, /\b(let me|i'll|i want to try)\b/i],
+  conceptual: [
+    /\b(explain|why|how does|principle|concept|theory|understand|reason)\b/i,
+    /\b(what is|define|meaning|mechanics)\b/i,
+  ],
+  "hands-on": [
+    /\b(try|step|walk me through|how to|guide|tutorial|practice|do it)\b/i,
+    /\b(let me|i'll|i want to try)\b/i,
+  ],
   adaptive: [],
 };
 
@@ -86,7 +95,10 @@ export class UserModel {
       const sVal = saved[key];
       if (sVal === undefined || sVal === null) continue;
       if (typeof dVal === "object" && !Array.isArray(dVal) && dVal !== null) {
-        (merged as Record<string, unknown>)[key] = { ...(dVal as Record<string, unknown>), ...(sVal as Record<string, unknown>) };
+        (merged as Record<string, unknown>)[key] = {
+          ...(dVal as Record<string, unknown>),
+          ...(sVal as Record<string, unknown>),
+        };
       } else {
         (merged as Record<string, unknown>)[key] = sVal as unknown;
       }
@@ -112,7 +124,11 @@ export class UserModel {
     const tmp = PROFILE_PATH + ".tmp";
     writeFileSync(tmp, data, "utf-8");
     writeFileSync(PROFILE_PATH, data, "utf-8");
-    try { unlinkSync(tmp); } catch { /* ignore */ }
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
   }
 
   private persist(): void {
@@ -220,7 +236,12 @@ export class UserModel {
     // Mood tracking
     const mood = analyzeMood(userMessage);
     const last = p.moodHistory[p.moodHistory.length - 1];
-    if (!last || mood.sentiment !== last.sentiment || mood.energy !== last.energy || Math.abs(mood.score - last.score) > 0.2) {
+    if (
+      !last ||
+      mood.sentiment !== last.sentiment ||
+      mood.energy !== last.energy ||
+      Math.abs(mood.score - last.score) > 0.2
+    ) {
       p.moodHistory.push(mood);
       if (p.moodHistory.length > 50) p.moodHistory = p.moodHistory.slice(-50);
       this.dirty = true;
@@ -304,7 +325,7 @@ export class UserModel {
         const name = match[1].trim();
         if (name.length > 1) {
           const existing = this.profile.projectAssociations.find(
-            (p) => p.projectName.toLowerCase() === name.toLowerCase()
+            (p) => p.projectName.toLowerCase() === name.toLowerCase(),
           );
           if (existing) {
             existing.lastMentioned = Date.now();
@@ -339,9 +360,7 @@ export class UserModel {
       if (match && match[1]) {
         const term = match[1].trim();
         if (term.length > 1) {
-          const existing = this.profile.personalVocabulary.find(
-            (v) => v.term.toLowerCase() === term.toLowerCase()
-          );
+          const existing = this.profile.personalVocabulary.find((v) => v.term.toLowerCase() === term.toLowerCase());
           if (existing) {
             existing.count++;
             existing.lastUsed = Date.now();
@@ -364,9 +383,7 @@ export class UserModel {
     if (capitalized) {
       for (const term of capitalized) {
         if (term.length > 2 && !this.profile.personalVocabulary.some((v) => v.term === term)) {
-          const existing = this.profile.personalVocabulary.find(
-            (v) => v.term.toLowerCase() === term.toLowerCase()
-          );
+          const existing = this.profile.personalVocabulary.find((v) => v.term.toLowerCase() === term.toLowerCase());
           if (!existing) {
             this.profile.personalVocabulary.push({
               term,
@@ -403,10 +420,7 @@ export class UserModel {
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
   }
 
-  setPreference<K extends keyof UserProfile["preferences"]>(
-    key: K,
-    value: UserProfile["preferences"][K]
-  ): void {
+  setPreference<K extends keyof UserProfile["preferences"]>(key: K, value: UserProfile["preferences"][K]): void {
     this.profile.preferences[key] = value;
     this.dirty = true;
     this.persist();

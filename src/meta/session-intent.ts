@@ -1,4 +1,5 @@
-export type SessionIntent = "deep-work" | "quick-question" | "debugging" | "exploration" | "casual" | "planning" | "learning";
+export type SessionIntent =
+  "deep-work" | "quick-question" | "debugging" | "exploration" | "casual" | "planning" | "learning";
 
 export interface SessionContext {
   intent: SessionIntent;
@@ -46,10 +47,33 @@ const LEARNING_PATTERNS = [
 ];
 
 const TECHNICAL_KEYWORDS = [
-  "code", "function", "class", "api", "error", "bug", "debug", "compile",
-  "syntax", "server", "database", "config", "deploy", "test", "build",
-  "npm", "git", "docker", "python", "javascript", "typescript", "sql",
-  "algorithm", "data structure", "async", "promise", "callback",
+  "code",
+  "function",
+  "class",
+  "api",
+  "error",
+  "bug",
+  "debug",
+  "compile",
+  "syntax",
+  "server",
+  "database",
+  "config",
+  "deploy",
+  "test",
+  "build",
+  "npm",
+  "git",
+  "docker",
+  "python",
+  "javascript",
+  "typescript",
+  "sql",
+  "algorithm",
+  "data structure",
+  "async",
+  "promise",
+  "callback",
 ];
 
 export interface IntentResult {
@@ -95,13 +119,20 @@ export function isTechnicalQuery(query: string): boolean {
 
 export function getIntentLabel(intent: SessionIntent): string {
   switch (intent) {
-    case "deep-work": return "focused work session";
-    case "quick-question": return "quick Q&A";
-    case "debugging": return "debugging session";
-    case "exploration": return "exploring ideas";
-    case "casual": return "casual conversation";
-    case "planning": return "planning & strategy";
-    case "learning": return "learning & study";
+    case "deep-work":
+      return "focused work session";
+    case "quick-question":
+      return "quick Q&A";
+    case "debugging":
+      return "debugging session";
+    case "exploration":
+      return "exploring ideas";
+    case "casual":
+      return "casual conversation";
+    case "planning":
+      return "planning & strategy";
+    case "learning":
+      return "learning & study";
   }
 }
 
@@ -124,7 +155,11 @@ export function getIntentGuidance(intent: SessionIntent): string {
   }
 }
 
-export function shouldShiftIntent(current: SessionIntent, newQuery: string, consecutiveTechnical: number): SessionIntent | null {
+export function shouldShiftIntent(
+  current: SessionIntent,
+  newQuery: string,
+  consecutiveTechnical: number,
+): SessionIntent | null {
   const result = classifyIntentWithConfidence(newQuery);
   const newIntent = result.intent;
   if (newIntent === current) return null;
@@ -143,7 +178,15 @@ export function shouldShiftIntent(current: SessionIntent, newQuery: string, cons
   if (current === "quick-question" && newIntent === "debugging" && result.confidence >= 0.5) return "debugging";
 
   // Allow shifts that increase focus
-  const focusOrder: SessionIntent[] = ["casual", "exploration", "quick-question", "learning", "planning", "debugging", "deep-work"];
+  const focusOrder: SessionIntent[] = [
+    "casual",
+    "exploration",
+    "quick-question",
+    "learning",
+    "planning",
+    "debugging",
+    "deep-work",
+  ];
   const currentIdx = focusOrder.indexOf(current);
   const newIdx = focusOrder.indexOf(newIntent);
 

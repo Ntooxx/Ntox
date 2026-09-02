@@ -1,4 +1,10 @@
-import { recordObservation, getTheoryHierarchy, extractObservationFromEpisode, loadTheoryStore, makeTheoryPrediction } from "../research/theory-store.js";
+import {
+  recordObservation,
+  getTheoryHierarchy,
+  extractObservationFromEpisode,
+  loadTheoryStore,
+  makeTheoryPrediction,
+} from "../research/theory-store.js";
 import type { Episode } from "../types/index.js";
 
 export class TheoryMemory {
@@ -48,7 +54,10 @@ export class TheoryMemory {
     const parts: string[] = [];
 
     if (hierarchy.theories.length > 0) {
-      const qWords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+      const qWords = query
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 3);
       const scored = hierarchy.theories
         .map((t) => {
           const tText = (t.name + " " + t.explanation).toLowerCase();
@@ -63,7 +72,11 @@ export class TheoryMemory {
       if (scored.length > 0) {
         const theoryLines = scored.map(({ t }) => {
           const status = t.confirmed ? "[confirmed]" : "[unconfirmed]";
-          makeTheoryPrediction(t.id, `Applying "${t.name.replace("Theory: ", "")}" reasoning to "${query.slice(0, 120)}" leads to a better outcome than generic reasoning`, t.confidence);
+          makeTheoryPrediction(
+            t.id,
+            `Applying "${t.name.replace("Theory: ", "")}" reasoning to "${query.slice(0, 120)}" leads to a better outcome than generic reasoning`,
+            t.confidence,
+          );
           return `- ${t.name}: ${t.explanation} ${status}`;
         });
         parts.push("## Learned Knowledge\n" + theoryLines.join("\n"));

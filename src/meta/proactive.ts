@@ -19,12 +19,10 @@ export class ProactiveEngine {
     this.analytics = analytics;
   }
 
-  setBondLevel(bondLevel: number, milestones: string[]): void {
-    this.currentBondLevel = bondLevel;
+  setBondLevel(_bondLevel: number, milestones: string[]): void {
     this.currentMilestones = milestones;
   }
 
-  private currentBondLevel = 0;
   private currentMilestones: string[] = [];
 
   generate(
@@ -32,7 +30,7 @@ export class ProactiveEngine {
     messageCount: number,
     skillsCount: number,
     memoryCount: number,
-    sessionIntent?: string
+    sessionIntent?: string,
   ): ProactiveSuggestion | null {
     const now = Date.now();
 
@@ -124,9 +122,7 @@ export class ProactiveEngine {
 
     // Correction rate
     const totalMsgs = userProfile.patterns.totalMessages;
-    const correctionRate = totalMsgs > 0
-      ? userProfile.patterns.correctionsReceived / totalMsgs
-      : 0;
+    const correctionRate = totalMsgs > 0 ? userProfile.patterns.correctionsReceived / totalMsgs : 0;
     if (correctionRate > 0.2 && totalMsgs > 10) {
       suggestions.push({
         message: `Corrected ${(correctionRate * 100).toFixed(0)}% of the time — learning from it.`,

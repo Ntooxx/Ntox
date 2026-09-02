@@ -74,27 +74,50 @@ function audit(command: string, blocked: boolean): void {
   try {
     const line = `[${new Date().toISOString()}]${blocked ? " [BLOCKED]" : ""} ${command}\n`;
     appendFileSync(getBaseDir() + "/shell-audit.log", line);
-  } catch { /* best effort */ }
+  } catch {
+    /* best effort */
+  }
 }
 
-function execAsync(command: string, options: { cwd?: string; timeout?: number; maxBuffer?: number }): Promise<{ stdout: string; stderr: string }> {
+function execAsync(
+  command: string,
+  options: { cwd?: string; timeout?: number; maxBuffer?: number },
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    exec(command, {
-      cwd: options.cwd,
-      timeout: options.timeout,
-      maxBuffer: options.maxBuffer,
-      windowsHide: true,
-      encoding: "utf-8",
-    }, (error, stdout, stderr) => {
-      if (error) {
-        (error as NodeJS.ErrnoException & { stdout: string; stderr: string }).stdout = stdout || "";
-        (error as NodeJS.ErrnoException & { stdout: string; stderr: string }).stderr = stderr || "";
-        reject(error);
-      } else {
-        resolve({ stdout: stdout || "", stderr: stderr || "" });
-      }
-    });
+    exec(
+      command,
+      {
+        cwd: options.cwd,
+        timeout: options.timeout,
+        maxBuffer: options.maxBuffer,
+        windowsHide: true,
+        encoding: "utf-8",
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          (error as NodeJS.ErrnoException & { stdout: string; stderr: string }).stdout = stdout || "";
+          (error as NodeJS.ErrnoException & { stdout: string; stderr: string }).stderr = stderr || "";
+          reject(error);
+        } else {
+          resolve({ stdout: stdout || "", stderr: stderr || "" });
+        }
+      },
+    );
   });
+}
+
+let dockerProbe: Promise<boolean> | null = null;
+
+function dockerAvailable(): Promise<boolean> {
+  if (!dockerProbe) {
+    dockerProbe = new Promise((resolve) => {
+      const probe = exec("docker --version", { timeout: 2500, windowsHide: true }, (error) => {
+        resolve(!error);
+      });
+      probe.on("error", () => resolve(false));
+    });
+  }
+  return dockerProbe;
 }
 
 function dockerExec(command: string, workdir: string, timeout: number): Promise<{ stdout: string; stderr: string }> {
@@ -152,7 +175,8 @@ export const shellTool: Tool = {
     audit(command, false);
 
     const config = loadConfig();
-    if (config.dockerEnabled) {
+    const wantsDocker = config.dockerEnabled || !IS_WINDOWS;
+    if (wantsDocker && (await dockerAvailable())) {
       try {
         const { stdout } = await dockerExec(command, workdir, timeout);
         return { success: true, data: stdout };
@@ -172,15 +196,18 @@ export const shellTool: Tool = {
     try {
       if (IS_WINDOWS) {
         const escaped = command.replace(/"/g, '`"');
-        const { stdout } = await execAsync(
-          `powershell -NoProfile -ExecutionPolicy Bypass -Command "${escaped}"`,
-          { cwd: workdir, timeout, maxBuffer: 10 * 1024 * 1024 }
-        );
+        const { stdout } = await execAsync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${escaped}"`, {
+          cwd: workdir,
+          timeout,
+          maxBuffer: 10 * 1024 * 1024,
+        });
         return { success: true, data: stdout };
       }
 
       const { stdout } = await execAsync(command, {
-        cwd: workdir, timeout, maxBuffer: 10 * 1024 * 1024,
+        cwd: workdir,
+        timeout,
+        maxBuffer: 10 * 1024 * 1024,
       });
       return { success: true, data: stdout };
     } catch (e: unknown) {

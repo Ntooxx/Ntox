@@ -31,7 +31,7 @@ describe("createTelegramChannel", () => {
       expect.stringContaining("sendChatAction"),
       expect.objectContaining({
         body: expect.stringContaining("typing"),
-      })
+      }),
     );
   });
 

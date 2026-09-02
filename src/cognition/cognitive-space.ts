@@ -11,15 +11,42 @@ const SPACE_PATH = join(COGNITION_DIR, "cognitive-space.json");
 function targetSim(a: string, b: string): number {
   if (a === b) return 1.0;
   const map: Record<string, Record<string, number>> = {
-    programming:     { python: 0.85, javascript: 0.85, rust: 0.80, data_science: 0.55, database: 0.55, devops: 0.60, system_admin: 0.50, writing: 0.25, design: 0.30 },
-    python:          { javascript: 0.60, rust: 0.50, data_science: 0.85, database: 0.55, devops: 0.40, system_admin: 0.25, writing: 0.30, design: 0.25 },
-    javascript:      { rust: 0.40, data_science: 0.40, database: 0.40, devops: 0.50, design: 0.65, writing: 0.30, system_admin: 0.25 },
-    rust:            { data_science: 0.30, database: 0.25, devops: 0.55, system_admin: 0.45, design: 0.15, writing: 0.20 },
-    data_science:    { database: 0.75, devops: 0.35, system_admin: 0.25, design: 0.30, writing: 0.50 },
-    database:        { devops: 0.45, system_admin: 0.45, design: 0.20, writing: 0.20 },
-    devops:          { system_admin: 0.80, design: 0.20, writing: 0.15 },
-    system_admin:    { design: 0.10, writing: 0.10 },
-    design:          { writing: 0.60 },
+    programming: {
+      python: 0.85,
+      javascript: 0.85,
+      rust: 0.8,
+      data_science: 0.55,
+      database: 0.55,
+      devops: 0.6,
+      system_admin: 0.5,
+      writing: 0.25,
+      design: 0.3,
+    },
+    python: {
+      javascript: 0.6,
+      rust: 0.5,
+      data_science: 0.85,
+      database: 0.55,
+      devops: 0.4,
+      system_admin: 0.25,
+      writing: 0.3,
+      design: 0.25,
+    },
+    javascript: {
+      rust: 0.4,
+      data_science: 0.4,
+      database: 0.4,
+      devops: 0.5,
+      design: 0.65,
+      writing: 0.3,
+      system_admin: 0.25,
+    },
+    rust: { data_science: 0.3, database: 0.25, devops: 0.55, system_admin: 0.45, design: 0.15, writing: 0.2 },
+    data_science: { database: 0.75, devops: 0.35, system_admin: 0.25, design: 0.3, writing: 0.5 },
+    database: { devops: 0.45, system_admin: 0.45, design: 0.2, writing: 0.2 },
+    devops: { system_admin: 0.8, design: 0.2, writing: 0.15 },
+    system_admin: { design: 0.1, writing: 0.1 },
+    design: { writing: 0.6 },
   };
   return map[a]?.[b] ?? map[b]?.[a] ?? 0.1;
 }
@@ -60,10 +87,13 @@ export class CognitiveSpace {
     if (!existsSync(COGNITION_DIR)) {
       mkdirSync(COGNITION_DIR, { recursive: true });
     }
-    writeFileSync(SPACE_PATH, JSON.stringify({
-      domains: ALL_DOMAIN_NAMES,
-      vectors: ALL_DOMAIN_NAMES.map((d) => this.domainVectors.get(d)),
-    }));
+    writeFileSync(
+      SPACE_PATH,
+      JSON.stringify({
+        domains: ALL_DOMAIN_NAMES,
+        vectors: ALL_DOMAIN_NAMES.map((d) => this.domainVectors.get(d)),
+      }),
+    );
   }
 
   private initializeVectors(): void {
@@ -78,7 +108,7 @@ export class CognitiveSpace {
       for (let i = 0; i < DIMS; i++) {
         h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
         h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
-        vec[i] = ((h >>> 0) / 0xffffffff) - 0.5;
+        vec[i] = (h >>> 0) / 0xffffffff - 0.5;
       }
       const mag = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
       for (let i = 0; i < DIMS; i++) vec[i] /= mag;
@@ -93,7 +123,8 @@ export class CognitiveSpace {
 
       for (let i = 0; i < ALL_DOMAIN_NAMES.length; i++) {
         for (let j = i + 1; j < ALL_DOMAIN_NAMES.length; j++) {
-          const a = ALL_DOMAIN_NAMES[i], b = ALL_DOMAIN_NAMES[j];
+          const a = ALL_DOMAIN_NAMES[i],
+            b = ALL_DOMAIN_NAMES[j];
           const va = this.domainVectors.get(a)!;
           const vb = this.domainVectors.get(b)!;
 

@@ -19,11 +19,7 @@ Respond with ONLY a JSON object:
 
 const FALLBACK: JudgeScore = { accuracy: 5, depth: 5, completeness: 5, overall: 5, reasoning: "judge failed" };
 
-export async function judgeResponse(
-  llm: LLMClient,
-  query: string,
-  response: string,
-): Promise<JudgeScore> {
+export async function judgeResponse(llm: LLMClient, query: string, response: string): Promise<JudgeScore> {
   try {
     const prompt = `Query: ${query.slice(0, 500)}
 
@@ -46,7 +42,7 @@ Score this response.`;
     const accuracy = clamp(parsed.accuracy, 1, 10);
     const depth = clamp(parsed.depth, 1, 10);
     const completeness = clamp(parsed.completeness, 1, 10);
-    const overall = Math.round((accuracy + depth + completeness) / 3 * 10) / 10;
+    const overall = Math.round(((accuracy + depth + completeness) / 3) * 10) / 10;
 
     return {
       accuracy,

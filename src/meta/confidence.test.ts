@@ -60,29 +60,21 @@ describe("computeDriftConfidence", () => {
   });
 
   it("returns higher confidence with consistent drift", () => {
-    const obs = Array.from({ length: 10 }, () =>
-      makeObservation(["css styling", "color palette", "animation"])
-    );
+    const obs = Array.from({ length: 10 }, () => makeObservation(["css styling", "color palette", "animation"]));
     const result = computeDriftConfidence(obs, "launch Sentinel");
     expect(result.score).toBeGreaterThan(0.3);
     expect(result.reasoning).toContain("launch Sentinel");
   });
 
   it("returns low confidence when aligned", () => {
-    const obs = Array.from({ length: 5 }, () =>
-      makeObservation(["launch sentinel", "github stars", "marketing"])
-    );
+    const obs = Array.from({ length: 5 }, () => makeObservation(["launch sentinel", "github stars", "marketing"]));
     const result = computeDriftConfidence(obs, "launch Sentinel");
     expect(result.score).toBeLessThan(0.2);
   });
 
   it("weights recent observations more heavily", () => {
-    const early = Array.from({ length: 5 }, () =>
-      makeObservation(["launch sentinel"])
-    );
-    const late = Array.from({ length: 5 }, () =>
-      makeObservation(["css styling", "animations"])
-    );
+    const early = Array.from({ length: 5 }, () => makeObservation(["launch sentinel"]));
+    const late = Array.from({ length: 5 }, () => makeObservation(["css styling", "animations"]));
     const result = computeDriftConfidence([...early, ...late], "launch Sentinel");
     expect(result.score).toBeGreaterThan(0.2);
   });

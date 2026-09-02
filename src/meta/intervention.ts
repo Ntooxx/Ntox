@@ -4,16 +4,16 @@ import { randomUUID } from "node:crypto";
 import { NTOX_DIR } from "../core/config.js";
 import type { ObservedSession } from "./observation.js";
 import type { MentalModelEntry } from "./mental-model.js";
-import { computeDriftConfidence, computeBeliefContradictionConfidence, computePatternConfidence } from "./confidence.js";
+import {
+  computeDriftConfidence,
+  computeBeliefContradictionConfidence,
+  computePatternConfidence,
+} from "./confidence.js";
 
 const INTERVENTION_PATH = join(NTOX_DIR, "interventions.json");
 
 export type InterventionType =
-  | "alignment-alert"
-  | "pattern-observation"
-  | "belief-contradiction"
-  | "strategic-question"
-  | "self-correction";
+  "alignment-alert" | "pattern-observation" | "belief-contradiction" | "strategic-question" | "self-correction";
 
 export interface Intervention {
   id: string;
@@ -64,12 +64,17 @@ export class InterventionEngine {
     try {
       writeFileSync(tmp, JSON.stringify(this.history, null, 2));
       writeFileSync(INTERVENTION_PATH, readFileSync(tmp, "utf-8"));
-    } catch { }
-    try { unlinkSync(tmp); } catch { }
+    } catch {}
+    try {
+      unlinkSync(tmp);
+    } catch {}
   }
 
   private persist(): void {
-    if (this.dirty) { this.save(); this.dirty = false; }
+    if (this.dirty) {
+      this.save();
+      this.dirty = false;
+    }
   }
 
   flush(): void {
@@ -153,7 +158,10 @@ export class InterventionEngine {
     const recentSessions = ctx.observations.slice(-5);
     const awayCount = recentSessions.filter((o) => {
       const topicText = o.topics.join(" ");
-      return !ctx.statedFocus!.toLowerCase().split(/\s+/).some((w) => w.length > 3 && topicText.includes(w));
+      return !ctx
+        .statedFocus!.toLowerCase()
+        .split(/\s+/)
+        .some((w) => w.length > 3 && topicText.includes(w));
     }).length;
 
     if (awayCount < 3) return null;

@@ -23,10 +23,7 @@ function formatConfidence(result: ConfidenceResult): string {
   return `Confidence: ${pct}% (${result.label}) — ${result.reasoning}`;
 }
 
-export function computeDriftConfidence(
-  observations: ObservedSession[],
-  statedFocus: string | null,
-): ConfidenceResult {
+export function computeDriftConfidence(observations: ObservedSession[], statedFocus: string | null): ConfidenceResult {
   if (!statedFocus || observations.length === 0) {
     return { score: 0, label: "none", reasoning: "No stated focus or no observations" };
   }
@@ -76,15 +73,23 @@ export function computeBeliefContradictionConfidence(
   const newLower = newStatement.toLowerCase();
 
   const CONTRADICTION_PAIRS: [string, string][] = [
-    ["hate", "like"], ["hate", "love"], ["bad", "good"], ["worst", "best"],
-    ["hard", "easy"], ["slow", "fast"], ["complex", "simple"],
-    ["expensive", "cheap"], ["useless", "useful"], ["never", "always"],
-    ["broken", "works"], ["wrong", "right"], ["ugly", "beautiful"],
+    ["hate", "like"],
+    ["hate", "love"],
+    ["bad", "good"],
+    ["worst", "best"],
+    ["hard", "easy"],
+    ["slow", "fast"],
+    ["complex", "simple"],
+    ["expensive", "cheap"],
+    ["useless", "useful"],
+    ["never", "always"],
+    ["broken", "works"],
+    ["wrong", "right"],
+    ["ugly", "beautiful"],
   ];
 
   for (const [a, b] of CONTRADICTION_PAIRS) {
-    if ((existingLower.includes(a) && newLower.includes(b)) ||
-        (existingLower.includes(b) && newLower.includes(a))) {
+    if ((existingLower.includes(a) && newLower.includes(b)) || (existingLower.includes(b) && newLower.includes(a))) {
       return {
         score: 0.85,
         label: "high",
@@ -143,10 +148,7 @@ export function computeBeliefContradictionConfidence(
   };
 }
 
-export function computePatternConfidence(
-  patternFrequency: number,
-  totalObservations: number,
-): ConfidenceResult {
+export function computePatternConfidence(patternFrequency: number, totalObservations: number): ConfidenceResult {
   if (totalObservations === 0) {
     return { score: 0, label: "none", reasoning: "No observations to analyze" };
   }

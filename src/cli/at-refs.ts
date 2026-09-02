@@ -9,7 +9,11 @@ const MAX_REF_SIZE = 50 * 1024;
 function validateUrlInternal(raw: string): string | null {
   if (raw.length > 4096) return "URL exceeds maximum length";
   let url: URL;
-  try { url = new URL(raw); } catch { return "Invalid URL format"; }
+  try {
+    url = new URL(raw);
+  } catch {
+    return "Invalid URL format";
+  }
   if (!["http:", "https:"].includes(url.protocol)) return `Blocked protocol: ${url.protocol}`;
   const blocked = ["localhost", "127.0.0.1", "0.0.0.0", "::1"];
   const host = url.hostname.toLowerCase();
@@ -39,11 +43,19 @@ function isGitRef(ref: string): boolean {
 }
 
 function isDirectory(path: string): boolean {
-  try { return statSync(path).isDirectory(); } catch { return false; }
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function isFile(path: string): boolean {
-  try { return statSync(path).isFile(); } catch { return false; }
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function readFileContent(filePath: string): string {
@@ -55,7 +67,11 @@ function listDir(dirPath: string): string {
   const entries = readdirSync(dirPath);
   const lines = entries.map((e) => {
     const full = resolve(dirPath, e);
-    try { return statSync(full).isDirectory() ? `${e}/` : e; } catch { return e; }
+    try {
+      return statSync(full).isDirectory() ? `${e}/` : e;
+    } catch {
+      return e;
+    }
   });
   const content = lines.join("\n");
   return content.length > MAX_REF_SIZE ? content.slice(0, MAX_REF_SIZE) + "\n... [truncated]" : content;
@@ -93,7 +109,8 @@ async function fetchUrlContent(url: string): Promise<string> {
   try {
     const result = await webReadTool.execute({ url, waitMs: 1800 });
     if (!result.success) return `[Error: ${result.error || "Unable to read URL"}]`;
-    const data = result.data && typeof result.data === "object" ? result.data as { title?: unknown; content?: unknown } : {};
+    const data =
+      result.data && typeof result.data === "object" ? (result.data as { title?: unknown; content?: unknown }) : {};
     const title = typeof data.title === "string" && data.title.trim() ? `# ${data.title.trim()}\n\n` : "";
     const text = `${title}${String(data.content || "")}`;
     return text.length > MAX_REF_SIZE ? text.slice(0, MAX_REF_SIZE) + "\n... [truncated]" : text;

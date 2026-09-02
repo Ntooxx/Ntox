@@ -19,10 +19,8 @@ import { Agent } from "../core/agent.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { MemoryStore } from "../memory/episodic.js";
 import { UserModel } from "../memory/user-model.js";
-import { Reflector } from "../meta/reflector.js";
 import { MistakeJournal } from "../meta/mistakes.js";
 import { SkillRegistry } from "../skills/registry.js";
-import { SkillExecutor } from "../skills/executor.js";
 import { SkillLibrary } from "../skills/library.js";
 import { learnSkillFromDescription } from "../skills/learner.js";
 import { Analytics } from "../meta/analytics.js";
@@ -80,10 +78,8 @@ export class Repl {
   private tools: ToolRegistry;
   private memory: MemoryStore;
   private userModel: UserModel;
-  private reflector: Reflector;
   private mistakes: MistakeJournal;
   private skillRegistry: SkillRegistry;
-  private skillExecutor: SkillExecutor;
   private skillLibrary: SkillLibrary;
   private lastBrowsedSkills: { name: string; importance: number; description: string; voices: string[] }[] = [];
   private analytics: Analytics;
@@ -116,12 +112,10 @@ export class Repl {
     this.userModel = this.infra.userModel;
     this.mistakes = this.infra.mistakes;
     this.skillRegistry = this.infra.skillRegistry;
-    this.skillExecutor = this.infra.skillExecutor;
     this.skillLibrary = this.infra.skillLibrary;
     this.analytics = this.infra.analytics;
     this.proactive = this.infra.proactive;
     this.cognitiveKernel = this.infra.cognitiveKernel;
-    this.reflector = new Reflector(this.llm, this.config.metaReflectionEnabled);
 
     if (this.config.cognitiveEnabled) this.cognitiveKernel.setEnabled(true);
 
@@ -163,7 +157,6 @@ export class Repl {
       this.config.apiBaseUrl,
       this.config.provider,
     );
-    this.reflector = new Reflector(this.llm, this.config.metaReflectionEnabled);
     this.agent = this.createAgent();
     this.agent.setSkillsCount(this.skillRegistry.count());
     this.userModel.startSession();
@@ -1769,6 +1762,7 @@ export class Repl {
         lifetime.totalInputTokens,
         lifetime.totalOutputTokens,
         lifetime.totalCost,
+        this.llm.embeddingFallbacks,
       ),
     );
   }

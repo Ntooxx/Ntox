@@ -55,26 +55,52 @@ export class PatternStore {
         }
         if (raw.coOccurrenceCounts) this.coOccurrenceCounts = new Map(Object.entries(raw.coOccurrenceCounts));
         if (raw.compileCount !== undefined) this.compileCount = raw.compileCount;
-      } catch { /* start fresh */ }
+      } catch {
+        /* start fresh */
+      }
     }
     if (this.patterns.size === 0) this.createSeedPatterns();
   }
 
   private persist(): void {
     this.ensureDir();
-    writeFileSync(PATTERNS_PATH, JSON.stringify({
-      patterns: Array.from(this.patterns.values()),
-      coOccurrenceCounts: Object.fromEntries(this.coOccurrenceCounts),
-      compileCount: this.compileCount,
-    }, null, 2));
+    writeFileSync(
+      PATTERNS_PATH,
+      JSON.stringify(
+        {
+          patterns: Array.from(this.patterns.values()),
+          coOccurrenceCounts: Object.fromEntries(this.coOccurrenceCounts),
+          compileCount: this.compileCount,
+        },
+        null,
+        2,
+      ),
+    );
   }
 
   private createSeedPatterns(): void {
     const seedSets = [
-      { domains: ["programming", "python", "javascript"], name: "software-dev", template: "Follow standard software engineering practices. Consider architecture, clean code, testing, and documentation." },
-      { domains: ["data_science", "python", "database"], name: "data-analysis", template: "Approach systematically: data understanding, preparation, modeling, evaluation, interpretation." },
-      { domains: ["devops", "system_admin", "programming"], name: "infrastructure", template: "Think about reliability, scalability, security, and automation. Prefer battle-tested solutions." },
-      { domains: ["design", "javascript", "writing"], name: "user-experience", template: "Focus on usability, aesthetics, and clarity. Consider the end-user perspective." },
+      {
+        domains: ["programming", "python", "javascript"],
+        name: "software-dev",
+        template:
+          "Follow standard software engineering practices. Consider architecture, clean code, testing, and documentation.",
+      },
+      {
+        domains: ["data_science", "python", "database"],
+        name: "data-analysis",
+        template: "Approach systematically: data understanding, preparation, modeling, evaluation, interpretation.",
+      },
+      {
+        domains: ["devops", "system_admin", "programming"],
+        name: "infrastructure",
+        template: "Think about reliability, scalability, security, and automation. Prefer battle-tested solutions.",
+      },
+      {
+        domains: ["design", "javascript", "writing"],
+        name: "user-experience",
+        template: "Focus on usability, aesthetics, and clarity. Consider the end-user perspective.",
+      },
     ];
     for (const seed of seedSets) {
       this.patterns.set(`pat_seed_${seed.name}`, {
@@ -95,13 +121,18 @@ export class PatternStore {
     this.persist();
   }
 
-  retrieve(queryVector: number[], queryDomains: string[], limit: number = 3, threshold: number = 0.3): CognitivePattern[] {
+  retrieve(
+    queryVector: number[],
+    queryDomains: string[],
+    limit: number = 3,
+    threshold: number = 0.3,
+  ): CognitivePattern[] {
     this.load();
     const scored: { pattern: CognitivePattern; score: number }[] = [];
     for (const pattern of this.patterns.values()) {
       const vecSim = this.space.cosineSimilarity(queryVector, pattern.vector);
       const overlap = pattern.domains.filter((d) => queryDomains.includes(d)).length;
-      const domainBonus = queryDomains.length > 0 ? overlap / queryDomains.length * 0.3 : 0;
+      const domainBonus = queryDomains.length > 0 ? (overlap / queryDomains.length) * 0.3 : 0;
       const totalScore = vecSim + domainBonus;
       if (totalScore >= threshold) scored.push({ pattern, score: totalScore });
     }
@@ -182,9 +213,12 @@ export class PatternStore {
       this.coOccurrenceCounts = new Map(entries);
     }
 
-    if (count >= 3 && !Array.from(this.patterns.values()).some(
-      (p) => p.domains.length === queryDomains.length && p.domains.every((d) => queryDomains.includes(d))
-    )) {
+    if (
+      count >= 3 &&
+      !Array.from(this.patterns.values()).some(
+        (p) => p.domains.length === queryDomains.length && p.domains.every((d) => queryDomains.includes(d)),
+      )
+    ) {
       const pattern: CognitivePattern = {
         id: `pat_${randomUUID().slice(0, 8)}`,
         name: generateName(queryDomains),
@@ -247,14 +281,21 @@ export class PatternStore {
     return Array.from(this.patterns.values()).sort((a, b) => b.strength - a.strength);
   }
 
-  count(): number { this.load(); return this.patterns.size; }
+  count(): number {
+    this.load();
+    return this.patterns.size;
+  }
 
-  get(id: string): CognitivePattern | undefined { this.load(); return this.patterns.get(id); }
+  get(id: string): CognitivePattern | undefined {
+    this.load();
+    return this.patterns.get(id);
+  }
 
   prune(maxPatterns: number = 100): number {
     this.load();
     if (this.patterns.size <= maxPatterns) return 0;
-    const sorted = Array.from(this.patterns.entries()).map(([id, p]) => ({ id, p }))
+    const sorted = Array.from(this.patterns.entries())
+      .map(([id, p]) => ({ id, p }))
       .sort((a, b) => a.p.strength - b.p.strength || a.p.lastActivated - b.p.lastActivated);
     const toRemove = sorted.slice(0, this.patterns.size - maxPatterns);
     for (const { id } of toRemove) this.patterns.delete(id);
@@ -282,7 +323,13 @@ export class PatternStore {
     this.persist();
   }
 
-  importPrimitive(name: string, description: string, domains: string[], rules: string[], confidence: number): CognitivePattern {
+  importPrimitive(
+    name: string,
+    description: string,
+    domains: string[],
+    rules: string[],
+    confidence: number,
+  ): CognitivePattern {
     this.load();
     const id = `pat_research_${name.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
     const existing = this.patterns.get(id);
@@ -315,7 +362,7 @@ export class PatternStore {
   }
 
   importPrimitivesBulk(
-    primitives: Array<{ name: string; description: string; domains: string[]; rules: string[]; confidence: number }>
+    primitives: Array<{ name: string; description: string; domains: string[]; rules: string[]; confidence: number }>,
   ): number {
     let count = 0;
     for (const p of primitives) {

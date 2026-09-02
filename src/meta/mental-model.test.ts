@@ -11,12 +11,16 @@ describe("MentalModel", () => {
   let mm: MentalModel;
 
   beforeEach(() => {
-    try { if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH); } catch { }
+    try {
+      if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH);
+    } catch {}
     mm = new MentalModel(TEST_PATH);
   });
 
   afterAll(() => {
-    try { if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH); } catch { }
+    try {
+      if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH);
+    } catch {}
   });
 
   it("starts empty", () => {

@@ -15,18 +15,27 @@ async function main() {
   console.log(`${"=".repeat(60)}\n`);
 
   const judgeLLM = new LLMClient(
-    config.apiKey, "openai/gpt-4o-mini", config.embeddingModel,
-    4096, 0.7, config.apiBaseUrl, config.provider
+    config.apiKey,
+    "openai/gpt-4o-mini",
+    config.embeddingModel,
+    4096,
+    0.7,
+    config.apiBaseUrl,
+    config.provider,
   );
 
-  const report = await runBenchmark(judgeLLM, (msg) => {
-    console.log(msg);
-  }, {
-    provider: "ollama",
-    model: OLLAMA_MODEL,
-    apiKey: "",
-    apiBaseUrl: "",
-  });
+  const report = await runBenchmark(
+    judgeLLM,
+    (msg) => {
+      console.log(msg);
+    },
+    {
+      provider: "ollama",
+      model: OLLAMA_MODEL,
+      apiKey: "",
+      apiBaseUrl: "",
+    },
+  );
 
   const jsonPath = saveReport(report);
   const mdPath = saveReportMarkdown(report);

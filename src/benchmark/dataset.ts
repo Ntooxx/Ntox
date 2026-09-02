@@ -16,14 +16,16 @@ const programming: BenchmarkQuery[] = [
   {
     id: "prog-1",
     domain: "programming",
-    query: "Write a TypeScript function that implements a Least Recently Used (LRU) cache with O(1) get and put operations. Explain your design choices.",
+    query:
+      "Write a TypeScript function that implements a Least Recently Used (LRU) cache with O(1) get and put operations. Explain your design choices.",
     expectedTopics: ["Map", "doubly-linked list", "O(1)", "eviction"],
     difficulty: 3,
   },
   {
     id: "prog-2",
     domain: "programming",
-    query: "Explain the difference between concurrency and parallelism. Give real-world examples of each in the context of a web server.",
+    query:
+      "Explain the difference between concurrency and parallelism. Give real-world examples of each in the context of a web server.",
     expectedTopics: ["threading", "async", "I/O bound", "CPU bound", "event loop"],
     difficulty: 2,
   },
@@ -47,14 +49,16 @@ const mathematics: BenchmarkQuery[] = [
   {
     id: "math-1",
     domain: "mathematics",
-    query: "Explain why the Riemann Hypothesis matters for prime number distribution. What would change if it were proven false?",
+    query:
+      "Explain why the Riemann Hypothesis matters for prime number distribution. What would change if it were proven false?",
     expectedTopics: ["prime counting", "zeta function", "error term", "complex zeros"],
     difficulty: 4,
   },
   {
     id: "math-2",
     domain: "mathematics",
-    query: "What is the Central Limit Theorem and why does it matter for practical statistics? Give an intuitive explanation, not just the formal statement.",
+    query:
+      "What is the Central Limit Theorem and why does it matter for practical statistics? Give an intuitive explanation, not just the formal statement.",
     expectedTopics: ["normal distribution", "sample mean", "convergence", "independence"],
     difficulty: 2,
   },
@@ -92,14 +96,16 @@ const physics: BenchmarkQuery[] = [
   {
     id: "phys-3",
     domain: "physics",
-    query: "Why does time dilation occur in special relativity? Give an intuitive explanation using the light clock thought experiment.",
+    query:
+      "Why does time dilation occur in special relativity? Give an intuitive explanation using the light clock thought experiment.",
     expectedTopics: ["speed of light", "invariant", "Lorentz factor", "light clock"],
     difficulty: 3,
   },
   {
     id: "phys-4",
     domain: "physics",
-    query: "Explain the butterfly effect in chaos theory. Is it real or a metaphor? What are the actual limitations of weather prediction?",
+    query:
+      "Explain the butterfly effect in chaos theory. Is it real or a metaphor? What are the actual limitations of weather prediction?",
     expectedTopics: ["sensitive dependence", "initial conditions", "Lyapunov exponent", "deterministic"],
     difficulty: 3,
   },
@@ -116,14 +122,16 @@ const ai: BenchmarkQuery[] = [
   {
     id: "ai-2",
     domain: "ai",
-    query: "What is the difference between fine-tuning and RAG for giving an LLM domain knowledge? When would you choose each?",
+    query:
+      "What is the difference between fine-tuning and RAG for giving an LLM domain knowledge? When would you choose each?",
     expectedTopics: ["training data", "embeddings", "retrieval", "hallucination", "cost"],
     difficulty: 3,
   },
   {
     id: "ai-3",
     domain: "ai",
-    query: "Why do neural networks generalize despite being overparameterized? What does the lottery ticket hypothesis say?",
+    query:
+      "Why do neural networks generalize despite being overparameterized? What does the lottery ticket hypothesis say?",
     expectedTopics: ["overfitting", "implicit regularization", "sparse subnetworks", "pruning"],
     difficulty: 4,
   },
@@ -140,35 +148,40 @@ const crossDomain: BenchmarkQuery[] = [
   {
     id: "cross-1",
     domain: "cross-domain",
-    query: "How does information theory (Shannon entropy) apply to neural network compression and knowledge distillation?",
+    query:
+      "How does information theory (Shannon entropy) apply to neural network compression and knowledge distillation?",
     expectedTopics: ["entropy", "mutual information", "compression", "distillation", "bits per parameter"],
     difficulty: 5,
   },
   {
     id: "cross-2",
     domain: "cross-domain",
-    query: "Explain how the concept of eigenvalues from linear algebra connects to PageRank, quantum mechanics, and vibration analysis.",
+    query:
+      "Explain how the concept of eigenvalues from linear algebra connects to PageRank, quantum mechanics, and vibration analysis.",
     expectedTopics: ["eigenvector centrality", "Hamiltonian", "natural frequencies", "spectral"],
     difficulty: 5,
   },
   {
     id: "cross-3",
     domain: "cross-domain",
-    query: "How does the second law of thermodynamics relate to the arrow of time, information theory, and the heat death of the universe?",
+    query:
+      "How does the second law of thermodynamics relate to the arrow of time, information theory, and the heat death of the universe?",
     expectedTopics: ["entropy increase", "irreversibility", "Maxwell's demon", "cosmology"],
     difficulty: 5,
   },
   {
     id: "cross-4",
     domain: "cross-domain",
-    query: "What do Godel's incompleteness theorems, the halting problem, and quantum uncertainty have in common? Is there a deeper pattern?",
+    query:
+      "What do Godel's incompleteness theorems, the halting problem, and quantum uncertainty have in common? Is there a deeper pattern?",
     expectedTopics: ["undecidability", "self-reference", "limits of knowledge", "formal systems"],
     difficulty: 5,
   },
   {
     id: "cross-5",
     domain: "cross-domain",
-    query: "How does evolutionary biology inform the design of genetic algorithms in computer science? What are the key differences between biological and computational evolution?",
+    query:
+      "How does evolutionary biology inform the design of genetic algorithms in computer science? What are the key differences between biological and computational evolution?",
     expectedTopics: ["selection", "mutation", "crossover", "fitness landscape", "convergence"],
     difficulty: 4,
   },

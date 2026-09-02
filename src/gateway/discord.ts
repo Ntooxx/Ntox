@@ -39,7 +39,12 @@ class RateLimitTracker {
 
 const rateLimit = new RateLimitTracker();
 
-async function apiCall(token: string, path: string, method: string = "GET", body?: Record<string, unknown>): Promise<Response> {
+async function apiCall(
+  token: string,
+  path: string,
+  method: string = "GET",
+  body?: Record<string, unknown>,
+): Promise<Response> {
   await rateLimit.waitIfNeeded();
   const res = await fetch(`${DISCORD_API}${path}`, {
     method,
@@ -85,7 +90,10 @@ export function createDiscordChannel(config: DiscordConfig): GatewayChannel {
   }
 
   function stopHeartbeat(): void {
-    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
   }
 
   function identify(): void {
@@ -110,7 +118,14 @@ export function createDiscordChannel(config: DiscordConfig): GatewayChannel {
     if (!running) return;
     if (reconnectTimer) clearTimeout(reconnectTimer);
     stopHeartbeat();
-    if (ws) { try { ws.close(); } catch { /* cleanup ok */ }; ws = null; }
+    if (ws) {
+      try {
+        ws.close();
+      } catch {
+        /* cleanup ok */
+      }
+      ws = null;
+    }
     const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
     reconnectAttempts++;
     console.error(`[discord] reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
@@ -120,7 +135,11 @@ export function createDiscordChannel(config: DiscordConfig): GatewayChannel {
   async function connect(): Promise<void> {
     if (!running) return;
     reconnectTimer = null;
-    try { ws?.close(); } catch { /* cleanup ok */ }
+    try {
+      ws?.close();
+    } catch {
+      /* cleanup ok */
+    }
     ws = null;
 
     ws = new WebSocket(GATEWAY_URL);
@@ -238,7 +257,9 @@ export function createDiscordChannel(config: DiscordConfig): GatewayChannel {
     notifyTyping: async (chatId: string) => {
       try {
         await apiCall(token, `/channels/${chatId}/typing`, "POST");
-      } catch { /* best-effort */ }
+      } catch {
+        /* best-effort */
+      }
     },
 
     async start() {
@@ -256,8 +277,18 @@ export function createDiscordChannel(config: DiscordConfig): GatewayChannel {
     async stop() {
       running = false;
       stopHeartbeat();
-      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-      if (ws) { try { ws.close(); } catch { /* cleanup ok */ }; ws = null; }
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (ws) {
+        try {
+          ws.close();
+        } catch {
+          /* cleanup ok */
+        }
+        ws = null;
+      }
       console.log("[discord] stopped");
     },
   };

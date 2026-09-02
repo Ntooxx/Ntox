@@ -15,7 +15,10 @@ const hashA = hashSeed(0x9e3779b1);
 const hashB = hashSeed(0x85ebca6b);
 
 function tokenize(text: string): string[] {
-  const cleaned = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+  const cleaned = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .trim();
   if (!cleaned) return [];
   const words = cleaned.split(/\s+/).filter((w) => w.length > 0);
   const tokens: string[] = [];

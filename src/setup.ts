@@ -42,9 +42,27 @@ export default async function setup(): Promise<void> {
   if (model) config.model = model;
 
   const modelPrefix = (config.model || "").split("/")[0];
-  const knownProviders = ["openrouter", "openai", "deepseek", "groq", "anthropic", "together", "mistral", "ollama", "lmstudio", "openai-compatible"];
-  if (modelPrefix && knownProviders.includes(modelPrefix) && modelPrefix !== config.provider && config.provider !== "openrouter") {
-    console.log(`\n  Warning: Model "${config.model}" has prefix "${modelPrefix}/" but provider is "${config.provider}".`);
+  const knownProviders = [
+    "openrouter",
+    "openai",
+    "deepseek",
+    "groq",
+    "anthropic",
+    "together",
+    "mistral",
+    "ollama",
+    "lmstudio",
+    "openai-compatible",
+  ];
+  if (
+    modelPrefix &&
+    knownProviders.includes(modelPrefix) &&
+    modelPrefix !== config.provider &&
+    config.provider !== "openrouter"
+  ) {
+    console.log(
+      `\n  Warning: Model "${config.model}" has prefix "${modelPrefix}/" but provider is "${config.provider}".`,
+    );
     console.log(`  This will likely fail. Consider switching provider or model.`);
   }
   console.log("");
@@ -80,7 +98,9 @@ export default async function setup(): Promise<void> {
   console.log("     - Create app at https://discord.com/developers/applications");
   console.log("     - Go to Bot > Reset Token and copy it");
   console.log("     - Enable MESSAGE CONTENT INTENT under Privileged Gateway Intents");
-  console.log("     - Invite with: https://discord.com/api/oauth2/authorize?client_id=YOUR_ID&permissions=3072&scope=bot");
+  console.log(
+    "     - Invite with: https://discord.com/api/oauth2/authorize?client_id=YOUR_ID&permissions=3072&scope=bot",
+  );
   console.log("");
 
   const hasDiscord = !!config.discordToken;
@@ -145,6 +165,8 @@ export default async function setup(): Promise<void> {
   if (webPort) config.webPort = parseInt(webPort, 10) || 3000;
   const webHost = await ask(`     Web UI host [${config.webHost || "127.0.0.1"}]`);
   if (webHost) config.webHost = webHost;
+  const webAuthToken = await ask(`     Web UI access token (leave empty for no auth)`);
+  if (webAuthToken) config.webAuthToken = webAuthToken;
   console.log("");
 
   // Save
@@ -165,7 +187,9 @@ export default async function setup(): Promise<void> {
   if (config.whatsappToken) {
     console.log("    npx ntox gateway      — WhatsApp included in gateway");
   }
-  console.log(`    npx ntox gateway web  — Web UI at http://${config.webHost || "127.0.0.1"}:${config.webPort || 3000}`);
+  console.log(
+    `    npx ntox gateway web  — Web UI at http://${config.webHost || "127.0.0.1"}:${config.webPort || 3000}`,
+  );
   console.log("    npx ntox setup        — Run this wizard again");
   console.log("");
 

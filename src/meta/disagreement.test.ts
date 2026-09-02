@@ -69,13 +69,17 @@ describe("DisagreementEngine", () => {
   let engine: DisagreementEngine;
 
   beforeEach(() => {
-    try { if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH); } catch { }
+    try {
+      if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH);
+    } catch {}
     engine = new DisagreementEngine();
     engine.clearAll();
   });
 
   afterAll(() => {
-    try { if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH); } catch { }
+    try {
+      if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH);
+    } catch {}
   });
 
   it("returns null when bond level too low", () => {
@@ -109,9 +113,7 @@ describe("DisagreementEngine", () => {
   });
 
   it("detects pattern repetition", () => {
-    const observations = Array.from({ length: 6 }, () =>
-      makeObs(["refactoring", "code cleanup", "type safety"])
-    );
+    const observations = Array.from({ length: 6 }, () => makeObs(["refactoring", "code cleanup", "type safety"]));
     const ctx = defaultCtx({
       proposal: "let's do more refactoring on the core modules",
       observations,
@@ -134,9 +136,7 @@ describe("DisagreementEngine", () => {
 
   it("combines multiple evidence sources", () => {
     const beliefs = [makeBelief("CLI users hate GUIs", 5)];
-    const observations = Array.from({ length: 6 }, () =>
-      makeObs(["refactoring", "code cleanup"])
-    );
+    const observations = Array.from({ length: 6 }, () => makeObs(["refactoring", "code cleanup"]));
     const ctx = defaultCtx({
       proposal: "let's add a GUI and also rewrite the parser",
       beliefs,

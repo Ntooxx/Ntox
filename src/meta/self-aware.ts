@@ -69,11 +69,16 @@ export class SelfAwareness {
     try {
       writeFileSync(tmp, JSON.stringify(this.state, null, 2));
       writeFileSync(AWARENESS_PATH, readFileSync(tmp, "utf-8"));
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
   }
 
   private persist(): void {
-    if (this.dirty) { this.save(); this.dirty = false; }
+    if (this.dirty) {
+      this.save();
+      this.dirty = false;
+    }
   }
 
   startSession(): void {
@@ -83,9 +88,7 @@ export class SelfAwareness {
   }
 
   discover(type: DiscoveryType, message: string, priority: number = 5): void {
-    const exists = this.state.discoveries.some(
-      (d) => d.type === type && d.message === message && !d.announced
-    );
+    const exists = this.state.discoveries.some((d) => d.type === type && d.message === message && !d.announced);
     if (exists) return;
     this.state.discoveries.push({ type, message, timestamp: Date.now(), announced: false, priority });
     this.state.sessionSummary.push(message);
@@ -96,9 +99,7 @@ export class SelfAwareness {
   getNextAnnouncement(): string | null {
     if (this.announcementsThisSession >= this.maxAnnouncementsPerSession) return null;
 
-    const unannounced = this.state.discoveries
-      .filter((d) => !d.announced)
-      .sort((a, b) => b.priority - a.priority);
+    const unannounced = this.state.discoveries.filter((d) => !d.announced).sort((a, b) => b.priority - a.priority);
 
     if (unannounced.length === 0) return null;
 
@@ -140,7 +141,7 @@ export class SelfAwareness {
       this.discover(
         "style-discovery",
         `I've noticed you communicate in a ${profile.communicationStyle} style — I'll match that.`,
-        6
+        6,
       );
     }
 
@@ -148,28 +149,27 @@ export class SelfAwareness {
       this.discover(
         "style-discovery",
         `You seem to learn best via ${profile.learningStyle.replace("-", " ")} approaches — I'll adjust.`,
-        5
+        5,
       );
     }
 
     const newTerms = profile.personalVocabulary.filter((v) => v.count >= 2);
     if (newTerms.length >= 3) {
-      const terms = newTerms.slice(-3).map((t) => t.term).join(", ");
+      const terms = newTerms
+        .slice(-3)
+        .map((t) => t.term)
+        .join(", ");
       this.discover(
         "vocabulary-discovery",
         `I've picked up ${newTerms.length} terms you use: ${terms}. I'll use them naturally.`,
-        4
+        4,
       );
     }
 
     const activeProjects = profile.projectAssociations.filter((p) => p.mentionCount >= 2);
     if (activeProjects.length >= 2) {
       const names = activeProjects.map((p) => p.projectName).join(", ");
-      this.discover(
-        "project-discovery",
-        `I've noticed you're working on: ${names}. I'll keep project context.`,
-        4
-      );
+      this.discover("project-discovery", `I've noticed you're working on: ${names}. I'll keep project context.`, 4);
     }
 
     const recentMood = profile.moodHistory.slice(-10);
@@ -180,7 +180,7 @@ export class SelfAwareness {
         this.discover(
           "mood-discovery",
           "I've noticed some frustration patterns. I'm learning to adapt my tone to help.",
-          3
+          3,
         );
       }
     }
@@ -191,7 +191,7 @@ export class SelfAwareness {
       this.discover(
         "intent-discovery",
         `This looks like a ${getIntentLabel(intent)} — I'll adjust my approach accordingly.`,
-        3
+        3,
       );
     }
   }

@@ -41,7 +41,9 @@ async function sendMessage(token: string, chatId: number, text: string): Promise
 async function sendChatAction(token: string, chatId: number, action: string): Promise<void> {
   try {
     await apiCall(token, "sendChatAction", { chat_id: chatId, action });
-  } catch { /* best-effort: typing indicator failure is non-critical */ }
+  } catch {
+    /* best-effort: typing indicator failure is non-critical */
+  }
 }
 
 export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
@@ -80,21 +82,27 @@ export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
         const username = update.message.from?.username || update.message.chat.username || "unknown";
 
         if (text.startsWith("/start")) {
-          await sendMessage(token, update.message.chat.id,
+          await sendMessage(
+            token,
+            update.message.chat.id,
             "Hello! I'm NTOX - your cognitive CLI agent.\n\n" +
-            "Send me any message and I'll help you with coding, research, analysis, or anything else.\n" +
-            "Commands:\n" +
-            "/new - start fresh conversation\n" +
-            "/help - show this message");
+              "Send me any message and I'll help you with coding, research, analysis, or anything else.\n" +
+              "Commands:\n" +
+              "/new - start fresh conversation\n" +
+              "/help - show this message",
+          );
           continue;
         }
 
         if (text === "/help") {
-          await sendMessage(token, update.message.chat.id,
+          await sendMessage(
+            token,
+            update.message.chat.id,
             "NTOX Telegram Bot\n\n" +
-            "Just send me a message and I'll respond.\n" +
-            "/new - reset conversation\n" +
-            "/help - this message");
+              "Just send me a message and I'll respond.\n" +
+              "/new - reset conversation\n" +
+              "/help - this message",
+          );
           continue;
         }
 
@@ -118,9 +126,7 @@ export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
 
   function schedulePoll(): void {
     if (!running) return;
-    const delay = pollFailures > 0
-      ? Math.min(1000 * Math.pow(2, pollFailures), 30000)
-      : POLL_INTERVAL;
+    const delay = pollFailures > 0 ? Math.min(1000 * Math.pow(2, pollFailures), 30000) : POLL_INTERVAL;
     pollTimer = setTimeout(poll, delay);
   }
 

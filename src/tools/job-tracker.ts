@@ -72,7 +72,17 @@ export const jobTrackerTool: Tool = {
       },
       status: {
         type: "string",
-        enum: ["discovered", "evaluated", "applied", "responded", "interviewing", "offered", "rejected", "withdrawn", "ghosted"],
+        enum: [
+          "discovered",
+          "evaluated",
+          "applied",
+          "responded",
+          "interviewing",
+          "offered",
+          "rejected",
+          "withdrawn",
+          "ghosted",
+        ],
         description: "Application status",
       },
       salary: { type: "string", description: "Salary range" },
@@ -106,7 +116,10 @@ export const jobTrackerTool: Tool = {
           remote: args.remote != null ? Boolean(args.remote) : undefined,
           matchScore: args.matchScore != null ? Number(args.matchScore) : undefined,
           matchReasons: args.matchReasons
-            ? String(args.matchReasons).split(",").map((s) => s.trim()).filter(Boolean)
+            ? String(args.matchReasons)
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean)
             : undefined,
           notes: [],
           createdAt: now,
@@ -144,7 +157,9 @@ export const jobTrackerTool: Tool = {
       case "list": {
         let filtered = store.applications;
         if (args.filter) {
-          const statuses = String(args.filter).split(",").map((s) => s.trim().toLowerCase());
+          const statuses = String(args.filter)
+            .split(",")
+            .map((s) => s.trim().toLowerCase());
           filtered = filtered.filter((a) => statuses.includes(a.status));
         }
         filtered = filtered.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -173,7 +188,10 @@ export const jobTrackerTool: Tool = {
         const now = Date.now();
         for (const a of store.applications) {
           byStatus[a.status] = (byStatus[a.status] || 0) + 1;
-          if (a.matchScore != null) { totalScore += a.matchScore; scoredCount++; }
+          if (a.matchScore != null) {
+            totalScore += a.matchScore;
+            scoredCount++;
+          }
           if (a.followUpAt && a.followUpAt <= now && (a.status === "applied" || a.status === "responded")) {
             pendingFollowups++;
           }
@@ -199,13 +217,9 @@ export const jobTrackerTool: Tool = {
       case "followups": {
         const now = Date.now();
         const overdue = store.applications.filter(
-          (a) =>
-            a.followUpAt && a.followUpAt <= now && (a.status === "applied" || a.status === "responded"),
+          (a) => a.followUpAt && a.followUpAt <= now && (a.status === "applied" || a.status === "responded"),
         );
-        const summary =
-          overdue.length === 0
-            ? "No follow-ups pending."
-            : overdue.map(formatApp).join("\n\n");
+        const summary = overdue.length === 0 ? "No follow-ups pending." : overdue.map(formatApp).join("\n\n");
         return { success: true, data: { count: overdue.length, applications: overdue, summary } };
       }
       case "notes": {

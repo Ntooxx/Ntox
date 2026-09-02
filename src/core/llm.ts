@@ -27,7 +27,7 @@ interface ProviderConfig {
   embedUrl: string | null;
   modelsUrl: string | null;
   headers: (apiKey: string) => Record<string, string>;
-  format: "openai" | "anthropic" | "ollama" | "google";
+  format: "openai" | "anthropic" | "ollama";
   apiKeyRequired: boolean;
 }
 
@@ -498,9 +498,9 @@ async function* streamOllama(
   messages: Message[],
   system: string | undefined,
   body: Record<string, unknown>,
-  _client: LLMClient,
+  client: LLMClient,
   signal?: AbortSignal,
-): AsyncGenerator<{ delta: string; usage?: CostUsage }> {
+): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
   const abort = () => controller.abort(signal?.reason);
@@ -513,8 +513,9 @@ async function* streamOllama(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: body.model,
-        messages: system ? [{ role: "system", content: system }, ...messages] : messages,
+        messages: toOpenAIMessages(messages, system),
         stream: true,
+        tools: body.tools,
         options: { num_predict: body.max_tokens, temperature: body.temperature },
       }),
       signal: controller.signal,
@@ -543,20 +544,37 @@ async function* streamOllama(
   if (!reader) throw new ApiError("Ollama returned no response body", 0, "ollama");
 
   let yieldedAnyContent = false;
+  const toolCallAccumulator = new Map<number, { id: string; name: string; args: string }>();
 
   for await (const line of StreamLineParser.readLines(reader, { idleTimeoutMs: STREAM_STALL_TIMEOUT_MS, signal })) {
     try {
       const parsed = JSON.parse(line) as {
-        message?: { content: string };
+        message?: {
+          content?: string;
+          tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[];
+        };
         error?: string;
         done: boolean;
       };
       if (parsed.error) {
         throw new StreamError(`Ollama stream error: ${parsed.error}`);
       }
+      if (parsed.message?.tool_calls) {
+        for (const tc of parsed.message.tool_calls) {
+          const acc = toolCallAccumulator.get(tc.index) || {
+            id: tc.id || `call_${tc.index}`,
+            name: "",
+            args: "",
+          };
+          if (tc.id) acc.id = tc.id;
+          if (tc.function?.name) acc.name = tc.function.name;
+          if (tc.function?.arguments) acc.args += tc.function.arguments;
+          toolCallAccumulator.set(tc.index, acc);
+        }
+      }
       if (parsed.message?.content) {
         yieldedAnyContent = true;
-        _client.outputTokens += parsed.message.content.length / 4;
+        client.outputTokens += parsed.message.content.length / 4;
         yield { delta: parsed.message.content };
       }
     } catch (e) {
@@ -564,7 +582,17 @@ async function* streamOllama(
     }
   }
 
-  if (!yieldedAnyContent) {
+  if (toolCallAccumulator.size > 0) {
+    const toolCalls: ToolCall[] = [];
+    for (const [, acc] of toolCallAccumulator) {
+      if (acc.name) toolCalls.push({ id: acc.id, name: acc.name, arguments: acc.args });
+    }
+    if (toolCalls.length > 0) {
+      yield { delta: "", toolCalls };
+    }
+  }
+
+  if (!yieldedAnyContent && toolCallAccumulator.size === 0) {
     throw new EmptyResponseError(
       `Ollama returned no content — model "${body.model}" may not be pulled. Run: ollama pull ${body.model}`,
     );
@@ -635,6 +663,7 @@ export class LLMClient {
   inputTokens = 0;
   outputTokens = 0;
   embeddingTokens = 0;
+  embeddingFallbacks = 0;
 
   constructor(
     apiKey: string,
@@ -709,6 +738,7 @@ export class LLMClient {
 
     if (remaining() >= MIN_FALLBACK_BUDGET_MS) {
       console.error("[embed] API embedding unavailable, using local fallback");
+      this.embeddingFallbacks++;
       const local = localEmbed(text);
       if (this.embedCache.size > 100) {
         const first = this.embedCache.keys().next().value;

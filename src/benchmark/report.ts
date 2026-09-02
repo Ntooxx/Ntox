@@ -15,7 +15,9 @@ export function generateReport(report: BenchmarkReport): string {
   lines.push("");
   lines.push(`| Metric | Kernel ON | Kernel OFF | Delta |`);
   lines.push(`|--------|-----------|------------|-------|`);
-  lines.push(`| Overall Score | ${report.overallKernelOn}/10 | ${report.overallKernelOff}/10 | ${fmtDelta(report.overallDelta)} |`);
+  lines.push(
+    `| Overall Score | ${report.overallKernelOn}/10 | ${report.overallKernelOff}/10 | ${fmtDelta(report.overallDelta)} |`,
+  );
   lines.push("");
 
   lines.push("## Domain Breakdown");
@@ -23,7 +25,8 @@ export function generateReport(report: BenchmarkReport): string {
   lines.push(`| Domain | Delta | Assessment |`);
   lines.push(`|--------|-------|------------|`);
   for (const [domain, delta] of Object.entries(report.domainDeltas)) {
-    const assessment = delta > 15 ? "Strong improvement" : delta > 5 ? "Moderate improvement" : delta > -5 ? "Neutral" : "Regression";
+    const assessment =
+      delta > 15 ? "Strong improvement" : delta > 5 ? "Moderate improvement" : delta > -5 ? "Neutral" : "Regression";
     lines.push(`| ${domain} | ${fmtDelta(delta)} | ${assessment} |`);
   }
   lines.push("");
@@ -32,13 +35,17 @@ export function generateReport(report: BenchmarkReport): string {
     lines.push(`## ${round.name}`);
     lines.push(round.description);
     lines.push("");
-    lines.push(`Round average — ON: ${round.kernelOnAvg}/10 | OFF: ${round.kernelOffAvg}/10 | Delta: ${fmtDelta(round.deltaPercent)}`);
+    lines.push(
+      `Round average — ON: ${round.kernelOnAvg}/10 | OFF: ${round.kernelOffAvg}/10 | Delta: ${fmtDelta(round.deltaPercent)}`,
+    );
     lines.push("");
     lines.push(`| ID | Domain | ON Acc | ON Depth | ON Comp | OFF Acc | OFF Depth | OFF Comp | Delta |`);
     lines.push(`|----|--------|--------|----------|---------|---------|-----------|----------|-------|`);
 
     for (const r of round.results) {
-      lines.push(`| ${r.queryId} | ${r.domain} | ${r.kernelOn.score.accuracy} | ${r.kernelOn.score.depth} | ${r.kernelOn.score.completeness} | ${r.kernelOff.score.accuracy} | ${r.kernelOff.score.depth} | ${r.kernelOff.score.completeness} | ${fmtDelta(r.delta)} |`);
+      lines.push(
+        `| ${r.queryId} | ${r.domain} | ${r.kernelOn.score.accuracy} | ${r.kernelOn.score.depth} | ${r.kernelOn.score.completeness} | ${r.kernelOff.score.accuracy} | ${r.kernelOff.score.depth} | ${r.kernelOff.score.completeness} | ${fmtDelta(r.delta)} |`,
+      );
     }
     lines.push("");
 

@@ -13,7 +13,9 @@ export class SkillExecutor {
     this.enabled = enabled;
   }
 
-  setEnabled(val: boolean): void { this.enabled = val; }
+  setEnabled(val: boolean): void {
+    this.enabled = val;
+  }
 
   findMatchingSkills(query: string): SkillTriggerMatch[] {
     if (!this.enabled) return [];
@@ -25,24 +27,26 @@ export class SkillExecutor {
       const top = libraryHits[0];
       const context = this.library.getContextForQuery(top.name, query);
       if (context) {
-        return [{
-          skill: {
-            name: top.name,
-            description: top.description,
-            category: top.category,
-            prompt: context,
-            triggers: top.triggers,
-            tools: [],
-            examples: [],
-            created: Date.now(),
-            updated: Date.now(),
-            usageCount: 0,
-            domain: top.domain,
-            importance: top.importance,
-            isExternal: false,
+        return [
+          {
+            skill: {
+              name: top.name,
+              description: top.description,
+              category: top.category,
+              prompt: context,
+              triggers: top.triggers,
+              tools: [],
+              examples: [],
+              created: Date.now(),
+              updated: Date.now(),
+              usageCount: 0,
+              domain: top.domain,
+              importance: top.importance,
+              isExternal: false,
+            },
+            confidence: 0.6,
           },
-          confidence: 0.6,
-        }];
+        ];
       }
     }
     return [];

@@ -99,12 +99,17 @@ export class Executive {
     try {
       writeFileSync(tmp, JSON.stringify(this.data, null, 2));
       writeFileSync(this.path, readFileSync(tmp, "utf-8"));
-    } catch { }
-    try { unlinkSync(tmp); } catch { }
+    } catch {}
+    try {
+      unlinkSync(tmp);
+    } catch {}
   }
 
   private persist(): void {
-    if (this.dirty) { this.save(); this.dirty = false; }
+    if (this.dirty) {
+      this.save();
+      this.dirty = false;
+    }
   }
 
   flush(): void {
@@ -171,7 +176,7 @@ export class Executive {
 
   addGoal(description: string, category: string = "general", priority: GoalPriority = "medium"): ExecGoal {
     const existing = this.data.goals.find(
-      (g) => g.status === "active" && g.description.toLowerCase() === description.toLowerCase()
+      (g) => g.status === "active" && g.description.toLowerCase() === description.toLowerCase(),
     );
     if (existing) {
       existing.lastMentioned = Date.now();
@@ -197,9 +202,7 @@ export class Executive {
   }
 
   addConstraint(type: ConstraintType, description: string): void {
-    const existing = this.data.constraints.find(
-      (c) => c.description.toLowerCase() === description.toLowerCase()
-    );
+    const existing = this.data.constraints.find((c) => c.description.toLowerCase() === description.toLowerCase());
     if (existing) return;
 
     this.data.constraints.push({ type, description, addedAt: Date.now() });
@@ -211,9 +214,7 @@ export class Executive {
   }
 
   addRisk(description: string, severity: RiskSeverity = "medium"): void {
-    const existing = this.data.risks.find(
-      (r) => r.description.toLowerCase() === description.toLowerCase()
-    );
+    const existing = this.data.risks.find((r) => r.description.toLowerCase() === description.toLowerCase());
     if (existing) {
       existing.lastMentioned = Date.now();
       existing.mentionCount++;

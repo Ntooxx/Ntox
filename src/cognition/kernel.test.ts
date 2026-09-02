@@ -31,7 +31,9 @@ describe("CognitiveKernel", () => {
 
   it("measures complexity", () => {
     const simple = kernel.process("what is 2+2");
-    const complex = kernel.process("explain the trade-offs between microservices and monolith architecture for a high-traffic e-commerce platform with real-time inventory management");
+    const complex = kernel.process(
+      "explain the trade-offs between microservices and monolith architecture for a high-traffic e-commerce platform with real-time inventory management",
+    );
     expect(complex.primitive.complexity).toBeGreaterThan(simple.primitive.complexity);
   });
 
@@ -51,7 +53,7 @@ describe("CognitiveKernel", () => {
     kernel.setEnabled(true);
     const review = kernel.review(
       "explain quantum mechanics and thermodynamics in detail with mathematical proofs and examples",
-      "I don't know how. I can't determine the answer. Not certain about this at all."
+      "I don't know how. I can't determine the answer. Not certain about this at all.",
     );
     expect(review.gaps.length).toBeGreaterThan(0);
   });
@@ -60,7 +62,7 @@ describe("CognitiveKernel", () => {
     kernel.setEnabled(true);
     const review = kernel.review(
       "what is Python",
-      "Python is a high-level programming language created by Guido van Rossum. It emphasizes code readability and supports multiple programming paradigms."
+      "Python is a high-level programming language created by Guido van Rossum. It emphasizes code readability and supports multiple programming paradigms.",
     );
     expect(review.shouldRetry).toBe(false);
   });

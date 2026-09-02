@@ -241,10 +241,7 @@ describe("NtoxCognitiveLayer", () => {
   });
 
   it("updates conflicting durable memories from explicit corrections", async () => {
-    const layer = new NtoxCognitiveLayer(
-      { cognitionEnabled: false, theoryEnabled: false },
-      { memory, mistakes },
-    );
+    const layer = new NtoxCognitiveLayer({ cognitionEnabled: false, theoryEnabled: false }, { memory, mistakes });
     const oldMemory = memory.addDurableMemory("fact", "harbor=blue-ember", "test", 0.8);
 
     await layer.afterTurn({

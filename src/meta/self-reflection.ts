@@ -59,7 +59,7 @@ export class SelfReflector {
     toolUsage: Record<string, number>,
     dominantIntent: string,
     correctionsCount: number,
-    sessionStartTime: number
+    sessionStartTime: number,
   ): SessionReflection {
     const userMessages = messages.filter((m) => m.role === "user").map((m) => m.content);
 
@@ -76,9 +76,13 @@ export class SelfReflector {
       dominantIntent,
       discoveredDomains,
       commonTerms: commonTerms.slice(0, 10),
-      satisfactionTrend: profile.patterns.correctionsReceived > 0
-        ? Math.max(-1, Math.min(1, 1 - profile.patterns.correctionsReceived / Math.max(1, profile.patterns.totalMessages)))
-        : 0.5,
+      satisfactionTrend:
+        profile.patterns.correctionsReceived > 0
+          ? Math.max(
+              -1,
+              Math.min(1, 1 - profile.patterns.correctionsReceived / Math.max(1, profile.patterns.totalMessages)),
+            )
+          : 0.5,
       correctionsReceived: correctionsCount,
       toolUsage: { ...toolUsage },
       topics: topics.slice(0, 8),
@@ -102,14 +106,12 @@ export class SelfReflector {
     const MAX_DOMAINS = 200;
     const termEntries = Object.entries(this.store.cumulativeTerms);
     if (termEntries.length > MAX_TERMS) {
-      this.store.cumulativeTerms = Object.fromEntries(
-        termEntries.sort(([, a], [, b]) => b - a).slice(0, MAX_TERMS)
-      );
+      this.store.cumulativeTerms = Object.fromEntries(termEntries.sort(([, a], [, b]) => b - a).slice(0, MAX_TERMS));
     }
     const domainEntries = Object.entries(this.store.cumulativeDomains);
     if (domainEntries.length > MAX_DOMAINS) {
       this.store.cumulativeDomains = Object.fromEntries(
-        domainEntries.sort(([, a], [, b]) => b - a).slice(0, MAX_DOMAINS)
+        domainEntries.sort(([, a], [, b]) => b - a).slice(0, MAX_DOMAINS),
       );
     }
 
@@ -118,18 +120,71 @@ export class SelfReflector {
   }
 
   private extractTopics(messages: string[]): string[] {
-    const stopWords = new Set(["the", "a", "an", "is", "are", "was", "were", "be", "been",
-      "being", "have", "has", "had", "do", "does", "did", "will", "would", "could",
-      "should", "may", "might", "shall", "can", "need", "want", "like", "just", "get",
-      "got", "make", "made", "use", "used", "using", "know", "think", "going", "way",
-      "thing", "things", "really", "actually", "basically", "well", "also", "even",
-      "still", "already", "though", "although", "however", "therefore", "thus"]);
+    const stopWords = new Set([
+      "the",
+      "a",
+      "an",
+      "is",
+      "are",
+      "was",
+      "were",
+      "be",
+      "been",
+      "being",
+      "have",
+      "has",
+      "had",
+      "do",
+      "does",
+      "did",
+      "will",
+      "would",
+      "could",
+      "should",
+      "may",
+      "might",
+      "shall",
+      "can",
+      "need",
+      "want",
+      "like",
+      "just",
+      "get",
+      "got",
+      "make",
+      "made",
+      "use",
+      "used",
+      "using",
+      "know",
+      "think",
+      "going",
+      "way",
+      "thing",
+      "things",
+      "really",
+      "actually",
+      "basically",
+      "well",
+      "also",
+      "even",
+      "still",
+      "already",
+      "though",
+      "although",
+      "however",
+      "therefore",
+      "thus",
+    ]);
 
     const wordCounts = new Map<string, number>();
     const bigramCounts = new Map<string, number>();
 
     for (const msg of messages) {
-      const words = msg.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && !stopWords.has(w));
+      const words = msg
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 3 && !stopWords.has(w));
       for (let i = 0; i < words.length; i++) {
         wordCounts.set(words[i], (wordCounts.get(words[i]) || 0) + 1);
         if (i < words.length - 1) {
@@ -144,7 +199,7 @@ export class SelfReflector {
       .concat(
         Array.from(wordCounts.entries())
           .filter(([w]) => !bigramCounts.has(w))
-          .map(([word, count]) => ({ phrase: word, score: count }))
+          .map(([word, count]) => ({ phrase: word, score: count })),
       );
 
     scored.sort((a, b) => b.score - a.score);
@@ -167,10 +222,31 @@ export class SelfReflector {
 
   private detectNewDomains(terms: string[]): string[] {
     const knownDomains = new Set([
-      "code", "function", "class", "api", "database", "server", "python",
-      "javascript", "typescript", "docker", "kubernetes", "aws", "devops",
-      "design", "writing", "data", "machine", "learning", "neural",
-      "algorithm", "testing", "deploy", "config", "security", "network",
+      "code",
+      "function",
+      "class",
+      "api",
+      "database",
+      "server",
+      "python",
+      "javascript",
+      "typescript",
+      "docker",
+      "kubernetes",
+      "aws",
+      "devops",
+      "design",
+      "writing",
+      "data",
+      "machine",
+      "learning",
+      "neural",
+      "algorithm",
+      "testing",
+      "deploy",
+      "config",
+      "security",
+      "network",
     ]);
 
     const newDomains: string[] = [];

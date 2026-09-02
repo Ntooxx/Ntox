@@ -28,7 +28,11 @@ function makeObs(topics: string[]): ObservedSession {
   };
 }
 
-function makeBelief(statement: string, mentionCount: number = 3, status: "active" | "challenged" = "active"): MentalModelEntry {
+function makeBelief(
+  statement: string,
+  mentionCount: number = 3,
+  status: "active" | "challenged" = "active",
+): MentalModelEntry {
   return {
     id: `mm_${randomUUID().slice(0, 8)}`,
     statement,
@@ -85,12 +89,16 @@ describe("BriefingEngine", () => {
   let engine: BriefingEngine;
 
   beforeEach(() => {
-    try { if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH); } catch { }
+    try {
+      if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH);
+    } catch {}
     engine = new BriefingEngine(TEST_PATH);
   });
 
   afterAll(() => {
-    try { if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH); } catch { }
+    try {
+      if (existsSync(TEST_PATH)) unlinkSync(TEST_PATH);
+    } catch {}
   });
 
   it("returns none when no data", () => {
@@ -135,9 +143,7 @@ describe("BriefingEngine", () => {
   });
 
   it("returns event brief on drift detection", () => {
-    const observations = Array.from({ length: 6 }, () =>
-      makeObs(["css styling", "animation", "color palette"])
-    );
+    const observations = Array.from({ length: 6 }, () => makeObs(["css styling", "animation", "color palette"]));
     const ctx = defaultCtx({
       observations,
       statedFocus: "launch Sentinel",

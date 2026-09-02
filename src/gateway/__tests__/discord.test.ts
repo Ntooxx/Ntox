@@ -9,10 +9,16 @@ describe("createDiscordChannel", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
 
-  const mockHeaders = (remaining = "99", reset = "0") => ({ get: (k: string) => k === "x-ratelimit-remaining" ? remaining : k === "x-ratelimit-reset" ? reset : null });
+  const mockHeaders = (remaining = "99", reset = "0") => ({
+    get: (k: string) => (k === "x-ratelimit-remaining" ? remaining : k === "x-ratelimit-reset" ? reset : null),
+  });
 
   it("validates token on start", async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true, headers: mockHeaders(), json: async () => ({ id: "123", username: "ntox" }) });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      headers: mockHeaders(),
+      json: async () => ({ id: "123", username: "ntox" }),
+    });
     const channel = createDiscordChannel({ token: "test.token", onMessage: async () => "ok" });
     await channel.start();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/users/@me"), expect.anything());
@@ -31,7 +37,7 @@ describe("createDiscordChannel", () => {
     await channel.notifyTyping("12345");
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/channels/12345/typing"),
-      expect.objectContaining({ method: "POST" })
+      expect.objectContaining({ method: "POST" }),
     );
   });
 

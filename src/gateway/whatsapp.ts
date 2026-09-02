@@ -96,7 +96,9 @@ async function markAsRead(token: string, phoneNumberId: string, messageId: strin
         message_id: messageId,
       }),
     });
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -180,8 +182,7 @@ export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
   return {
     name: "whatsapp",
 
-    notifyTyping: async () => {
-    },
+    notifyTyping: async () => {},
 
     async start() {
       const verifyRes = await fetch(`${WHATSAPP_API}/${phoneNumberId}`, {

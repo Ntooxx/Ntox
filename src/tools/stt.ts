@@ -43,7 +43,7 @@ export const sttTool: Tool = {
       const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${config.apiKey}`,
+          Authorization: `Bearer ${config.apiKey}`,
         },
         body: form,
       });
@@ -53,7 +53,7 @@ export const sttTool: Tool = {
         return { success: false, error: `STT API error ${res.status}: ${errBody.slice(0, 300)}` };
       }
 
-      const result = await res.json() as { text: string };
+      const result = (await res.json()) as { text: string };
       return { success: true, data: { text: result.text } };
     } catch (e) {
       return { success: false, error: `STT error: ${e instanceof Error ? e.message : String(e)}` };

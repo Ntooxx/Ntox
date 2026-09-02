@@ -53,12 +53,17 @@ export class DisagreementEngine {
     try {
       writeFileSync(tmp, JSON.stringify(this.history, null, 2));
       writeFileSync(DISAGREEMENT_PATH, readFileSync(tmp, "utf-8"));
-    } catch { }
-    try { unlinkSync(tmp); } catch { }
+    } catch {}
+    try {
+      unlinkSync(tmp);
+    } catch {}
   }
 
   private persist(): void {
-    if (this.dirty) { this.save(); this.dirty = false; }
+    if (this.dirty) {
+      this.save();
+      this.dirty = false;
+    }
   }
 
   flush(): void {
@@ -174,7 +179,10 @@ export class DisagreementEngine {
 
     const proposalLower = ctx.proposal.toLowerCase();
     const unaddressed = highRisks.filter((r) => {
-      const riskWords = r.description.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+      const riskWords = r.description
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 3);
       return !riskWords.some((w) => proposalLower.includes(w));
     });
 
@@ -196,9 +204,7 @@ export class DisagreementEngine {
       }
     }
 
-    const dominantTopics = [...topicCounts.entries()]
-      .filter(([, count]) => count >= 4)
-      .sort((a, b) => b[1] - a[1]);
+    const dominantTopics = [...topicCounts.entries()].filter(([, count]) => count >= 4).sort((a, b) => b[1] - a[1]);
 
     if (dominantTopics.length === 0) return null;
 
@@ -223,14 +229,21 @@ export class DisagreementEngine {
     for (const belief of activeBeliefs) {
       const beliefLower = belief.statement.toLowerCase();
       const CONTRADICTION_PAIRS: [string, string][] = [
-        ["hate", "like"], ["bad", "good"], ["hard", "easy"],
-        ["slow", "fast"], ["expensive", "cheap"], ["useless", "useful"],
-        ["never", "always"], ["broken", "works"],
+        ["hate", "like"],
+        ["bad", "good"],
+        ["hard", "easy"],
+        ["slow", "fast"],
+        ["expensive", "cheap"],
+        ["useless", "useful"],
+        ["never", "always"],
+        ["broken", "works"],
       ];
 
       for (const [a, b] of CONTRADICTION_PAIRS) {
-        if ((beliefLower.includes(a) && proposalLower.includes(b)) ||
-            (beliefLower.includes(b) && proposalLower.includes(a))) {
+        if (
+          (beliefLower.includes(a) && proposalLower.includes(b)) ||
+          (beliefLower.includes(b) && proposalLower.includes(a))
+        ) {
           return `You've stated "${belief.statement}" ${belief.mentionCount} times. This proposal suggests the opposite`;
         }
       }

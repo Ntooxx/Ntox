@@ -1,8 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
-  NtoxError, ApiError, StreamError, NetworkError,
-  TimeoutError, EmptyResponseError, ConfigError,
-  isRetryableError, describeError,
+  NtoxError,
+  ApiError,
+  StreamError,
+  NetworkError,
+  TimeoutError,
+  EmptyResponseError,
+  ConfigError,
+  isRetryableError,
+  describeError,
 } from "./errors.js";
 
 describe("NtoxError", () => {

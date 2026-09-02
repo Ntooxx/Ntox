@@ -4,10 +4,10 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](package.json)
 [![CI](https://github.com/Ntooxx/Ntox/actions/workflows/ci.yml/badge.svg)](https://github.com/Ntooxx/Ntox/actions)
 [![npm](https://img.shields.io/badge/npm-0.1.0-red)](package.json)
-[![tests](https://img.shields.io/badge/tests-529%20passing-44cc11)](https://github.com/Ntooxx/Ntox/actions)
+[![tests](https://img.shields.io/badge/tests-510%20passing-44cc11)](https://github.com/Ntooxx/Ntox/actions)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
 
-A self-improving CLI agent with persistent memory, a cognitive kernel, pattern compilation, theory distillation, and 74+ reasoning skills. Includes a runtime-neutral cognition API and DeepSeek Harness adapter. Multi-channel gateway (Telegram, Discord, Web UI). Docker sandboxing. Runs locally.
+A self-improving CLI agent with persistent memory, a cognitive kernel, pattern compilation, theory distillation, and 83+ reasoning skills. Includes a runtime-neutral cognition API and DeepSeek Harness adapter. Multi-channel gateway (Telegram, Discord, WhatsApp, Web UI). Docker sandboxing. Runs locally.
 
 ## Why NTOX?
 
@@ -23,14 +23,14 @@ NTOX is the only agent with a **cognitive kernel**: it doesn't just call tools, 
 - **False-Success Self-Correction**: Detects shallow reasoning and retries with deeper analysis
 - **Persistent Memory**: Every exchange is embedded and searchable via cosine similarity (local fallback, no API key needed)
 - **Multi-Channel Gateway**: Telegram, Discord (WebSocket with intents), and a minimal local Web UI all share the same agent runtime
-- **Skill Library**: 74+ markdown skill documents, auto-triggered by semantic search
+- **Skill Library**: 83+ markdown skill documents, auto-triggered by semantic search
 - **Meta-Cognition**: Strategy classification, self-reflection, mistake journal, session intent, style optimization
 - **Runtime-Neutral Cognition API**: Mount NTOX cognitive context and turn learning into another agent runtime without replacing its model, tools, or session engine
 - **DeepSeek Harness Adapter**: Connects Harness lifecycle events to NTOX before-step context, tool outcomes, and post-turn learning
 - **Correction-Aware Recall**: Explicit user corrections are stored as authoritative context ahead of older, conflicting memories
 - **Tool Recovery Guidance**: Failed tool outcomes become a concise next-step prompt that asks the agent to use a fallback or verify its input instead of repeating the same call
 - **Live OpenRouter Model Catalog**: Loads the current OpenRouter models API at startup, refreshes the selector during long sessions, and supports `/model refresh` for an immediate catalog update
-- **9 LLM Providers**: OpenAI, Anthropic, Ollama, LM Studio, Groq, Together, Mistral, DeepSeek, OpenRouter
+- **10 LLM Providers**: OpenAI, Anthropic, Ollama, LM Studio, Groq, Together, Mistral, DeepSeek, OpenRouter, plus any OpenAI-compatible endpoint
 - **Tool System**: read, write, edit, glob, grep, bash (with security blocklist + Docker sandboxing), web fetch
 - **User Model**: Learns verbosity, technical level, communication style, and vocabulary over time
 - **Prompt Injection Guard**: 14 injection pattern detectors + output secret sanitization
@@ -173,7 +173,7 @@ ntox/
 │   ├── benchmark/     NCB cognitive benchmark
 │   ├── types/         TypeScript interfaces
 │   └── index.ts       Entry point
-├── skills/            45+ bundled reasoning skill documents
+├── skills/            83+ bundled reasoning skill documents
 ├── .github/workflows/ CI/CD
 ├── AGENTS.md          Guide for AI-assisted contributors
 ├── CONTRIBUTING.md    Guide for human contributors
@@ -215,7 +215,7 @@ cd integrations/deepseek-harness && npm test  # Run adapter tests
 
 `verify:all` checks linting, type safety, tests, builds, package contents, the built CLI, the built cognition export, and every adapter package gate. It records results in `experiments/verification/report.json`.
 
-The current functional verification result is 11 of 12 passing checks: the remaining failure is the repository-wide Prettier check, which currently reports formatting drift in older files. Linting, 529 root tests, builds, CLI startup, the cognition and Alive smoke scenarios, and all adapter checks pass.
+The current functional verification result is 11 of 12 passing checks: the remaining failure is the repository-wide Prettier check, which currently reports formatting drift in older files. Linting, 510 root tests, builds, CLI startup, the cognition and Alive smoke scenarios, and all adapter checks pass.
 
 ## Roadmap
 

@@ -1,5 +1,12 @@
 import { loadConfig } from "../core/config.js";
-import { createSharedInfra, createSessionInfra, createAgentConfig, SessionManager, runAgentMessage, GatewayOutput } from "../core/dispatcher.js";
+import {
+  createSharedInfra,
+  createSessionInfra,
+  createAgentConfig,
+  SessionManager,
+  runAgentMessage,
+  GatewayOutput,
+} from "../core/dispatcher.js";
 import type { SharedInfra } from "../core/dispatcher.js";
 import { sanitizeOutput } from "../core/guard.js";
 import { CronManager } from "../cron/index.js";
@@ -32,9 +39,12 @@ function handleCronCommand(text: string, ctx: string, chatId: string): string | 
   if (!rest || rest === "list") {
     const jobs = cron.listJobs();
     if (jobs.length === 0) return "No scheduled jobs. Use /cron add <name> | <schedule> | <prompt>";
-    return jobs.map((j) =>
-      `${j.id} [${j.enabled ? "ON" : "OFF"}] ${j.name}\n  Schedule: ${j.schedule}\n  Prompt: ${j.prompt.slice(0, 80)}\n  Runs: ${j.runCount} | Next: ${new Date(j.nextRun).toLocaleString()}`
-    ).join("\n\n");
+    return jobs
+      .map(
+        (j) =>
+          `${j.id} [${j.enabled ? "ON" : "OFF"}] ${j.name}\n  Schedule: ${j.schedule}\n  Prompt: ${j.prompt.slice(0, 80)}\n  Runs: ${j.runCount} | Next: ${new Date(j.nextRun).toLocaleString()}`,
+      )
+      .join("\n\n");
   }
 
   if (rest === "help") {
@@ -79,7 +89,8 @@ function handleCronCommand(text: string, ctx: string, chatId: string): string | 
 export async function runGateway(channel?: string): Promise<void> {
   const sessions = new SessionManager();
   const channelsByName = new Map<string, GatewayChannel>();
-  const makeHandler = (ctx: string) =>
+  const makeHandler =
+    (ctx: string) =>
     async (
       chatId: string,
       text: string,
@@ -87,9 +98,8 @@ export async function runGateway(channel?: string): Promise<void> {
       onToken?: (token: string) => void,
       onEvent?: (event: Record<string, unknown>) => void,
     ): Promise<string> => {
-      const allowed = ctx === "telegram" ? config.telegramAllowedUsers
-        : ctx === "discord" ? config.discordAllowedUsers
-        : [];
+      const allowed =
+        ctx === "telegram" ? config.telegramAllowedUsers : ctx === "discord" ? config.discordAllowedUsers : [];
       if (allowed.length > 0 && !allowed.includes(username) && !allowed.includes(chatId)) {
         return "Access denied.";
       }
@@ -101,7 +111,7 @@ export async function runGateway(channel?: string): Promise<void> {
       const sessionInfra = getOrCreateSessionInfra(chatId, shared);
       const agent = sessions.getOrCreate(
         chatId,
-        createAgentConfig({ ...shared, ...sessionInfra }, config, `${ctx}_${chatId}`, { skipReflection: true })
+        createAgentConfig({ ...shared, ...sessionInfra }, config, `${ctx}_${chatId}`, { skipReflection: true }),
       );
       const direct = (response: string, record = true): string => {
         if (record) {
@@ -197,37 +207,42 @@ export async function runGateway(channel?: string): Promise<void> {
     if (sender) channelSenders.set("discord", sender);
   }
   if ((!channel || channel === "whatsapp") && config.whatsappToken) {
-    channels.push(createWhatsAppChannel({
-      token: config.whatsappToken,
-      phoneNumberId: config.whatsappPhoneNumberId,
-      verifyToken: config.whatsappVerifyToken,
-      port: config.whatsappPort || 3001,
-      onMessage: makeHandler("whatsapp"),
-    }));
+    channels.push(
+      createWhatsAppChannel({
+        token: config.whatsappToken,
+        phoneNumberId: config.whatsappPhoneNumberId,
+        verifyToken: config.whatsappVerifyToken,
+        port: config.whatsappPort || 3001,
+        onMessage: makeHandler("whatsapp"),
+      }),
+    );
     const sender = makeSender("whatsapp");
     if (sender) channelSenders.set("whatsapp", sender);
   }
-  if ((!channel || channel === "web")) {
-    channels.push(createWebChannel({
-      port: config.webPort || 3000,
-      host: config.webHost || "127.0.0.1",
-      onMessage: makeHandler("web"),
-      getStatus: () => ({
-        model: config.model,
-        provider: config.provider,
-        memoryEnabled: config.memoryEnabled,
-        theoryEnabled: config.theoryEnabled,
-        metaEnabled: {
-          strategy: config.metaStrategyEnabled,
-          mistakes: config.metaMistakesEnabled,
-          reflection: config.metaReflectionEnabled,
-        },
-        profile: shared.policy.profile,
-        sessions: sessions.status(),
-        policyDenials: shared.policy.decisions.filter((d) => !d.allowed).slice(-20),
-        lastPolicyDecisions: shared.policy.decisions.slice(-20),
+  if (!channel || channel === "web") {
+    channels.push(
+      createWebChannel({
+        port: config.webPort || 3000,
+        host: config.webHost || "127.0.0.1",
+        authToken: config.webAuthToken || "",
+        onMessage: makeHandler("web"),
+        getStatus: () => ({
+          model: config.model,
+          provider: config.provider,
+          memoryEnabled: config.memoryEnabled,
+          theoryEnabled: config.theoryEnabled,
+          metaEnabled: {
+            strategy: config.metaStrategyEnabled,
+            mistakes: config.metaMistakesEnabled,
+            reflection: config.metaReflectionEnabled,
+          },
+          profile: shared.policy.profile,
+          sessions: sessions.status(),
+          policyDenials: shared.policy.decisions.filter((d) => !d.allowed).slice(-20),
+          lastPolicyDecisions: shared.policy.decisions.slice(-20),
+        }),
       }),
-    }));
+    );
   }
 
   if (channels.length === 0) {
@@ -236,10 +251,13 @@ export async function runGateway(channel?: string): Promise<void> {
     process.exit(1);
   }
 
-  setInterval(() => {
-    const purged = sessions.purge();
-    for (const id of purged) sessionInfras.delete(id);
-  }, 5 * 60 * 1000);
+  setInterval(
+    () => {
+      const purged = sessions.purge();
+      for (const id of purged) sessionInfras.delete(id);
+    },
+    5 * 60 * 1000,
+  );
 
   for (const ch of channels) await ch.start();
 
@@ -247,7 +265,7 @@ export async function runGateway(channel?: string): Promise<void> {
     const sid = `cron_${Date.now()}`;
     const sessionInfra = createSessionInfra(shared);
     const agent = new (await import("../core/agent.js")).Agent(
-      createAgentConfig({ ...shared, ...sessionInfra }, config, sid, { skipReflection: true })
+      createAgentConfig({ ...shared, ...sessionInfra }, config, sid, { skipReflection: true }),
     );
     const output = new GatewayOutput();
     const result = await runAgentMessage(agent, prompt, output);

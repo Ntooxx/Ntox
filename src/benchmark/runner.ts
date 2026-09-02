@@ -12,8 +12,8 @@ export interface QueryResult {
   domain: string;
   query: string;
   difficulty: number;
-  kernelOn: { response: string; score: JudgeScore; tokens: number; toolCalls: number; };
-  kernelOff: { response: string; score: JudgeScore; tokens: number; toolCalls: number; };
+  kernelOn: { response: string; score: JudgeScore; tokens: number; toolCalls: number };
+  kernelOff: { response: string; score: JudgeScore; tokens: number; toolCalls: number };
   delta: number;
 }
 
@@ -47,19 +47,15 @@ async function runSingleQuery(
   const session = createSessionInfra(shared);
   const sessionId = `bench_${kernelEnabled ? "on" : "off"}_${Date.now()}`;
 
-  const agentConfig = createAgentConfig(
-    { ...shared, ...session },
-    config,
-    sessionId,
-    {
-      kernelEnabled,
-      memoryEnabled: false,
-      strategyEnabled: false,
-      mistakesEnabled: false,
-      skipReflection: true,
-      systemPrompt: "You are a knowledgeable assistant. Answer questions directly and thoroughly. Do NOT use any tools. Do NOT output <tool_call> XML. Just answer with your knowledge.",
-    },
-  );
+  const agentConfig = createAgentConfig({ ...shared, ...session }, config, sessionId, {
+    kernelEnabled,
+    memoryEnabled: false,
+    strategyEnabled: false,
+    mistakesEnabled: false,
+    skipReflection: true,
+    systemPrompt:
+      "You are a knowledgeable assistant. Answer questions directly and thoroughly. Do NOT use any tools. Do NOT output <tool_call> XML. Just answer with your knowledge.",
+  });
 
   const agent = new Agent(agentConfig);
   let response = "";
@@ -67,15 +63,23 @@ async function runSingleQuery(
   let tokens = 0;
 
   const callbacks: AgentCallbacks = {
-    onToken: (t) => { response += t; },
-    onToolCall: () => { toolCalls++; },
+    onToken: (t) => {
+      response += t;
+    },
+    onToolCall: () => {
+      toolCalls++;
+    },
     onToolResult: () => {},
-    onUsage: (u) => { tokens = (u.inputTokens || 0) + (u.outputTokens || 0); },
+    onUsage: (u) => {
+      tokens = (u.inputTokens || 0) + (u.outputTokens || 0);
+    },
     onThinking: () => {},
   };
 
   const stream = agent.run(query, callbacks);
-  for await (const _ of stream) { /* drain */ }
+  for await (const _ of stream) {
+    /* drain */
+  }
 
   return { response: response.trim(), tokens, toolCalls };
 }
@@ -90,7 +94,9 @@ export async function runBenchmark(
   const domainScores: Record<string, { on: number[]; off: number[] }> = {};
 
   for (const round of ALL_ROUNDS) {
-    const log = (msg: string) => { onProgress?.(msg); };
+    const log = (msg: string) => {
+      onProgress?.(msg);
+    };
     log(`\n=== ${round.name} ===`);
     log(round.description);
 
@@ -109,15 +115,25 @@ export async function runBenchmark(
       log("    Scoring...");
       const onScore = await judgeResponse(judgeLLM, q.query, onResult.response);
 
-      const delta = Math.round((onScore.overall - offScore.overall) / offScore.overall * 1000) / 10;
+      const delta = Math.round(((onScore.overall - offScore.overall) / offScore.overall) * 1000) / 10;
 
       results.push({
         queryId: q.id,
         domain: q.domain,
         query: q.query,
         difficulty: q.difficulty,
-        kernelOn: { response: onResult.response, score: onScore, tokens: onResult.tokens, toolCalls: onResult.toolCalls },
-        kernelOff: { response: offResult.response, score: offScore, tokens: offResult.tokens, toolCalls: offResult.toolCalls },
+        kernelOn: {
+          response: onResult.response,
+          score: onScore,
+          tokens: onResult.tokens,
+          toolCalls: onResult.toolCalls,
+        },
+        kernelOff: {
+          response: offResult.response,
+          score: offScore,
+          tokens: offResult.tokens,
+          toolCalls: offResult.toolCalls,
+        },
         delta,
       });
 
@@ -130,7 +146,7 @@ export async function runBenchmark(
 
     const kernelOnAvg = avg(results.map((r) => r.kernelOn.score.overall));
     const kernelOffAvg = avg(results.map((r) => r.kernelOff.score.overall));
-    const deltaPercent = Math.round((kernelOnAvg - kernelOffAvg) / kernelOffAvg * 1000) / 10;
+    const deltaPercent = Math.round(((kernelOnAvg - kernelOffAvg) / kernelOffAvg) * 1000) / 10;
 
     rounds.push({
       name: round.name,
@@ -141,18 +157,20 @@ export async function runBenchmark(
       deltaPercent,
     });
 
-    log(`\n  Round avg — ON: ${kernelOnAvg}/10 | OFF: ${kernelOffAvg}/10 | Delta: ${deltaPercent > 0 ? "+" : ""}${deltaPercent}%`);
+    log(
+      `\n  Round avg — ON: ${kernelOnAvg}/10 | OFF: ${kernelOffAvg}/10 | Delta: ${deltaPercent > 0 ? "+" : ""}${deltaPercent}%`,
+    );
   }
 
   const overallOn = avg(rounds.flatMap((r) => r.results.map((q) => q.kernelOn.score.overall)));
   const overallOff = avg(rounds.flatMap((r) => r.results.map((q) => q.kernelOff.score.overall)));
-  const overallDelta = Math.round((overallOn - overallOff) / overallOff * 1000) / 10;
+  const overallDelta = Math.round(((overallOn - overallOff) / overallOff) * 1000) / 10;
 
   const domainDeltas: Record<string, number> = {};
   for (const [domain, scores] of Object.entries(domainScores)) {
     const onAvg = avg(scores.on);
     const offAvg = avg(scores.off);
-    domainDeltas[domain] = Math.round((onAvg - offAvg) / offAvg * 1000) / 10;
+    domainDeltas[domain] = Math.round(((onAvg - offAvg) / offAvg) * 1000) / 10;
   }
 
   return {

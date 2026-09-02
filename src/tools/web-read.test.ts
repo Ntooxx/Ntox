@@ -9,10 +9,12 @@ afterEach(() => {
 
 describe("shouldUseBrowserFallback", () => {
   it("keeps good fetch results", () => {
-    expect(shouldUseBrowserFallback({
-      success: true,
-      data: { content: "x".repeat(700), diagnostics: [] },
-    })).toBe(false);
+    expect(
+      shouldUseBrowserFallback({
+        success: true,
+        data: { content: "x".repeat(700), diagnostics: [] },
+      }),
+    ).toBe(false);
   });
 
   it("falls back on failed fetches", () => {
@@ -21,21 +23,27 @@ describe("shouldUseBrowserFallback", () => {
   });
 
   it("falls back on bot-wall diagnostics", () => {
-    expect(shouldUseBrowserFallback({
-      success: true,
-      data: { content: "Checking your browser", diagnostics: ["possible-bot-wall"] },
-    })).toBe(true);
+    expect(
+      shouldUseBrowserFallback({
+        success: true,
+        data: { content: "Checking your browser", diagnostics: ["possible-bot-wall"] },
+      }),
+    ).toBe(true);
   });
 
   it("falls back on very short content", () => {
-    expect(shouldUseBrowserFallback({
-      success: true,
-      data: { content: "too short", diagnostics: [] },
-    })).toBe(true);
-    expect(getBrowserFallbackReason({
-      success: true,
-      data: { content: "too short", diagnostics: [] },
-    })).toBe("low-content");
+    expect(
+      shouldUseBrowserFallback({
+        success: true,
+        data: { content: "too short", diagnostics: [] },
+      }),
+    ).toBe(true);
+    expect(
+      getBrowserFallbackReason({
+        success: true,
+        data: { content: "too short", diagnostics: [] },
+      }),
+    ).toBe("low-content");
   });
 
   it("returns short fetched content when browser fallback is disabled by policy", async () => {

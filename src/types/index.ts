@@ -88,8 +88,6 @@ export interface NtoxConfig {
   metaMinConfidence: number;
   cognitiveEnabled: boolean;
   theoryEnabled: boolean;
-  soundEnabled: boolean;
-  soundVolume: number;
   animationLevel: "off" | "minimal" | "full";
   uiMode: "minimal" | "normal" | "debug";
   telegramToken: string;
@@ -103,6 +101,7 @@ export interface NtoxConfig {
   dockerEnabled: boolean;
   webPort: number;
   webHost: string;
+  webAuthToken: string;
   introEnabled: boolean;
   verboseCallbacks: boolean;
   defaultProfileId: string;
@@ -421,11 +420,6 @@ export interface CritiqueResult {
 }
 
 export type ThinkPhase = "thinking" | "analyzing" | "reasoning" | "recalling" | "responding";
-
-export interface SoundConfig {
-  enabled: boolean;
-  volume: number;
-}
 
 export interface CognitiveTrace {
   problemRepresentation: string;

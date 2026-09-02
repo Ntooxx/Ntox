@@ -21,8 +21,6 @@ describe("validateConfig", () => {
     metaMinConfidence: 0.5,
     cognitiveEnabled: true,
     theoryEnabled: true,
-    soundEnabled: false,
-    soundVolume: 50,
     animationLevel: "minimal",
     uiMode: "normal",
     telegramToken: "",
@@ -36,20 +34,23 @@ describe("validateConfig", () => {
     dockerEnabled: false,
     webPort: 3000,
     webHost: "127.0.0.1",
+    webAuthToken: "",
     introEnabled: true,
     verboseCallbacks: false,
     defaultProfileId: "default",
-    profiles: [{
-      id: "default",
-      name: "Default Workspace",
-      workspaceRoot: process.cwd(),
-      readRoots: [process.cwd()],
-      writeRoots: [process.cwd()],
-      allowedTools: ["read", "write", "shell"],
-      shellPolicy: "approval-required",
-      networkPolicy: "browser-allowed",
-      autoCheckpoint: true,
-    }],
+    profiles: [
+      {
+        id: "default",
+        name: "Default Workspace",
+        workspaceRoot: process.cwd(),
+        readRoots: [process.cwd()],
+        writeRoots: [process.cwd()],
+        allowedTools: ["read", "write", "shell"],
+        shellPolicy: "approval-required",
+        networkPolicy: "browser-allowed",
+        autoCheckpoint: true,
+      },
+    ],
   };
 
   it("passes valid config", () => {
@@ -74,11 +75,6 @@ describe("validateConfig", () => {
   it("rejects metaMinConfidence out of range", () => {
     expect(validateConfig({ ...valid, metaMinConfidence: 1.5 }).valid).toBe(false);
     expect(validateConfig({ ...valid, metaMinConfidence: -0.1 }).valid).toBe(false);
-  });
-
-  it("rejects sound volume out of range", () => {
-    expect(validateConfig({ ...valid, soundVolume: 150 }).valid).toBe(false);
-    expect(validateConfig({ ...valid, soundVolume: -10 }).valid).toBe(false);
   });
 
   it("rejects invalid UI mode", () => {

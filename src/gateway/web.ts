@@ -10,6 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 interface WebConfig {
   port?: number;
   host?: string;
+  authToken?: string;
   onMessage: (
     chatId: string,
     text: string,
@@ -24,16 +25,39 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
   const { onMessage, getStatus } = config;
   const port = config.port ?? 3000;
   const host = config.host ?? "127.0.0.1";
+  const authToken = config.authToken ?? "";
   let server: ReturnType<typeof createServer> | null = null;
   let io: import("socket.io").Server | null = null;
 
   const htmlPath = join(__dirname, "..", "..", "web", "index.html");
   let htmlContent = "";
-  try { htmlContent = readFileSync(htmlPath, "utf-8"); } catch {
+  try {
+    htmlContent = readFileSync(htmlPath, "utf-8");
+  } catch {
     htmlContent = `<!DOCTYPE html><html><body>Web UI not found — create web/index.html</body></html>`;
   }
 
   const WEB_USER = "web_user";
+
+  const unauthorized = (res: ServerResponse) => {
+    res.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: "Unauthorized — open the web UI with ?token=..." }));
+  };
+
+  const tokenFromRequest = (req: IncomingMessage): string | null => {
+    if (!authToken) return "";
+    const header = req.headers.authorization || "";
+    if (header.startsWith("Bearer ")) return header.slice(7);
+    const url = new URL(req.url || "/", `http://${host}:${port}`);
+    return url.searchParams.get("token");
+  };
+
+  const authorized = (req: IncomingMessage): boolean => {
+    if (!authToken) return true;
+    const supplied = tokenFromRequest(req);
+    if (!supplied) return false;
+    return supplied === authToken;
+  };
 
   return {
     name: "web",
@@ -41,7 +65,11 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
     async start() {
       const http = await import("node:http");
       server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
-        if (req.url === "/status.json" && getStatus) {
+        if (!authorized(req)) {
+          unauthorized(res);
+          return;
+        }
+        if (req.url?.startsWith("/status.json") && getStatus) {
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify(getStatus(), null, 2));
           return;
@@ -56,6 +84,18 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
         maxHttpBufferSize: 1e6,
         pingTimeout: 60000,
       });
+
+      if (authToken) {
+        io.use((socket: import("socket.io").Socket, next: (err?: Error) => void) => {
+          const supplied =
+            socket.handshake.auth?.token || socket.handshake.headers.authorization?.replace("Bearer ", "");
+          if (typeof supplied === "string" && supplied === authToken) {
+            next();
+          } else {
+            next(new Error("Unauthorized"));
+          }
+        });
+      }
 
       io.on("connection", (socket: import("socket.io").Socket) => {
         const sid = `web_${socket.id}`;
@@ -96,8 +136,14 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
     },
 
     async stop() {
-      if (io) { io.close(); io = null; }
-      if (server) { await new Promise<void>((r) => server!.close(() => r())); server = null; }
+      if (io) {
+        io.close();
+        io = null;
+      }
+      if (server) {
+        await new Promise<void>((r) => server!.close(() => r()));
+        server = null;
+      }
       console.log("[web] stopped");
     },
 

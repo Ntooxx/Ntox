@@ -8,11 +8,19 @@ import { randomUUID } from "node:crypto";
 const tmpBase = join(tmpdir(), `ntox-fs-test-${randomUUID().slice(0, 8)}`);
 
 process.on("exit", () => {
-  try { rmSync(tmpBase, { recursive: true, force: true }); } catch { /* cleanup on exit */ }
+  try {
+    rmSync(tmpBase, { recursive: true, force: true });
+  } catch {
+    /* cleanup on exit */
+  }
 });
 
 function setup() {
-  try { rmSync(tmpBase, { recursive: true, force: true }); } catch { /* setup ok */ }
+  try {
+    rmSync(tmpBase, { recursive: true, force: true });
+  } catch {
+    /* setup ok */
+  }
   mkdirSync(tmpBase, { recursive: true });
 }
 

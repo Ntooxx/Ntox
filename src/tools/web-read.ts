@@ -13,7 +13,7 @@ interface WebReadStep {
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
 function getDiagnostics(result: ToolResult): string[] {
@@ -51,7 +51,8 @@ function makeStep(method: WebReadMethod, result: ToolResult): WebReadStep {
 
 export const webReadTool: Tool = {
   name: "web_read",
-  description: "Reliably read a URL. Tries direct fetch first, then falls back to a browser-rendered markdown snapshot when content looks empty, blocked, or JavaScript-dependent.",
+  description:
+    "Reliably read a URL. Tries direct fetch first, then falls back to a browser-rendered markdown snapshot when content looks empty, blocked, or JavaScript-dependent.",
   parameters: {
     type: "object",
     properties: {

@@ -16,7 +16,7 @@ async function analyzeImage(apiKey: string, image: string, prompt: string): Prom
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -39,7 +39,7 @@ async function analyzeImage(apiKey: string, image: string, prompt: string): Prom
     return { success: false, error: `Vision API error ${res.status}: ${errBody.slice(0, 300)}` };
   }
 
-  const result = await res.json() as { choices: { message: { content: string } }[] };
+  const result = (await res.json()) as { choices: { message: { content: string } }[] };
   return { success: true, data: { text: result.choices[0].message.content } };
 }
 
@@ -50,7 +50,7 @@ async function generateImage(apiKey: string, prompt: string, size: string): Prom
   const res = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -67,7 +67,7 @@ async function generateImage(apiKey: string, prompt: string, size: string): Prom
     return { success: false, error: `DALL-E API error ${res.status}: ${errBody.slice(0, 300)}` };
   }
 
-  const result = await res.json() as { data: { b64_json: string; revised_prompt?: string }[] };
+  const result = (await res.json()) as { data: { b64_json: string; revised_prompt?: string }[] };
   const dataUrl = `data:image/png;base64,${result.data[0].b64_json}`;
   return {
     success: true,
@@ -77,14 +77,19 @@ async function generateImage(apiKey: string, prompt: string, size: string): Prom
 
 export const imageTool: Tool = {
   name: "image",
-  description: "Analyze an image with GPT-4o Vision or generate an image with DALL-E 3. For analysis, provide image (base64/URL) and optional prompt. For generation, set mode to 'generate'.",
+  description:
+    "Analyze an image with GPT-4o Vision or generate an image with DALL-E 3. For analysis, provide image (base64/URL) and optional prompt. For generation, set mode to 'generate'.",
   parameters: {
     type: "object",
     properties: {
       image: { type: "string", description: "Image as base64 string, data URL, or HTTP URL (for analysis)" },
       prompt: { type: "string", description: "Question about the image (analysis) or description (generation)" },
       mode: { type: "string", enum: ["analyze", "generate"], description: "Mode: analyze (default) or generate" },
-      size: { type: "string", enum: ["1024x1024", "1792x1024", "1024x1792"], description: "Image size for generation (default: 1024x1024)" },
+      size: {
+        type: "string",
+        enum: ["1024x1024", "1792x1024", "1024x1792"],
+        description: "Image size for generation (default: 1024x1024)",
+      },
     },
     required: [],
   },

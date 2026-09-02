@@ -18,9 +18,7 @@ export const ttsTool: Tool = {
     const text = String(args.text);
     if (!text) return { success: false, error: "Text is required" };
 
-    const voice = args.voice && VOICES.includes(args.voice as typeof VOICES[number])
-      ? String(args.voice)
-      : "alloy";
+    const voice = args.voice && VOICES.includes(args.voice as (typeof VOICES)[number]) ? String(args.voice) : "alloy";
 
     const config = loadConfig();
     if (!config.apiKey) {
@@ -31,7 +29,7 @@ export const ttsTool: Tool = {
       const res = await fetch("https://api.openai.com/v1/audio/speech", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${config.apiKey}`,
+          Authorization: `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

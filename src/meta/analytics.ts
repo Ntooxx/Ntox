@@ -115,39 +115,6 @@ export class Analytics {
     return lines.join("\n");
   }
 
-  generateProactiveSuggestion(
-    skillsCount: number,
-    recentTopics: string[],
-    activeGoals: { description: string }[]
-  ): string | null {
-    // Suggest creating a skill if none exist and there's been tool usage
-    if (skillsCount <= 3 && this.data.totalToolCalls > 10) {
-      const topTool = this.getMostUsedTools(1)[0];
-      if (topTool && topTool.count >= 3) {
-        return `I noticed you've used "${topTool.name}" ${topTool.count} times. Want to create a skill to automate common workflows with it? Try /skill learn <description>.`;
-      }
-    }
-
-    // Check active goals
-    if (activeGoals.length > 0) {
-      const stalled = activeGoals.filter((_g) => {
-        // In a real implementation, check last mention date
-        return true;
-      });
-      if (stalled.length > 0) {
-        return `You have ${stalled.length} active goal${stalled.length > 1 ? "s" : ""}: ${stalled.map((g) => g.description).join(", ")}. Want to make progress?`;
-      }
-    }
-
-    // Suggest reviewing mistakes if there are many
-    const mistakeCount = 0; // will be injected
-    if (mistakeCount > 5) {
-      return `You've had ${mistakeCount} corrections logged. Try /mistakes to review patterns.`;
-    }
-
-    return null;
-  }
-
   reset(): void {
     this.data = { ...DEFAULT_DATA };
     this.dirty = true;

@@ -3,7 +3,17 @@ import type { CognitivePattern } from "../types/index.js";
 export interface TheorySnapshot {
   observations: { id: string; description: string; domain: string; confidence: number; timestamp: number }[];
   patterns: { id: string; name: string; generalization: string; confidence: number; timestamp: number }[];
-  theories: { id: string; name: string; explanation: string; predictions: string[]; falsificationCriteria: string; confirmed: boolean; confidence: number; timestamp: number; evidence?: { signal: string; source: string; summary: string; timestamp: number }[] }[];
+  theories: {
+    id: string;
+    name: string;
+    explanation: string;
+    predictions: string[];
+    falsificationCriteria: string;
+    confirmed: boolean;
+    confidence: number;
+    timestamp: number;
+    evidence?: { signal: string; source: string; summary: string; timestamp: number }[];
+  }[];
   metaTheories: { id: string; name: string; synthesis: string; confidence: number; timestamp: number }[];
 }
 
@@ -22,7 +32,9 @@ function shorten(text: string, max = 120): string {
 
 export function formatTheoryOverview(snapshot: TheorySnapshot, limit = 10): string {
   const lines: string[] = [];
-  lines.push(`theories ${snapshot.theories.length} | confirmed ${snapshot.theories.filter((t) => t.confirmed).length} | patterns ${snapshot.patterns.length} | observations ${snapshot.observations.length}`);
+  lines.push(
+    `theories ${snapshot.theories.length} | confirmed ${snapshot.theories.filter((t) => t.confirmed).length} | patterns ${snapshot.patterns.length} | observations ${snapshot.observations.length}`,
+  );
   if (snapshot.theories.length === 0) {
     lines.push("no theories yet");
     return lines.join("\n");
@@ -41,7 +53,9 @@ export function formatTheoryDetail(snapshot: TheorySnapshot, id: string): string
   if (!theory) return `theory not found: ${id}`;
   const lines: string[] = [];
   lines.push(`${theory.id} ${theory.name}`);
-  lines.push(`confidence ${pct(theory.confidence)} | ${theory.confirmed ? "confirmed" : "tentative"} | ${date(theory.timestamp)}`);
+  lines.push(
+    `confidence ${pct(theory.confidence)} | ${theory.confirmed ? "confirmed" : "tentative"} | ${date(theory.timestamp)}`,
+  );
   lines.push(`explanation: ${theory.explanation}`);
   lines.push(`falsification: ${theory.falsificationCriteria}`);
   if (theory.predictions.length > 0) {
@@ -80,7 +94,9 @@ export function formatPatternOverview(patterns: CognitivePattern[], limit = 10):
   }
   for (const pattern of patterns.slice(0, limit)) {
     const compiled = pattern.compiledTemplate ? "compiled" : "raw";
-    lines.push(`${pattern.id} ${pct(pattern.strength)} ${compiled} hits ${pattern.hitCount} compile ${pattern.compileCount}/5 ${pattern.name}`);
+    lines.push(
+      `${pattern.id} ${pct(pattern.strength)} ${compiled} hits ${pattern.hitCount} compile ${pattern.compileCount}/5 ${pattern.name}`,
+    );
     lines.push(`  ${pattern.domains.join(", ")}`);
   }
   if (patterns.length > limit) lines.push(`... ${patterns.length - limit} more`);

@@ -159,7 +159,6 @@ export class Agent {
     lastIntentShift: Date.now(),
     shiftCount: 0,
   };
-  private sessionStarted = false;
   private theoryMemory: TheoryMemory;
   private searchCache = new Map<string, string>();
   private lastSearchEntity = "";
@@ -634,14 +633,10 @@ export class Agent {
     return "";
   }
 
-  private estimateTokens(messages: Message[]): number {
-    return messages.reduce((s, m) => s + countTokens(m.content), 0);
-  }
-
   private async manageContextWindow(): Promise<void> {
     const budget = this.cfg.contextTokenBudget;
     const msgCap = this.cfg.maxContextMessages;
-    const currentTokens = this.estimateTokens(this.messages);
+    const currentTokens = this.countTokens();
     const anchorEnd = this.messages.length > 0 && this.messages[0].role === "system" ? 1 : 0;
 
     if (this.messages.length <= msgCap && currentTokens <= budget * 0.8) return;
@@ -651,10 +646,7 @@ export class Agent {
     }
 
     const minKeep = anchorEnd + 2;
-    while (
-      this.messages.length > minKeep &&
-      (this.estimateTokens(this.messages) > budget || this.messages.length > msgCap)
-    ) {
+    while (this.messages.length > minKeep && (this.countTokens() > budget || this.messages.length > msgCap)) {
       this.messages.splice(anchorEnd, 1);
     }
   }

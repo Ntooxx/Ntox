@@ -70,12 +70,13 @@ function computeLayout(cols: number, rows: number): Layout {
 }
 
 // ── Cell grid ─────────────────────────────────────────────
-interface Cell { char: string; color: RGB | null; }
+interface Cell {
+  char: string;
+  color: RGB | null;
+}
 
 function createGrid(rows: number, cols: number): Cell[][] {
-  return Array.from({ length: rows }, () =>
-    Array.from({ length: cols }, () => ({ char: " ", color: null }))
-  );
+  return Array.from({ length: rows }, () => Array.from({ length: cols }, () => ({ char: " ", color: null })));
 }
 
 function placeText(grid: Cell[][], row: number, col: number, text: string, color: RGB): void {
@@ -121,14 +122,27 @@ function getPhase(elapsed: number): { phase: string; progress: number } {
     if (elapsed < t) return { phase: name, progress: Math.min(1, (elapsed - start) / dur) };
     return null;
   };
-  return check(VOID_MS, "void") || check(LABELS_MS, "labels") || check(CONVERGENCE_MS, "convergence") ||
-    check(CONTACT_MS, "contact") || check(FLASH_MS, "flash") || check(BIRTH_MS, "birth") ||
-    check(FADE_MS, "fade") || { phase: "done", progress: 1 };
+  return (
+    check(VOID_MS, "void") ||
+    check(LABELS_MS, "labels") ||
+    check(CONVERGENCE_MS, "convergence") ||
+    check(CONTACT_MS, "contact") ||
+    check(FLASH_MS, "flash") ||
+    check(BIRTH_MS, "birth") ||
+    check(FADE_MS, "fade") || { phase: "done", progress: 1 }
+  );
 }
 
-function addParticles(grid: Cell[][], row: number, lineStart: number, lineEnd: number, lineProgress: number, frameTime: number): void {
-  const tipL = lineStart + Math.floor((lineEnd - lineStart) * lineProgress / 2);
-  const tipR = lineEnd - Math.floor((lineEnd - lineStart) * lineProgress / 2);
+function addParticles(
+  grid: Cell[][],
+  row: number,
+  lineStart: number,
+  lineEnd: number,
+  lineProgress: number,
+  frameTime: number,
+): void {
+  const tipL = lineStart + Math.floor(((lineEnd - lineStart) * lineProgress) / 2);
+  const tipR = lineEnd - Math.floor(((lineEnd - lineStart) * lineProgress) / 2);
   const chars = ["\u00b7", "\u2022", "\u25e6", "\u2218"];
   for (let p = 0; p < 5; p++) {
     const drift = Math.sin(frameTime / 180 + p * 2.1) * 3;
@@ -178,7 +192,7 @@ function renderFrame(phase: string, progress: number, layout: Layout, frameTime:
   else if (phase === "fade") lineProgress = 1;
 
   if (lineProgress > 0) {
-    const halfLen = Math.floor(maxLineLen * lineProgress / 2);
+    const halfLen = Math.floor((maxLineLen * lineProgress) / 2);
     const lineColor: RGB = phase === "fade" ? dim(MUTED_RED, 1 - progress) : MUTED_RED;
     for (let i = 0; i < halfLen; i++) {
       grid[centerY][lineStart + i] = { char: "\u2550", color: lineColor };
@@ -189,7 +203,7 @@ function renderFrame(phase: string, progress: number, layout: Layout, frameTime:
   // Center dot
   if (phase === "void" || phase === "labels" || phase === "convergence") {
     const pulseSpeed = phase === "convergence" ? 3 + progress * 5 : 2;
-    const pulse = 0.3 + 0.7 * Math.abs(Math.sin(frameTime / 400 * pulseSpeed));
+    const pulse = 0.3 + 0.7 * Math.abs(Math.sin((frameTime / 400) * pulseSpeed));
     grid[centerY][centerX] = { char: "\u00b7", color: dim(GOLD, pulse) };
   } else if (phase === "contact") {
     const p = easeInOutQuad(progress);
@@ -277,14 +291,22 @@ export async function playIntro(): Promise<void> {
   try {
     process.stdout.write("\x1b[?25l");
     process.stdout.write("\x1b[2J");
-  } catch { /* terminal doesn't support ANSI */ }
+  } catch {
+    /* terminal doesn't support ANSI */
+  }
 
   let skip = false;
 
-  const onKeypress = () => { skip = true; };
+  const onKeypress = () => {
+    skip = true;
+  };
   readline.emitKeypressEvents(process.stdin);
   if (process.stdin.isTTY) {
-    try { process.stdin.setRawMode(true); } catch { /* ok */ }
+    try {
+      process.stdin.setRawMode(true);
+    } catch {
+      /* ok */
+    }
     process.stdin.resume();
     process.stdin.on("keypress", onKeypress);
   }
@@ -300,7 +322,12 @@ export async function playIntro(): Promise<void> {
           clearInterval(interval);
           process.stdout.write("\x1b[?25h");
           if (process.stdin.isTTY) {
-            try { process.stdin.setRawMode(false); process.stdin.pause(); } catch { /* ok */ }
+            try {
+              process.stdin.setRawMode(false);
+              process.stdin.pause();
+            } catch {
+              /* ok */
+            }
           }
           resolve();
           return;
@@ -308,19 +335,30 @@ export async function playIntro(): Promise<void> {
 
         const { phase, progress } = getPhase(elapsed);
 
-
         try {
           const frame = renderFrame(phase, progress, layout, elapsed);
           process.stdout.write(frame);
-        } catch { /* render error, continue */ }
+        } catch {
+          /* render error, continue */
+        }
       }, 33);
     });
-  } catch { /* intro failed, clean up */ }
-   finally {
-    try { process.stdout.write("\x1b[?25h"); } catch { /* ok */ }
+  } catch {
+    /* intro failed, clean up */
+  } finally {
+    try {
+      process.stdout.write("\x1b[?25h");
+    } catch {
+      /* ok */
+    }
     process.stdin.removeListener("keypress", onKeypress);
     if (process.stdin.isTTY) {
-      try { process.stdin.setRawMode(false); process.stdin.pause(); } catch { /* ok */ }
+      try {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+      } catch {
+        /* ok */
+      }
     }
   }
 }

@@ -221,14 +221,103 @@ describe("formatCost", () => {
   });
 });
 
+describe("LLMClient.stream (Ollama)", () => {
+  function ollamaChunkLine(payload: Record<string, unknown>): string {
+    return JSON.stringify(payload);
+  }
+
+  function streamResponse(lines: string[]): Response {
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(lines.join("\n") + "\n"));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "application/x-ndjson" } },
+    );
+  }
+
+  const tools: {
+    type: "function";
+    function: { name: string; description: string; parameters: { type: string; properties: Record<string, never> } };
+  }[] = [
+    {
+      type: "function",
+      function: {
+        name: "read",
+        description: "Read a file",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  ];
+
+  it("parses tool calls from the Ollama stream", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      streamResponse([
+        ollamaChunkLine({ model: "llama3", message: { role: "assistant", content: "" }, done: false }),
+        ollamaChunkLine({
+          model: "llama3",
+          message: { role: "assistant", tool_calls: [{ index: 0, function: { name: "read", arguments: '{"path":' } }] },
+          done: false,
+        }),
+        ollamaChunkLine({
+          model: "llama3",
+          message: { role: "assistant", tool_calls: [{ index: 0, function: { arguments: '"test.txt"}' } }] },
+          done: false,
+        }),
+        ollamaChunkLine({ model: "llama3", message: { role: "assistant", content: "Done." }, done: true }),
+      ]),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const client = new LLMClient("", "ollama/llama3", "openai/text-embedding-3-small", 1024, 0.7);
+
+    const chunks: { delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }[] = [];
+    for await (const chunk of client.stream([{ role: "user", content: "read test.txt" }], undefined, tools)) {
+      chunks.push(chunk as { delta: string; toolCalls?: { id: string; name: string; arguments: string }[] });
+    }
+
+    const toolCallChunk = chunks.find((c) => c.toolCalls && c.toolCalls.length > 0);
+    expect(toolCallChunk).toBeDefined();
+    expect(toolCallChunk?.toolCalls?.[0]).toEqual({
+      id: "call_0",
+      name: "read",
+      arguments: '{"path":"test.txt"}',
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:11434/api/chat",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+  });
+
+  it("still streams plain content when no tools are called", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        streamResponse([
+          ollamaChunkLine({ model: "llama3", message: { role: "assistant", content: "Hello " }, done: false }),
+          ollamaChunkLine({ model: "llama3", message: { role: "assistant", content: "world" }, done: true }),
+        ]),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const client = new LLMClient("", "ollama/llama3", "openai/text-embedding-3-small", 1024, 0.7);
+
+    let text = "";
+    for await (const chunk of client.stream([{ role: "user", content: "hi" }])) {
+      text += chunk.delta;
+    }
+
+    expect(text).toBe("Hello world");
+  });
+});
+
 describe("LLMClient.embed", () => {
   it("returns embeddings from the endpoint", async () => {
-    const fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }),
-        { status: 200 },
-      ),
-    );
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }), { status: 200 }));
     vi.stubGlobal("fetch", fetch);
     const client = new LLMClient("key", "openrouter/model", "openrouter/text-embedding-3-small", 1024, 0.7);
 
@@ -239,12 +328,9 @@ describe("LLMClient.embed", () => {
   });
 
   it("caches embeddings so repeat queries skip the network", async () => {
-    const fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({ data: [{ embedding: [0.5, 0.6] }] }),
-        { status: 200 },
-      ),
-    );
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ data: [{ embedding: [0.5, 0.6] }] }), { status: 200 }));
     vi.stubGlobal("fetch", fetch);
     const client = new LLMClient("key", "openrouter/model", "openrouter/text-embedding-3-small", 1024, 0.7);
 

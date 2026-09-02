@@ -37,9 +37,7 @@ describe("SkillExecutor", () => {
     registry.add(makeSkill("helper", ["help", "assist"]));
     const executor = makeExecutor(registry);
 
-    const ctx = executor.buildSkillsContext([
-      { skill: registry.get("helper")!, confidence: 0.8 },
-    ]);
+    const ctx = executor.buildSkillsContext([{ skill: registry.get("helper")!, confidence: 0.8 }]);
     expect(ctx).toContain("Active Skill");
     expect(ctx).toContain("helper");
   });

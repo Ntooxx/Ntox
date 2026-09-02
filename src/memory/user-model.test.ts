@@ -10,7 +10,32 @@ describe("UserModel", () => {
   let model: UserModel;
 
   beforeEach(() => {
-    writeFileSync(PROFILE_PATH, JSON.stringify({ name: "", goals: [], expertise: {}, preferences: { verbosity: "balanced", technicalLevel: "intermediate", tone: "adaptive", codeExamples: "when-helpful" }, patterns: { averageMessageLength: 0, totalMessages: 0, correctionsReceived: 0, prefersCodeBlocks: false, prefersBulletPoints: false }, domains: [], closenessScore: 0, personalVocabulary: [], projectAssociations: [], moodHistory: [] }));
+    writeFileSync(
+      PROFILE_PATH,
+      JSON.stringify({
+        name: "",
+        goals: [],
+        expertise: {},
+        preferences: {
+          verbosity: "balanced",
+          technicalLevel: "intermediate",
+          tone: "adaptive",
+          codeExamples: "when-helpful",
+        },
+        patterns: {
+          averageMessageLength: 0,
+          totalMessages: 0,
+          correctionsReceived: 0,
+          prefersCodeBlocks: false,
+          prefersBulletPoints: false,
+        },
+        domains: [],
+        closenessScore: 0,
+        personalVocabulary: [],
+        projectAssociations: [],
+        moodHistory: [],
+      }),
+    );
     model = new UserModel();
   });
 

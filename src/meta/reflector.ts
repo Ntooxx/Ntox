@@ -46,9 +46,7 @@ export class Reflector {
     const truncatedQuery = query.length > 500 ? query.slice(0, 500) + "..." : query;
     const truncatedResp = response.length > 1500 ? response.slice(0, 1500) + "..." : response;
 
-    const prompt = REFLECTION_PROMPT
-      .replace("{QUERY}", truncatedQuery)
-      .replace("{RESPONSE}", truncatedResp);
+    const prompt = REFLECTION_PROMPT.replace("{QUERY}", truncatedQuery).replace("{RESPONSE}", truncatedResp);
 
     try {
       const result: Reflection = {

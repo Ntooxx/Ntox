@@ -24,12 +24,60 @@ export interface ObservedSession {
 }
 
 const STOP_WORDS = new Set([
-  "the", "a", "an", "is", "are", "was", "were", "be", "been",
-  "being", "have", "has", "had", "do", "does", "did", "will", "would", "could",
-  "should", "may", "might", "shall", "can", "need", "want", "like", "just", "get",
-  "got", "make", "made", "use", "used", "using", "know", "think", "going", "way",
-  "thing", "things", "really", "actually", "basically", "well", "also", "even",
-  "still", "already", "though", "although", "however", "therefore", "thus",
+  "the",
+  "a",
+  "an",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "could",
+  "should",
+  "may",
+  "might",
+  "shall",
+  "can",
+  "need",
+  "want",
+  "like",
+  "just",
+  "get",
+  "got",
+  "make",
+  "made",
+  "use",
+  "used",
+  "using",
+  "know",
+  "think",
+  "going",
+  "way",
+  "thing",
+  "things",
+  "really",
+  "actually",
+  "basically",
+  "well",
+  "also",
+  "even",
+  "still",
+  "already",
+  "though",
+  "although",
+  "however",
+  "therefore",
+  "thus",
 ]);
 
 export class ObservationEngine {
@@ -56,12 +104,17 @@ export class ObservationEngine {
     try {
       writeFileSync(tmp, JSON.stringify(this.observations, null, 2));
       writeFileSync(this.path, readFileSync(tmp, "utf-8"));
-      try { unlinkSync(tmp); } catch { }
-    } catch { }
+      try {
+        unlinkSync(tmp);
+      } catch {}
+    } catch {}
   }
 
   private persist(): void {
-    if (this.dirty) { this.save(); this.dirty = false; }
+    if (this.dirty) {
+      this.save();
+      this.dirty = false;
+    }
   }
 
   flush(): void {
@@ -77,9 +130,7 @@ export class ObservationEngine {
     sessionStartTime: number;
     userProfile: UserProfile;
   }): ObservedSession {
-    const userMessages = data.messages
-      .filter((m) => m.role === "user")
-      .map((m) => m.content);
+    const userMessages = data.messages.filter((m) => m.role === "user").map((m) => m.content);
 
     const observation: ObservedSession = {
       id: `obs_${randomUUID().slice(0, 8)}`,
@@ -112,9 +163,7 @@ export class ObservationEngine {
 
   getByTopic(topic: string, count: number = 10): ObservedSession[] {
     const lower = topic.toLowerCase();
-    return this.observations
-      .filter((o) => o.topics.some((t) => t.includes(lower)))
-      .slice(-count);
+    return this.observations.filter((o) => o.topics.some((t) => t.includes(lower))).slice(-count);
   }
 
   getPattern(topic: string, window: number = 10): { topic: string; frequency: number; total: number } {
@@ -173,7 +222,10 @@ export class ObservationEngine {
     const bigramCounts = new Map<string, number>();
 
     for (const msg of messages) {
-      const words = msg.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && !STOP_WORDS.has(w));
+      const words = msg
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 3 && !STOP_WORDS.has(w));
       for (let i = 0; i < words.length; i++) {
         wordCounts.set(words[i], (wordCounts.get(words[i]) || 0) + 1);
         if (i < words.length - 1) {

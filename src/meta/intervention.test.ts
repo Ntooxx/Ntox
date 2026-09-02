@@ -83,9 +83,7 @@ describe("InterventionEngine", () => {
   });
 
   it("detects goal drift when sessions are away from focus", () => {
-    const observations = Array.from({ length: 6 }, () =>
-      makeObs(["css styling", "animation", "color palette"])
-    );
+    const observations = Array.from({ length: 6 }, () => makeObs(["css styling", "animation", "color palette"]));
     const ctx = defaultCtx({ observations });
     const result = engine.evaluate(ctx);
     expect(result).not.toBeNull();
@@ -94,18 +92,14 @@ describe("InterventionEngine", () => {
   });
 
   it("does not detect drift when aligned with focus", () => {
-    const observations = Array.from({ length: 6 }, () =>
-      makeObs(["launch sentinel", "github stars", "marketing"])
-    );
+    const observations = Array.from({ length: 6 }, () => makeObs(["launch sentinel", "github stars", "marketing"]));
     const ctx = defaultCtx({ observations });
     const result = engine.evaluate(ctx);
     expect(result).toBeNull();
   });
 
   it("detects repetition pattern", () => {
-    const observations = Array.from({ length: 6 }, () =>
-      makeObs(["launch sentinel", "github stars", "marketing"])
-    );
+    const observations = Array.from({ length: 6 }, () => makeObs(["launch sentinel", "github stars", "marketing"]));
     const ctx = defaultCtx({ observations });
     const result = engine.evaluate(ctx);
     if (result) {
@@ -116,9 +110,7 @@ describe("InterventionEngine", () => {
 
   it("detects belief contradiction", () => {
     const beliefs = [makeBelief("CLI users hate GUIs")];
-    const observations = Array.from({ length: 4 }, () =>
-      makeObs(["gui design", "user interface", "button layout"])
-    );
+    const observations = Array.from({ length: 4 }, () => makeObs(["gui design", "user interface", "button layout"]));
     const ctx = defaultCtx({ beliefs, observations, bondLevel: 50 });
     const result = engine.evaluate(ctx);
     expect(result).not.toBeNull();
@@ -127,18 +119,14 @@ describe("InterventionEngine", () => {
 
   it("does not challenge with low bond level", () => {
     const beliefs = [makeBelief("CLI users hate GUIs")];
-    const observations = Array.from({ length: 4 }, () =>
-      makeObs(["gui design", "user interface", "button layout"])
-    );
+    const observations = Array.from({ length: 4 }, () => makeObs(["gui design", "user interface", "button layout"]));
     const ctx = defaultCtx({ beliefs, observations, bondLevel: 15 });
     const result = engine.evaluate(ctx);
     expect(result).toBeNull();
   });
 
   it("respects cooldown period", () => {
-    const observations = Array.from({ length: 6 }, () =>
-      makeObs(["css styling", "animation", "color palette"])
-    );
+    const observations = Array.from({ length: 6 }, () => makeObs(["css styling", "animation", "color palette"]));
     const ctx1 = defaultCtx({ observations });
     const result1 = engine.evaluate(ctx1);
     expect(result1).not.toBeNull();
@@ -152,18 +140,14 @@ describe("InterventionEngine", () => {
   });
 
   it("records intervention history", () => {
-    const observations = Array.from({ length: 6 }, () =>
-      makeObs(["css styling", "animation", "color palette"])
-    );
+    const observations = Array.from({ length: 6 }, () => makeObs(["css styling", "animation", "color palette"]));
     const ctx = defaultCtx({ observations });
     engine.evaluate(ctx);
     expect(engine.getHistory()).toHaveLength(1);
   });
 
   it("tracks outcome", () => {
-    const observations = Array.from({ length: 6 }, () =>
-      makeObs(["css styling", "animation", "color palette"])
-    );
+    const observations = Array.from({ length: 6 }, () => makeObs(["css styling", "animation", "color palette"]));
     const ctx = defaultCtx({ observations });
     const result = engine.evaluate(ctx);
     if (result) {

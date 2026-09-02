@@ -4,12 +4,7 @@ import type { Tool } from "../types/index.js";
 import { globToRegex } from "../utils/glob.js";
 
 const MAX_PATTERN_LENGTH = 200;
-const REDOS_PATTERNS = [
-  /\([^)]*[+*]\)[+*]/,
-  /\(\([^)]+\)[+*]\)[+*]/,
-  /\(\.+\)[+*]/,
-  /\(\w\+\)[+*]/,
-];
+const REDOS_PATTERNS = [/\([^)]*[+*]\)[+*]/, /\(\([^)]+\)[+*]\)[+*]/, /\(\.+\)[+*]/, /\(\w\+\)[+*]/];
 const WHITESPACE_ONLY = /^\s*$/;
 
 function isReDoS(pattern: string): boolean {
