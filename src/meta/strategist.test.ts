@@ -40,6 +40,15 @@ describe("classifyQuery", () => {
     expect(classifyQuery("ok")).toBe("general");
   });
 
+  it("does not classify casual chat as coding", () => {
+    expect(classifyQuery("how is your day going")).toBe("general");
+    expect(classifyQuery("let's go to the beach tomorrow")).toBe("general");
+    expect(classifyQuery("i object to that proposal")).toBe("general");
+    expect(classifyQuery("create a birthday card design")).toBe("creative");
+    expect(classifyQuery("i am sorry for the error in my essay")).toBe("general");
+    expect(classifyQuery("check the latest test results please")).toBe("general");
+  });
+
   it("scores overlapping categories correctly", () => {
     const r = classifyQuery("write and analyze code for the database query");
     expect(r).toBe("coding");

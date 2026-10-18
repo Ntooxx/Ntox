@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { checkForSurfaceReasoning } from "./false-success.js";
-import type { CognitiveTrace } from "../types/index.js";
+import type { CognitiveTrace, CritiqueResult } from "../types/index.js";
 
 function makeTrace(
   finalAnswer: string,
-  selfCritique: string = "",
+  selfCritique: string = "The answer addresses the main mechanism but ignores the failure case.",
   assumptions: string[] = ["some assumption"],
 ): CognitiveTrace {
   return {
@@ -23,46 +23,61 @@ function makeTrace(
   };
 }
 
+function makeCritique(overrides: Partial<CritiqueResult> = {}): CritiqueResult {
+  return {
+    completeness: 0.8,
+    accuracy: 0.9,
+    clarity: 0.8,
+    gaps: [],
+    strengthened: true,
+    ...overrides,
+  };
+}
+
 describe("checkForSurfaceReasoning", () => {
-  it("flags shallow answers with high surface-to-depth ratio", () => {
-    const shallow = makeTrace("Therefore, thus, clearly, obviously, it follows that this is the answer.");
-    const result = checkForSurfaceReasoning(shallow);
+  it("flags shallow answers when the critic scores completeness low", () => {
+    const shallow = makeTrace("A brief answer with no mechanism.");
+    const result = checkForSurfaceReasoning(shallow, makeCritique({ completeness: 0.2 }));
     expect(result.isSurface).toBe(true);
-    expect(result.details.length).toBeGreaterThan(0);
+    expect(result.details.some((d) => d.includes("completeness"))).toBe(true);
   });
 
-  it("passes answers with deep reasoning", () => {
-    const deep = makeTrace(
-      "The reason is because the underlying mechanism involves feedback loops. However, we must consider the counterargument. Fundamentally, this implies a first-principles approach.",
+  it("flags shallow answers when the critic scores accuracy low", () => {
+    const result = checkForSurfaceReasoning(makeTrace("Some answer."), makeCritique({ accuracy: 0.3 }));
+    expect(result.isSurface).toBe(true);
+    expect(result.details.some((d) => d.includes("accuracy"))).toBe(true);
+  });
+
+  it("surfaces critic gaps in details", () => {
+    const result = checkForSurfaceReasoning(
+      makeTrace("Some answer."),
+      makeCritique({ gaps: ["Response is too brief for the query complexity"] }),
     );
-    const result = checkForSurfaceReasoning(deep);
     expect(result.isSurface).toBe(false);
+    expect(result.details).toContain("Response is too brief for the query complexity");
   });
 
-  it("flags answers with absent self-critique", () => {
-    const trace = makeTrace("Therefore, thus, clearly this is correct.", "", []);
+  it("passes answers with high critic scores", () => {
+    const deep = makeTrace(
+      "The answer is 42 because the recurrence halves the search space each step. However, this assumes sorted input; the limitation is unsorted data.",
+    );
+    const result = checkForSurfaceReasoning(deep, makeCritique());
+    expect(result.isSurface).toBe(false);
+    expect(result.depthScore).toBeGreaterThan(result.surfaceScore);
+  });
+
+  it("reports structural diagnostics without critic scores but does not flag", () => {
+    const trace = makeTrace("Some answer.", "", []);
     const result = checkForSurfaceReasoning(trace);
-    expect(result.isSurface).toBe(true);
+    expect(result.isSurface).toBe(false);
     expect(result.details.some((d) => d.includes("Self-critique"))).toBe(true);
-  });
-
-  it("flags answers with no assumptions stated", () => {
-    const trace = makeTrace("Therefore, thus, clearly this is correct.", "some critique", []);
-    const result = checkForSurfaceReasoning(trace);
-    expect(result.isSurface).toBe(true);
     expect(result.details.some((d) => d.includes("assumptions"))).toBe(true);
-  });
-
-  it("returns correct scores", () => {
-    const result = checkForSurfaceReasoning(makeTrace("because, however, this implies a mechanism"));
-    expect(result.surfaceScore).toBe(0);
-    expect(result.depthScore).toBeGreaterThan(0);
   });
 
   it("does not flag short natural responses (greetings, thanks)", () => {
     const hello = makeTrace("Hey! What can I help with?");
     const thanks = makeTrace("You're welcome! Happy to help.");
-    expect(checkForSurfaceReasoning(hello).isSurface).toBe(false);
-    expect(checkForSurfaceReasoning(thanks).isSurface).toBe(false);
+    expect(checkForSurfaceReasoning(hello, makeCritique()).isSurface).toBe(false);
+    expect(checkForSurfaceReasoning(thanks, makeCritique()).isSurface).toBe(false);
   });
 });

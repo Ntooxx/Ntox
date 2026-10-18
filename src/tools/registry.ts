@@ -1,4 +1,4 @@
-import type { Tool, ToolResult } from "../types/index.js";
+import type { Tool, ToolContext, ToolResult } from "../types/index.js";
 
 export interface OpenAITool {
   type: "function";
@@ -44,13 +44,14 @@ export async function executeToolCall(
   registry: ToolRegistry,
   name: string,
   args: Record<string, unknown>,
+  context?: ToolContext,
 ): Promise<ToolResult> {
   const tool = registry.get(name);
   if (!tool) {
     return { success: false, error: `Unknown tool: ${name}` };
   }
   try {
-    return await tool.execute(args);
+    return await tool.execute(args, context);
   } catch (e) {
     return {
       success: false,

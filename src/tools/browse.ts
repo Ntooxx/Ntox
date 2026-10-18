@@ -71,6 +71,7 @@ async function scrollPage(page: any, requestedTimes: number): Promise<void> {
 
 export const browseTool: Tool = {
   name: "browse",
+  parallelSafe: true,
   description:
     "Browse a JavaScript-rendered webpage using a real browser. Use for LinkedIn, Indeed, Glassdoor, Wellfound, or any SPA that requires JS. Supports snapshots, extraction, clicking, and scrolling.",
   parameters: {

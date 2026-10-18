@@ -1,6 +1,18 @@
-import { Readability } from "@mozilla/readability";
-import { parseHTML } from "linkedom";
 import type { Tool } from "../types/index.js";
+
+let htmlParserModule: Promise<{
+  Readability: typeof import("@mozilla/readability").Readability;
+  parseHTML: typeof import("linkedom").parseHTML;
+}> | null = null;
+
+async function loadHtmlParser() {
+  if (!htmlParserModule) {
+    htmlParserModule = Promise.all([import("@mozilla/readability"), import("linkedom")]).then(
+      ([{ Readability }, { parseHTML }]) => ({ Readability, parseHTML }),
+    );
+  }
+  return await htmlParserModule;
+}
 
 const MAX_URL_LENGTH = 4096;
 const MAX_RESPONSE_BYTES = 10_000_000;
@@ -101,11 +113,12 @@ export function htmlToBasicMarkdown(html: string): string {
     .replace(/\n{3,}/g, "\n\n");
 }
 
-export function htmlToReadableMarkdown(
+export async function htmlToReadableMarkdown(
   html: string,
   url: string,
-): { title: string; content: string; extractor: "readability" | "basic" } {
+): Promise<{ title: string; content: string; extractor: "readability" | "basic" }> {
   try {
+    const { Readability, parseHTML } = await loadHtmlParser();
     const { document } = parseHTML(html);
     const parsed = new Readability(document, { charThreshold: 100 }).parse();
     if (parsed?.textContent && parsed.textContent.trim().length > 200) {
@@ -155,6 +168,7 @@ async function readLimitedResponse(res: Response): Promise<string> {
 
 export const webFetchTool: Tool = {
   name: "web_fetch",
+  parallelSafe: true,
   description:
     "Fetch content from a URL with 30s timeout. Returns the content as text, markdown (converted from HTML), or raw HTML.",
   parameters: {
@@ -179,11 +193,31 @@ export const webFetchTool: Tool = {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
     try {
-      const res = await fetch(url, {
-        signal: controller.signal,
-        headers: FETCH_HEADERS,
-        redirect: "follow",
-      });
+      let currentUrl = url;
+      let res: Response | null = null;
+      for (let hop = 0; hop <= 5; hop++) {
+        const hopReason = validateHttpUrl(currentUrl);
+        if (hopReason) {
+          return { success: false, error: `URL rejected: ${hopReason}` };
+        }
+        res = await fetch(currentUrl, {
+          signal: controller.signal,
+          headers: FETCH_HEADERS,
+          redirect: "manual",
+        });
+        if (res.status >= 300 && res.status < 400) {
+          const location = res.headers.get("location");
+          if (!location) break;
+          currentUrl = new URL(location, currentUrl).toString();
+          res.body?.cancel().catch(() => {});
+          continue;
+        }
+        break;
+      }
+      if (!res) return { success: false, error: "Fetch failed: no response" };
+      if (res.status >= 300 && res.status < 400) {
+        return { success: false, error: "Too many redirects" };
+      }
 
       if (!res.ok) return { success: false, error: `HTTP ${res.status}: ${res.statusText}` };
       const cl = res.headers.get("content-length");
@@ -199,7 +233,7 @@ export const webFetchTool: Tool = {
       let content = raw;
       let extractor = isHtml ? "basic" : "raw";
       if (format === "markdown" && isHtml) {
-        const readable = htmlToReadableMarkdown(raw, res.url || url);
+        const readable = await htmlToReadableMarkdown(raw, res.url || currentUrl);
         title = readable.title;
         content = readable.content;
         extractor = readable.extractor;
@@ -210,7 +244,7 @@ export const webFetchTool: Tool = {
       return {
         success: true,
         data: {
-          url: res.url || url,
+          url: res.url || currentUrl,
           status: res.status,
           title,
           content,

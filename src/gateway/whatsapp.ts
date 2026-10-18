@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { GatewayChannel } from "./types.js";
 
 const WHATSAPP_API = "https://graph.facebook.com/v18.0";
@@ -8,6 +9,7 @@ interface WhatsAppConfig {
   token: string;
   phoneNumberId: string;
   verifyToken: string;
+  appSecret?: string;
   port: number;
   onMessage: (chatId: string, text: string, username: string) => Promise<string>;
 }
@@ -110,8 +112,21 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+export function verifyWhatsAppSignature(rawBody: string, header: string | undefined, appSecret: string): boolean {
+  if (!appSecret) return true;
+  if (!header || !header.startsWith("sha256=")) return false;
+  const expected = createHmac("sha256", appSecret).update(rawBody).digest("hex");
+  const received = header.slice("sha256=".length);
+  if (received.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(received, "hex"), Buffer.from(expected, "hex"));
+  } catch {
+    return false;
+  }
+}
+
 export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
-  const { token, phoneNumberId, verifyToken, port, onMessage } = config;
+  const { token, phoneNumberId, verifyToken, appSecret, port, onMessage } = config;
   let server: ReturnType<typeof createServer> | null = null;
 
   function handleVerify(req: IncomingMessage, res: ServerResponse): void {
@@ -132,6 +147,14 @@ export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
   async function handleWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
       const body = await readBody(req);
+      const signatureHeader = req.headers["x-hub-signature-256"];
+      const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+      if (!verifyWhatsAppSignature(body, signature, appSecret || "")) {
+        console.error("[whatsapp] webhook signature verification failed");
+        res.writeHead(401);
+        res.end();
+        return;
+      }
       const payload = JSON.parse(body) as { entry?: WebhookEntry[] };
 
       if (!payload.entry) {

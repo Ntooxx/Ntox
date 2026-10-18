@@ -46,6 +46,7 @@
     "gateway": "tsx src/index.ts gateway",
     "gateway:build": "node dist/index.js gateway",
     "gateway:discord": "tsx src/index.ts gateway discord",
+    "api": "tsx src/index.ts api",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run",
@@ -54,6 +55,13 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "verify:all": "node scripts/verify-all.mjs",
+    "bench:startup": "npm run build && node scripts/bench-startup.mjs",
+    "bench:cognitive": "npm run build && node dist/benchmark/run-ci.js",
+    "bench:alive": "npm run build && node scripts/bench-alive.mjs",
+    "bench:m5": "npm run build && node scripts/m5-run.mjs",
+    "bench:meta": "npm run build && node scripts/bench-meta.mjs",
+    "eval:necessity": "npm run build && node scripts/bench-meta.mjs --necessity",
+    "eval:longitudinal": "npm run build && node scripts/bench-meta.mjs --longitudinal",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -88,10 +96,12 @@
     "gpt-tokenizer": "^3.4.0",
     "linkedom": "^0.18.13",
     "ora": "^8.1.1",
-    "playwright-core": "^1.62.0",
     "socket.io": "^4.8.3",
     "ws": "^8.21.1",
     "zod": "^3.24.3"
+  },
+  "optionalDependencies": {
+    "playwright-core": "^1.62.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

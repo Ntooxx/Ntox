@@ -12,10 +12,13 @@ import {
   getProviderNames,
   getProviders,
   providerRequiresKey,
+  modelSupportsTools,
   LOCAL_PROVIDERS,
 } from "../core/llm.js";
 import { describeError } from "../core/errors.js";
 import { Agent } from "../core/agent.js";
+import { Reflector } from "../meta/reflector.js";
+import { createIdleJobs } from "../mind/jobs.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { MemoryStore } from "../memory/episodic.js";
 import { UserModel } from "../memory/user-model.js";
@@ -26,7 +29,18 @@ import { learnSkillFromDescription } from "../skills/learner.js";
 import { Analytics } from "../meta/analytics.js";
 import { ProactiveEngine } from "../meta/proactive.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
-import { loadTheoryStore, getTheoryHierarchy, confirmTheory, disconfirmTheory } from "../research/theory-store.js";
+import {
+  loadTheoryStore,
+  getTheoryHierarchy,
+  confirmTheory,
+  disconfirmTheory,
+  detectDomain,
+} from "../research/theory-store.js";
+import { TransferStore, findTransferCandidates, type TransferTheoryView } from "../research/transfer.js";
+import { freshProfile, profileComponents, profileDivergence } from "../mind/profile.js";
+import { promoteOpinions } from "../mind/opinion.js";
+import { assessM5, collectAliveRun, loadAliveRuns, saveAliveRun } from "../benchmark/alive.js";
+import { loadVoiceABStats } from "../benchmark/voice-ab.js";
 import {
   formatPatternDetail,
   formatPatternOverview,
@@ -56,7 +70,6 @@ import {
   renderMistakeList,
   renderUserPrompt,
   renderAssistantLabel,
-  renderDivider,
   renderInlineTag,
   renderSkillsMenu,
   renderDomainSkills,
@@ -66,7 +79,11 @@ import {
   renderMemoryPulse,
   renderTips,
   renderLastTurn,
+  renderBriefCard,
+  termWidth,
 } from "./render.js";
+import { revealBlock, sweepDivider } from "./motion.js";
+import { gradient, palette } from "./theme.js";
 
 const MODEL_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -100,9 +117,11 @@ export class Repl {
 
   private infra: ReturnType<typeof createAgentInfra>;
   private briefingEngine: BriefingEngine;
+  private resumeSessionId?: string;
 
-  constructor() {
-    this.sessionId = `sess_${randomUUID().slice(0, 8)}`;
+  constructor(options: { resumeSessionId?: string } = {}) {
+    this.resumeSessionId = options.resumeSessionId;
+    this.sessionId = options.resumeSessionId || `sess_${randomUUID().slice(0, 8)}`;
     this.infra = createAgentInfra(this.config);
     this.briefingEngine = new BriefingEngine();
 
@@ -123,26 +142,25 @@ export class Repl {
   }
 
   private createAgent(): Agent {
-    const cfg = createAgentConfig(this.infra, this.config, this.sessionId);
+    const cfg = createAgentConfig(this.infra, this.config, this.sessionId, { sessionSource: "repl" });
     return new Agent(cfg);
   }
 
   async start(): Promise<void> {
     if (process.stdout.isTTY && this.config.introEnabled) {
       await playIntro();
-      process.stdout.write(`\x1b[39m\n  ${chalk.rgb(255, 183, 77)(">")} ${chalk.dim("loading...")}\n`);
     }
 
     if (!this.config.apiKey && providerRequiresKey(this.config.provider)) {
       await this.promptApiKey();
     }
 
-    try {
-      const local = await detectLocalProviders();
-      this.localProviders = { ollama: local.ollama, lmstudio: local.lmstudio };
-    } catch {
-      /* ignore */
+    const bootSpinner = new Spinner();
+    if (process.stdout.isTTY && this.config.animationLevel !== "off") {
+      bootSpinner.start("initializing");
     }
+
+    this.probeLocalProvidersInBackground();
 
     process.on("SIGINT", () => {
       this.handleExit();
@@ -158,24 +176,52 @@ export class Repl {
       this.config.provider,
     );
     this.agent = this.createAgent();
+    let resumeMessage: string | null = null;
+    if (this.resumeSessionId) {
+      const restored = this.agent.restoreSession(this.sessionId);
+      if (restored.restored) {
+        const saved = restored.savedAt ? new Date(restored.savedAt).toLocaleString() : "unknown";
+        this.messageCount = this.agent.getMessages().filter((message) => message.role === "user").length;
+        resumeMessage = `Resumed ${this.sessionId} (${restored.messageCount} messages, saved ${saved})`;
+      } else {
+        resumeMessage = `No saved session found for ${this.sessionId}; starting fresh.`;
+      }
+    }
     this.agent.setSkillsCount(this.skillRegistry.count());
     this.userModel.startSession();
+    bootSpinner.stop();
     await runFirstTimeOnboarding(this.userModel);
-    await this.loadModels();
+    this.loadModelsCached();
     this.infra.aliveHosts?.start();
-    this.skillLibrary.scan();
+    if (this.config.idleEnabled === true) {
+      try {
+        this.wireIdleJobs();
+        this.infra.mind?.idle.setActivity();
+        this.infra.mind?.idle.start();
+        const queuedProposals = this.infra.mind?.idle.drainProposals() ?? [];
+        if (queuedProposals.length > 0) {
+          console.log(chalk.bold("\nqueued while away"));
+          for (const proposal of queuedProposals) console.log(`  ${chalk.dim("•")} ${proposal}`);
+        }
+      } catch (e) {
+        console.error("[idle]", e);
+      }
+    }
+    this.refreshModelsInBackground();
     this.agent.initKernel(this.config.model);
 
     const providerNames = getProviderNames();
     const providerLabel = providerNames[this.config.provider] || this.config.provider;
 
-    console.log(
+    await revealBlock(
       renderHeaderBar(this.config.model, providerLabel, {
         memoryCount: this.memory.count(),
       }),
+      { enabled: this.config.animationLevel !== "off" },
     );
-    console.log("");
-    this.showAutoBrief();
+    process.stdout.write("\n");
+    if (resumeMessage) console.log(chalk.cyan(resumeMessage), "\n");
+    await this.showAutoBrief();
     this.rl = readline.createInterface({ input, output });
     this.loop();
   }
@@ -287,18 +333,26 @@ export class Repl {
 
   private localProviders: { ollama: boolean; lmstudio: boolean } = { ollama: false, lmstudio: false };
 
-  private async loadModels(): Promise<void> {
-    try {
-      const local = await detectLocalProviders();
-      this.localProviders = { ollama: local.ollama, lmstudio: local.lmstudio };
+  private loadModelsCached(): void {
+    const cached = loadCachedModels();
+    if (cached && cached.length > 0) this.models = cached;
+  }
 
-      const cached = loadCachedModels();
-      if (await this.refreshModels()) return;
-      this.models = cached ?? [];
-    } catch (e) {
-      console.log(chalk.yellow(`Could not fetch models: ${e}`));
-      this.models = [];
-    }
+  private refreshModelsInBackground(): void {
+    if (this.modelCatalogUpdatedAt && Date.now() - this.modelCatalogUpdatedAt < MODEL_REFRESH_INTERVAL_MS) return;
+    void this.refreshModels().catch(() => {
+      /* catalog refresh is best-effort */
+    });
+  }
+
+  private probeLocalProvidersInBackground(): void {
+    void detectLocalProviders()
+      .then((local) => {
+        this.localProviders = { ollama: local.ollama, lmstudio: local.lmstudio };
+      })
+      .catch(() => {
+        /* local provider probe is best-effort */
+      });
   }
 
   private async refreshModels(): Promise<boolean> {
@@ -307,7 +361,19 @@ export class Repl {
     this.models = models;
     this.modelCatalogUpdatedAt = Date.now();
     saveCachedModels(models);
+    this.warnCurrentModelTools();
     return true;
+  }
+
+  private warnCurrentModelTools(): void {
+    const current = this.models.find((m) => m.id === this.config.model);
+    if (modelSupportsTools(current) === false) {
+      console.log(
+        chalk.yellow(
+          `Warning: "${this.config.model}" does not advertise tool support — the agent will not be able to call tools. Switch with /model.`,
+        ),
+      );
+    }
   }
 
   private loop(): void {
@@ -320,6 +386,7 @@ export class Repl {
           this.loop();
           return;
         }
+        this.infra.mind?.idle.setActivity();
 
         if (this.isProcessing) {
           console.log(chalk.yellow("Still processing previous request..."));
@@ -338,7 +405,8 @@ export class Repl {
           return;
         }
 
-        process.stdout.write(`\n${renderDivider()}\n`);
+        process.stdout.write("\n");
+        await sweepDivider(termWidth(), this.config.animationLevel !== "off");
         this.isProcessing = true;
         await this.handleMessage(trimmed);
         this.isProcessing = false;
@@ -472,6 +540,9 @@ export class Repl {
       case "meta":
         this.printMeta();
         break;
+      case "mind":
+        await this.handleMindCommand(arg);
+        break;
       case "mistakes":
         this.printMistakes();
         break;
@@ -548,7 +619,7 @@ export class Repl {
         console.log(chalk.dim("Everything reset (memory + mistakes)."));
         break;
       case "brief":
-        this.handleBriefCommand();
+        await this.handleBriefCommand();
         break;
       case "focus":
         this.handleFocusCommand(arg);
@@ -1289,7 +1360,7 @@ export class Repl {
     if (trace.contextBudget) {
       const b = trace.contextBudget;
       lines.push(
-        `  ${chalk.dim("tokens")}    total~${b.total} system~${b.system} memory~${b.memory} theory~${b.theory} tools~${b.toolResults}`,
+        `  ${chalk.dim("tokens")}    total~${b.total} system~${b.system} memory~${b.memory} theory~${b.theory} plan~${b.plan} tools~${b.toolResults}`,
       );
     }
     if (trace.checkpointIds.length > 0) lines.push(`  ${chalk.dim("checkpoints")} ${trace.checkpointIds.join(", ")}`);
@@ -1366,7 +1437,7 @@ export class Repl {
     console.log(chalk.yellow(`Unknown menu: "${sub}". Try /help.`));
   }
 
-  private handleBriefCommand(): void {
+  private async handleBriefCommand(): Promise<void> {
     const exec = this.infra.executive;
     const observations = this.infra.observation
       ? (() => {
@@ -1405,7 +1476,13 @@ export class Repl {
       console.log(chalk.dim("\n  Nothing notable right now. Everything looks aligned."));
       return;
     }
-    console.log(chalk.cyan(this.briefingEngine.formatBrief(brief)));
+    const card = renderBriefCard(brief);
+    if (!card) {
+      console.log(chalk.dim("\n  Nothing notable right now. Everything looks aligned."));
+      return;
+    }
+    await revealBlock(card, { enabled: this.config.animationLevel !== "off", lineDelayMs: 10 });
+    process.stdout.write("\n");
   }
 
   private handleFocusCommand(arg: string): void {
@@ -1434,7 +1511,7 @@ export class Repl {
     console.log("");
   }
 
-  private showAutoBrief(): void {
+  private async showAutoBrief(): Promise<void> {
     const exec = this.infra.executive;
     const observations = this.infra.observation
       ? (() => {
@@ -1462,10 +1539,11 @@ export class Repl {
     const brief = this.briefingEngine.generate(ctx);
     if (brief.type === "none") return;
 
-    const formatted = this.briefingEngine.formatBrief(brief);
-    if (!formatted) return;
+    const card = renderBriefCard(brief);
+    if (!card) return;
 
-    console.log(chalk.cyan(formatted));
+    await revealBlock(card, { enabled: this.config.animationLevel !== "off", lineDelayMs: 10 });
+    process.stdout.write("\n");
   }
 
   private async handleBenchmark(): Promise<void> {
@@ -1529,6 +1607,521 @@ export class Repl {
   private printMistakes(): void {
     const all = this.mistakes.getAll();
     console.log(renderMistakeList(all));
+  }
+
+  private wireIdleJobs(): void {
+    const mind = this.infra.mind;
+    if (!mind) return;
+    if (mind.idle.hasJob("resolve")) return;
+    let selfPlayCursor = 0;
+    const jobs = createIdleJobs({
+      mind,
+      memory: this.memory,
+      alive: this.infra.alive,
+      executive: this.infra.executive,
+      reflector: new Reflector(this.llm, true),
+      createSelfPlaySession: this.config.idleSelfPlay
+        ? () => {
+            const sid = `selfplay-${Date.now().toString(36)}`;
+            const agent = new Agent(
+              createAgentConfig(this.infra, this.config, sid, {
+                skipReflection: true,
+                predictionLlmEnabled: false,
+                modelCritiqueEnabled: false,
+                mind: undefined,
+              }),
+            );
+            return {
+              send: async (prompt: string) => {
+                let response = "";
+                let tokens = 0;
+                const stream = agent.run(prompt, {
+                  onToken: (t) => {
+                    response += t;
+                  },
+                  onUsage: (u) => {
+                    tokens += u.inputTokens + u.outputTokens;
+                  },
+                  onToolCall: () => {},
+                  onToolResult: () => {},
+                  onThinking: () => {},
+                });
+                for await (const _ of stream) {
+                  /* drain */
+                }
+                return { response, tokens };
+              },
+              reset: async () => {
+                agent.resetConversation();
+              },
+            };
+          }
+        : undefined,
+      pushProposal: (proposal) => mind.idle.pushProposal(proposal),
+      selfPlayCursor: () => selfPlayCursor++,
+      selfPlayCapPerDay: 2,
+    });
+    for (const job of jobs) mind.idle.addJob(job);
+  }
+
+  private buildProfileExtras(): {
+    patterns: { name: string; strength: number; domains: string[] }[];
+    theories: { name: string; confidence: number }[];
+    skills: string[];
+    strategyWeights: Record<string, Record<string, number>>;
+  } {
+    const mind = this.infra.mind;
+    const strategyWeights = Object.fromEntries(
+      Object.entries(mind.bandit.stats().preferred).map(([context, variant]) => [context, { [variant]: 1 }]),
+    );
+    let patterns: { name: string; strength: number; domains: string[] }[] = [];
+    let theories: { name: string; confidence: number }[] = [];
+    try {
+      loadTheoryStore();
+      const hierarchy = getTheoryHierarchy();
+      patterns = hierarchy.patterns.map((p) => ({
+        name: p.name,
+        strength: p.confidence,
+        domains: [detectDomain(`${p.name} ${p.generalization}`)],
+      }));
+      theories = hierarchy.theories.filter((t) => t.confirmed).map((t) => ({ name: t.name, confidence: t.confidence }));
+    } catch {
+      /* theory store unavailable */
+    }
+    let skills: string[] = [];
+    try {
+      skills = this.skillRegistry.list().map((s) => s.name);
+    } catch {
+      /* skills unavailable */
+    }
+    return { patterns, theories, skills, strategyWeights };
+  }
+
+  private async handleMindCommand(arg: string): Promise<void> {
+    const mind = this.infra.mind;
+    if (!mind) {
+      console.log(chalk.dim("\nMind is not configured."));
+      return;
+    }
+    const [sub, ...rest] = arg.split(/\s+/);
+    const subCmd = (sub ?? "").toLowerCase();
+
+    if (subCmd === "ledger") {
+      const limit = Math.max(1, Math.min(50, parseInt(rest[0] ?? "10", 10) || 10));
+      const rows = mind.ledger.recent(limit);
+      console.log(chalk.bold(`\nmind ledger (last ${rows.length})`));
+      for (const row of rows) {
+        const kinds = [...new Set(row.context.map((c) => c.kind))].join(",");
+        const flags = [
+          row.signals.corrected ? "corrected" : "",
+          row.signals.thanked ? "thanked" : "",
+          row.signals.toolFailure ? "tool-fail" : "",
+          row.signals.falseSuccess ? "shallow" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const score = row.score.toFixed(2);
+        const variant = row.strategyVariant ?? "standard";
+        console.log(
+          `  ${chalk.dim(new Date(row.timestamp).toISOString().slice(11, 19))} ${row.queryType.padEnd(9)} score=${score.padStart(5)} ${chalk.dim(`(${variant})`)} ${kinds} ${flags}`,
+        );
+      }
+      if (rows.length === 0) console.log(chalk.dim("  no turns recorded yet"));
+      return;
+    }
+
+    if (subCmd === "predict") {
+      const query = rest.join(" ");
+      if (!query) {
+        console.log(chalk.yellow("Usage: /mind predict <query>"));
+        return;
+      }
+      const prediction = mind.predict(query);
+      console.log(chalk.bold("\nmind prediction"));
+      console.log(`  ${chalk.dim("intent")}     ${prediction.intent}`);
+      console.log(`  ${chalk.dim("shape")}      ${prediction.answerShape}`);
+      console.log(`  ${chalk.dim("tools")}      ${prediction.expectedTools.join(", ") || "none"}`);
+      console.log(`  ${chalk.dim("outcome")}    ${prediction.expectedOutcome}`);
+      console.log(`  ${chalk.dim("confidence")} ${prediction.confidence.toFixed(2)}`);
+      return;
+    }
+
+    if (subCmd === "fingerprint") {
+      const fingerprint = mind.identity.fingerprint();
+      console.log(chalk.bold("\nmind fingerprint"));
+      console.log(`  ${chalk.dim("hash")}      ${chalk.cyan(fingerprint.hash)}`);
+      console.log(`  ${chalk.dim("positions")} ${fingerprint.positions}`);
+      console.log(`  ${chalk.dim("values")}    ${fingerprint.values}`);
+      const positions = mind.identity.get().positions.slice(0, 5);
+      if (positions.length > 0) {
+        console.log(`  ${chalk.dim("top positions")}`);
+        for (const position of positions) {
+          const pct = Math.round(position.confidence * 100);
+          console.log(`    ${position.topic}: ${position.stance} ${chalk.dim(`${pct}%`)}`);
+        }
+      }
+      return;
+    }
+
+    if (subCmd === "idle") {
+      const action = (rest[0] ?? "status").toLowerCase();
+      if (action === "on") {
+        this.wireIdleJobs();
+        mind.idle.start();
+        console.log(chalk.green(`Idle cognition started (jobs: ${mind.idle.jobsList().join(", ") || "none"}).`));
+        return;
+      }
+      if (action === "off") {
+        mind.idle.stop();
+        console.log(chalk.dim("Idle cognition stopped."));
+        return;
+      }
+      if (action === "run") {
+        this.wireIdleJobs();
+        const artifacts = await mind.idle.runCycle();
+        console.log(chalk.bold(`\nmind idle cycle (${artifacts.length} artifacts)`));
+        for (const artifact of artifacts) console.log(`  ${chalk.dim(artifact.job)}: ${artifact.summary}`);
+        if (artifacts.length === 0) console.log(chalk.dim("  nothing to do"));
+        return;
+      }
+      const status = mind.idle.status();
+      console.log(chalk.bold("\nmind idle"));
+      console.log(`  ${chalk.dim("enabled")}   ${status.enabled ? chalk.green("yes") : chalk.dim("no")}`);
+      console.log(`  ${chalk.dim("cycles")}    ${status.cyclesToday} today / ${status.totalCycles} total`);
+      console.log(
+        `  ${chalk.dim("budgets")}   ${status.tokensToday}/${status.budgets.tokens} tok · $${status.usdToday.toFixed(3)}/$${status.budgets.usd} · cycle ${status.cyclesToday}/${status.budgets.cycles} · idle-gate ${Math.round(status.budgets.idleMs / 60_000)}m`,
+      );
+      const yieldValue = status.yieldPerKToken;
+      console.log(
+        `  ${chalk.dim("yield")}      ${yieldValue === Infinity ? "n/a (0 tokens spent)" : `${yieldValue.toFixed(2)} artifacts/1k tok`}`,
+      );
+      console.log(`  ${chalk.dim("jobs")}      ${status.jobs.join(", ") || "none wired"}`);
+      if (status.pendingProposals.length > 0) {
+        console.log(`  ${chalk.dim("proposals")}`);
+        for (const proposal of status.pendingProposals) console.log(`    ${chalk.dim("•")} ${proposal}`);
+      }
+      const artifacts = mind.idle.recentArtifacts(5);
+      if (artifacts.length > 0) {
+        console.log(`  ${chalk.dim("recent artifacts")}`);
+        for (const artifact of artifacts) console.log(`    ${chalk.dim(artifact.job)}: ${artifact.summary}`);
+      }
+      return;
+    }
+
+    if (subCmd === "consolidate") {
+      const dupes = this.memory.consolidateDurable();
+      const report = this.memory.consolidateEpisodes();
+      console.log(chalk.bold("\nmind consolidate"));
+      console.log(`  ${chalk.dim("dedupe")}   ${dupes} duplicate durable memories merged`);
+      console.log(
+        `  ${chalk.dim("episodes")}  ${report.clusters} clusters → ${report.created} created · ${report.merged} merged · ${report.challenged} challenged`,
+      );
+      try {
+        const promoted = promoteOpinions(this.infra.mentalModel, mind.identity);
+        if (promoted.length > 0) {
+          console.log(`  ${chalk.dim("opinions")}   ${promoted.length} promoted to identity positions`);
+        }
+        if (mind.refreshNarrative()) {
+          console.log(`  ${chalk.dim("narrative")}  identity narrative refreshed`);
+        }
+      } catch {
+        /* opinion promotion unavailable */
+      }
+      return;
+    }
+
+    if (subCmd === "identity") {
+      mind.refreshNarrative();
+      const data = mind.identity.get();
+      console.log(chalk.bold("\nmind identity"));
+      console.log(`  ${chalk.dim("narrative")}  ${data.narrative || "(empty — turns will populate it)"}`);
+      if (data.values.length > 0) console.log(`  ${chalk.dim("values")}     ${data.values.join(" · ")}`);
+      if (data.activeProjects.length > 0)
+        console.log(`  ${chalk.dim("projects")}   ${data.activeProjects.join(" · ")}`);
+      if (data.positions.length > 0) {
+        console.log(`  ${chalk.dim("positions")}`);
+        for (const position of data.positions.slice(0, 10)) {
+          const pct = Math.round(position.confidence * 100);
+          console.log(
+            `    ${position.topic.padEnd(24)} ${chalk.dim(`${pct}%`)} ${position.stance} ${chalk.dim(`[${position.evidence.length} ev]`)}`,
+          );
+        }
+      } else {
+        console.log(`  ${chalk.dim("positions")}  none yet — corrections and repeated opinions create them`);
+      }
+      if (data.revisionLog.length > 0) {
+        console.log(`  ${chalk.dim("recent revisions")}`);
+        for (const revision of data.revisionLog.slice(-5)) {
+          console.log(`    ${new Date(revision.at).toISOString().slice(0, 10)} ${revision.topic}: ${revision.change}`);
+        }
+      }
+      const fingerprint = mind.identity.fingerprint();
+      console.log(`  ${chalk.dim("fingerprint")} ${fingerprint.hash}`);
+      return;
+    }
+
+    if (subCmd === "divergence") {
+      const extras = this.buildProfileExtras();
+      const profile = mind.cognitiveProfile(extras);
+      const fresh = freshProfile();
+      const divergence = profileDivergence(profile, fresh);
+      const components = profileComponents(profile, fresh);
+      console.log(chalk.bold("\nmind divergence (trained vs fresh)"));
+      const pct = (v: number) => `${Math.round(v * 100)}%`;
+      console.log(
+        `  ${chalk.dim("score")}     ${chalk.cyan(divergence.toFixed(3))} ${divergence > 0.4 ? chalk.green("(> 0.4 M5 target)") : chalk.dim("(target > 0.4)")}`,
+      );
+      console.log(
+        `  ${chalk.dim("profile")}   ${profile.positions.length} positions · ${profile.patterns.length} patterns · ${profile.topTheories.length} theories · ${profile.skills.length} skills`,
+      );
+      console.log(`  ${chalk.dim("components")}`);
+      for (const [key, value] of Object.entries(components).sort((a, b) => b[1] - a[1])) {
+        console.log(`    ${key.padEnd(12)} ${pct(value)}`);
+      }
+      return;
+    }
+
+    if (subCmd === "transfer") {
+      const store = new TransferStore();
+      const action = (rest[0] ?? "list").toLowerCase();
+      try {
+        loadTheoryStore();
+      } catch {
+        /* store unavailable */
+      }
+      const hierarchy = getTheoryHierarchy();
+      const theories: TransferTheoryView[] = hierarchy.theories.map((t) => ({
+        id: t.id,
+        name: t.name,
+        explanation: t.explanation,
+        confidence: t.confidence,
+        confirmed: t.confirmed,
+        ...(t.embedding ? { embedding: t.embedding } : {}),
+      }));
+      const candidates = findTransferCandidates(theories);
+      if (action === "candidates") {
+        console.log(chalk.bold(`\nmind transfer candidates (${candidates.length})`));
+        for (const candidate of candidates.slice(0, 10)) {
+          console.log(
+            `  ${candidate.sourceDomain} → ${candidate.targetDomain}  ${chalk.dim(`sim=${candidate.structuralSimilarity.toFixed(2)}`)}`,
+          );
+          console.log(`    ${chalk.dim("from")} ${candidate.source.name}`);
+          console.log(`    ${chalk.dim("to")}   ${candidate.target.name}`);
+        }
+        if (candidates.length === 0)
+          console.log(chalk.dim("  no distant-domain theory pairs above similarity threshold"));
+        return;
+      }
+      if (action === "scan") {
+        const fresh = store.candidates(theories).slice(0, 3);
+        if (fresh.length === 0) {
+          console.log(chalk.dim("\nNo new transfer candidates to record."));
+          return;
+        }
+        console.log(chalk.bold("\nmind transfer scan"));
+        for (const candidate of fresh) {
+          const hypothesis = store.createHypothesis(candidate);
+          console.log(`  ${hypothesis.id} ${hypothesis.sourceDomain} → ${hypothesis.targetDomain}`);
+          console.log(`    ${chalk.dim("hypothesis")} ${hypothesis.hypothesis}`);
+          console.log(
+            `    ${chalk.dim("resolve")}    /mind transfer resolve ${hypothesis.id} <baseline-score> <transfer-score>`,
+          );
+        }
+        return;
+      }
+      if (action === "resolve") {
+        const [id, baselineArg, transferArg] = rest.slice(1);
+        const baseline = Number(baselineArg);
+        const transfer = Number(transferArg);
+        if (!id || !Number.isFinite(baseline) || !Number.isFinite(transfer)) {
+          console.log(chalk.yellow("Usage: /mind transfer resolve <id> <baseline-score> <transfer-score>"));
+          return;
+        }
+        const resolved = store.resolve(id, baseline, transfer);
+        if (!resolved) {
+          console.log(chalk.yellow(`No transfer hypothesis named ${id}.`));
+          return;
+        }
+        const lift =
+          resolved.lift === null ? "n/a" : `${resolved.lift >= 0 ? "+" : ""}${(resolved.lift * 100).toFixed(1)}%`;
+        console.log(chalk.bold(`\n${resolved.id} ${resolved.status}`));
+        console.log(`  ${chalk.dim("lift")} ${lift} (baseline ${baseline} → transfer ${transfer})`);
+        return;
+      }
+      const hypotheses = store.list();
+      const stats = store.stats();
+      console.log(chalk.bold("\nmind transfer"));
+      console.log(
+        `  ${chalk.dim("stats")}      ${stats.total} hypotheses · ${stats.supported} supported · ${stats.rejected} rejected · ${stats.pending} pending · avg lift ${stats.avgLift >= 0 ? "+" : ""}${(stats.avgLift * 100).toFixed(1)}%`,
+      );
+      console.log(`  ${chalk.dim("candidates")} ${candidates.length} untested distant-domain pairs`);
+      if (hypotheses.length > 0) {
+        console.log(`  ${chalk.dim("hypotheses")}`);
+        for (const hypothesis of hypotheses.slice(0, 8)) {
+          const lift =
+            hypothesis.lift === null
+              ? "pending"
+              : `${hypothesis.lift >= 0 ? "+" : ""}${(hypothesis.lift * 100).toFixed(1)}%`;
+          const status =
+            hypothesis.status === "supported"
+              ? chalk.green("supported")
+              : hypothesis.status === "rejected"
+                ? chalk.dim("rejected")
+                : chalk.yellow("pending");
+          console.log(
+            `    ${hypothesis.id} ${hypothesis.sourceDomain}→${hypothesis.targetDomain} ${status} lift=${lift}`,
+          );
+          console.log(`      ${chalk.dim(hypothesis.hypothesis.slice(0, 140))}`);
+        }
+      }
+      return;
+    }
+
+    if (subCmd === "alive") {
+      const action = (rest[0] ?? "show").toLowerCase();
+      const extras = this.buildProfileExtras();
+      const transferStore = new TransferStore();
+      const run = collectAliveRun({
+        identity: mind.identity,
+        ledger: mind.ledger.stats(),
+        rows: mind.ledger.all(),
+        calibration: mind.calibration.stats(),
+        mistakes: this.mistakes.getStats(),
+        transfer: transferStore.stats(),
+        idle: mind.idle.status(),
+        strategyWeights: extras.strategyWeights,
+        patterns: extras.patterns,
+        theories: extras.theories,
+        skills: extras.skills,
+        voiceStats: loadVoiceABStats(),
+      });
+      const voiceStats = loadVoiceABStats();
+      const assessment = assessM5(run, voiceStats);
+      if (action === "save") {
+        const saved = saveAliveRun(run);
+        console.log(chalk.bold("\nmind alive"));
+        console.log(`  saved ${saved.jsonPath}`);
+        console.log(`  report ${saved.mdPath}`);
+        return;
+      }
+      if (action === "curve") {
+        const runs = loadAliveRuns();
+        console.log(chalk.bold(`\nmind alive curve (${runs.length} runs)`));
+        for (const point of runs.slice(-10)) {
+          const div = point.metrics.identityDivergence;
+          const transfer = point.metrics.transferLift;
+          const ece = point.metrics.calibrationEce;
+          console.log(
+            `  ${new Date(point.timestamp).toISOString().slice(0, 10)}  div=${div === null ? "n/a" : div.toFixed(2)}  transfer=${transfer === null ? "n/a" : `${(transfer * 100).toFixed(0)}%`}  ece=${ece === null ? "n/a" : ece.toFixed(2)}  ${chalk.dim(`turns=${point.turns}`)}`,
+          );
+        }
+        if (runs.length === 0) console.log(chalk.dim("  no saved runs — use /mind alive save"));
+        return;
+      }
+      console.log(chalk.bold("\nmind alive (ALIVE-1)"));
+      const fmt = (value: number | null, render: (v: number) => string) => (value === null ? "n/a" : render(value));
+      console.log(`  ${chalk.dim("turns")}      ${run.turns} · fingerprint ${run.fingerprintHash}`);
+      console.log(`  ${chalk.dim("slope")}      ${fmt(run.metrics.learningSlope, (v) => v.toFixed(4))} per 100 turns`);
+      console.log(
+        `  ${chalk.dim("correction")} ${fmt(run.metrics.correctionRecurrence, (v) => `${Math.round(v * 100)}%`)} recurrence`,
+      );
+      console.log(
+        `  ${chalk.dim("transfer")}   ${fmt(run.metrics.transferLift, (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`)} avg lift`,
+      );
+      console.log(
+        `  ${chalk.dim("calibration")} ece ${fmt(run.metrics.calibrationEce, (v) => v.toFixed(3))} · brier ${mind.calibration.stats().brier.toFixed(3)}`,
+      );
+      console.log(
+        `  ${chalk.dim("autonomy")}   ${fmt(run.metrics.autonomyYield, (v) => `${v.toFixed(2)} artifacts/1k tok`)} · ${mind.idle.status().totalCycles} cycles`,
+      );
+      console.log(`  ${chalk.dim("divergence")} ${fmt(run.metrics.identityDivergence, (v) => v.toFixed(3))} vs fresh`);
+      console.log(
+        `  ${chalk.dim("voice")}      ${voiceStats.trials > 0 ? `${Math.round(voiceStats.identificationRate * 100)}% blind ID (n=${voiceStats.trials})` : "no blind A/B trials yet"}`,
+      );
+      console.log(
+        `  ${chalk.dim("cost/task")}  ${fmt(run.metrics.costPerSolvedTask, (v) => `$${v.toFixed(4)}`)} per solved turn`,
+      );
+      for (const criterion of assessment.criteria) {
+        const mark = criterion.met ? chalk.green("MET") : chalk.dim("not met");
+        const value = criterion.value === null ? "n/a" : criterion.value.toFixed(3);
+        console.log(`  ${chalk.dim("m5")}         ${criterion.label}: ${value} (target ${criterion.target}) ${mark}`);
+      }
+      console.log(
+        `  ${chalk.dim("m5 status")}  ${assessment.met ? chalk.green("PASS") : chalk.dim("IN PROGRESS")} ${chalk.dim("(save with /mind alive save)")}`,
+      );
+      return;
+    }
+
+    const stats = mind.stats();
+    console.log(chalk.bold("\nmind"));
+    console.log(
+      `  ${chalk.dim("turns")}      ${stats.ledger.total} recorded, avg score ${stats.ledger.avgScore.toFixed(2)}`,
+    );
+    console.log(
+      `  ${chalk.dim("signals")}    corrected ${(stats.ledger.correctedRate * 100).toFixed(0)}% · thanked ${(stats.ledger.thankedRate * 100).toFixed(0)}% · abandoned ${(stats.ledger.abandonedRate * 100).toFixed(0)}% · tool-fail ${(stats.ledger.toolFailureRate * 100).toFixed(0)}%`,
+    );
+    try {
+      const mistakeStats = this.mistakes.getStats();
+      if (mistakeStats.followUps > 0) {
+        console.log(
+          `  ${chalk.dim("corrections")}  n=${mistakeStats.total} · recurrence ${(mistakeStats.recurrenceRate * 100).toFixed(0)}% of ${mistakeStats.followUps} follow-ups · injected ${mistakeStats.injected}×`,
+        );
+      } else if (mistakeStats.total > 0) {
+        console.log(
+          `  ${chalk.dim("corrections")}  n=${mistakeStats.total} · no repeat corrections yet (baseline accumulating)`,
+        );
+      }
+    } catch {
+      /* stats unavailable */
+    }
+    console.log(
+      `  ${chalk.dim("prediction")} err ${stats.ledger.avgPredictionError.toFixed(2)} · brier ${stats.calibration.brier.toFixed(2)} · ece ${stats.calibration.ece.toFixed(2)} (n=${stats.calibration.count})`,
+    );
+    const predSources = stats.ledger.predictionSources;
+    const predSourceParts = ["llm", "cache", "heuristic"]
+      .filter((k) => (predSources[k] ?? 0) > 0)
+      .map((k) => `${k}=${predSources[k]}`);
+    if (predSourceParts.length > 0) {
+      console.log(
+        `  ${chalk.dim("predict src")}  ${predSourceParts.join(" ")} · avg ${Math.round(stats.ledger.avgPredictionTokens)} tok/llm-call`,
+      );
+    }
+    const variantCalibration = Object.entries(stats.calibrationByStrategy).filter(([, s]) => s.count >= 10);
+    if (variantCalibration.length > 0) {
+      console.log(`  ${chalk.dim("calibration by variant")}`);
+      for (const [variant, s] of variantCalibration) {
+        console.log(
+          `    ${(variant || "unlabeled").padEnd(10)} brier ${s.brier.toFixed(2)} · ece ${s.ece.toFixed(2)} ${chalk.dim(`n=${s.count}`)}`,
+        );
+      }
+    }
+    if (stats.ledger.byKind.length > 0) {
+      console.log(`  ${chalk.dim("context lift")}  present vs absent arms`);
+      for (const kind of stats.ledger.byKind.slice(0, 6)) {
+        const lift = kind.lift >= 0 ? `+${kind.lift.toFixed(2)}` : kind.lift.toFixed(2);
+        console.log(
+          `    ${kind.kind.padEnd(10)} ${lift}  ${chalk.dim(`on n=${kind.present} avg ${kind.presentAvg.toFixed(2)} · off n=${kind.absent} avg ${kind.absentAvg.toFixed(2)}`)}`,
+        );
+      }
+    }
+    if (stats.bandit.contexts > 0) {
+      console.log(`  ${chalk.dim("strategies")}`);
+      for (const [strategy, variant] of Object.entries(stats.bandit.preferred).slice(0, 5)) {
+        console.log(`    ${strategy.padEnd(10)} ${variant}`);
+      }
+    }
+    const domains = stats.capability.domains.slice(0, 5);
+    if (domains.length > 0) {
+      console.log(`  ${chalk.dim("capability")}`);
+      for (const domain of domains) {
+        const pct = Math.round(domain.confidence * 100);
+        console.log(`    ${domain.domain.padEnd(12)} ${pct}%  ${chalk.dim(`n=${domain.count}`)}`);
+      }
+    }
+    console.log(`  ${chalk.dim("fingerprint")} ${stats.identity.hash} (${stats.identity.positions} positions)`);
+    console.log(
+      `  ${chalk.dim("reliability")} ${stats.reliability.tracked} tracked, avg ${stats.reliability.avgScore.toFixed(2)}`,
+    );
   }
 
   private printAlive(): void {
@@ -1603,6 +2196,9 @@ export class Repl {
             ? chalk.dim(` [${getProviderNames()[selected.provider] || selected.provider}]`)
             : "";
         console.log(chalk.green(`Switched to ${selected.name}${providerTag}`));
+        if (modelSupportsTools(selected) === false) {
+          console.log(chalk.yellow("Warning: this model does not advertise tool support — tool calls will not work."));
+        }
         return;
       }
       console.log(chalk.red(`No model #${idx + 1}. Use /menu models to see options.`));
@@ -1627,6 +2223,9 @@ export class Repl {
             ? chalk.dim(` [${getProviderNames()[match.provider] || match.provider}]`)
             : "";
         console.log(chalk.green(`Switched to ${match.name}${providerTag}`));
+        if (modelSupportsTools(match) === false) {
+          console.log(chalk.yellow("Warning: this model does not advertise tool support — tool calls will not work."));
+        }
         return;
       }
       console.log(chalk.red(`No model matching "${arg}".`));
@@ -1800,7 +2399,8 @@ export class Repl {
         );
       }
     }
-    process.stdout.write(`\n${renderDivider()}\n`);
+    process.stdout.write("\n");
+    await sweepDivider(termWidth(), this.config.animationLevel !== "off");
     this.isProcessing = true;
     try {
       await this.handleMessage(this.lastSubmittedInput);
@@ -1872,9 +2472,9 @@ export class Repl {
           startOutput();
           spinner.setText(`using ${name}`);
           if (this.config.uiMode === "debug" && this.config.animationLevel !== "off") {
-            writer.writeTag(renderInlineTag(renderToolPill(name, "running"), chalk.dim));
+            writer.writeTag(renderInlineTag(renderToolPill(name, "running")));
           } else if (this.config.uiMode === "debug") {
-            writer.writeTag(renderInlineTag(`tool: ${name}`, chalk.dim));
+            writer.writeTag(renderInlineTag(`tool: ${name}`));
           }
         },
         onToolResult: (name, result, args) => {
@@ -1884,7 +2484,7 @@ export class Repl {
           toolStarts.delete(key);
           if (this.config.uiMode === "minimal" && result.success) return;
           if (this.config.animationLevel !== "off" || this.config.uiMode !== "minimal" || !result.success) {
-            writer.writeTag(renderInlineTag(renderToolEvent(name, result, elapsed), chalk.dim));
+            writer.writeTag(renderInlineTag(renderToolEvent(name, result, elapsed)));
           }
         },
         onUsage: (usage) => {
@@ -2089,7 +2689,7 @@ export class Repl {
     } catch {
       /* best-effort exit */
     }
-    console.log(chalk.green("\nGoodbye! \u2014 Ntox"));
+    console.log(`\n  ${gradient("session closed", palette.accent, palette.violet)} ${chalk.dim("· goodbye")}`);
     process.exit(0);
   }
 

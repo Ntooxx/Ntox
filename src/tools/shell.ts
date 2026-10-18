@@ -58,6 +58,31 @@ const WINDOWS_UNIX_COMMAND_PATTERNS = [
   /\bawk\s+['"-]/i,
 ];
 
+export function detectRmRecursiveForce(command: string): boolean {
+  const segments = command.split(/[;&|]/);
+  for (const segment of segments) {
+    const rmMatch = segment.match(/\brm\b(.*)/i);
+    if (!rmMatch) continue;
+    const tokens = rmMatch[1].split(/\s+/).filter(Boolean);
+    let hasR = false;
+    let hasF = false;
+    for (const token of tokens) {
+      if (token.startsWith("--")) {
+        if (token === "--recursive") hasR = true;
+        if (token === "--force") hasF = true;
+        continue;
+      }
+      if (token.startsWith("-") && token.length > 1) {
+        const flags = token.slice(1);
+        if (flags.includes("r") || flags.includes("R")) hasR = true;
+        if (flags.includes("f") || flags.includes("F")) hasF = true;
+      }
+    }
+    if (hasR && hasF) return true;
+  }
+  return false;
+}
+
 export function validateShellCommand(command: string): string | null {
   const trimmed = command.trim();
   if (!trimmed) return "Command is empty";
@@ -70,7 +95,18 @@ export function validateShellCommand(command: string): string | null {
   return null;
 }
 
-function audit(command: string, blocked: boolean): void {
+export function checkShellCommandSafety(command: string): string | null {
+  const invalidReason = validateShellCommand(command);
+  if (invalidReason) return invalidReason;
+  const hit = BLOCKED_PATTERNS.find((pattern) => pattern.test(command));
+  if (hit) return `Command blocked by safety policy: "${command}" (matched ${hit})`;
+  if (detectRmRecursiveForce(command)) {
+    return `Command blocked by safety policy: "${command}" (recursive+force rm flags)`;
+  }
+  return null;
+}
+
+export function auditShellCommand(command: string, blocked: boolean): void {
   try {
     const line = `[${new Date().toISOString()}]${blocked ? " [BLOCKED]" : ""} ${command}\n`;
     appendFileSync(getBaseDir() + "/shell-audit.log", line);
@@ -150,16 +186,10 @@ export const shellTool: Tool = {
     const workdir = args.workdir ? String(args.workdir) : process.cwd();
     const timeout = args.timeout ? Number(args.timeout) : 30000;
 
-    const invalidReason = validateShellCommand(command);
-    if (invalidReason) {
-      audit(command, true);
-      return { success: false, error: invalidReason };
-    }
-
-    const hit = BLOCKED_PATTERNS.find((p) => p.test(command));
-    if (hit) {
-      audit(command, true);
-      return { success: false, error: `Command blocked by safety policy: "${command}" (matched ${hit})` };
+    const safetyError = checkShellCommandSafety(command);
+    if (safetyError) {
+      auditShellCommand(command, true);
+      return { success: false, error: safetyError };
     }
 
     if (needsApproval(command)) {
@@ -172,7 +202,7 @@ export const shellTool: Tool = {
       }
     }
 
-    audit(command, false);
+    auditShellCommand(command, false);
 
     const config = loadConfig();
     const wantsDocker = config.dockerEnabled || !IS_WINDOWS;

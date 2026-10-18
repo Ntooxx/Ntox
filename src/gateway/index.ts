@@ -14,7 +14,24 @@ import { createTelegramChannel } from "./telegram.js";
 import { createDiscordChannel } from "./discord.js";
 import { createWebChannel } from "./web.js";
 import { createWhatsAppChannel } from "./whatsapp.js";
-import { isAliveQuery, recordDirectGatewayResponse, renderAliveStatus } from "./commands.js";
+import {
+  isAliveQuery,
+  parseApproveCommand,
+  recordDirectGatewayResponse,
+  renderAliveStatus,
+  renderApprovalOutcome,
+  renderApprovalRequest,
+  resolveApproval,
+  type PendingApproval,
+} from "./commands.js";
+import { ConversationStore } from "./conversations.js";
+import { createInspectServices, extractApprovalCommand, isApprovalRequired } from "./inspect.js";
+import { approvalStore } from "../tools/approval.js";
+import { createSettingsService } from "./settings.js";
+import { suggestWorkspacePaths } from "./paths.js";
+import { audioFilenameFor, clampTtsText } from "./voice.js";
+import type { WebVoiceHandlers } from "./web.js";
+import { processAtReferences } from "../cli/at-refs.js";
 import type { GatewayChannel } from "./types.js";
 
 const config = loadConfig();
@@ -22,10 +39,12 @@ const shared = createSharedInfra(config);
 const sessionInfras = new Map<string, ReturnType<typeof createSessionInfra>>();
 const cron = new CronManager();
 const channelSenders = new Map<string, (chatId: string, message: string) => Promise<void>>();
+const pendingApprovals = new Map<string, PendingApproval>();
+const conversations = new ConversationStore();
 
 function getOrCreateSessionInfra(chatId: string, sharedInfra: SharedInfra) {
   if (!sessionInfras.has(chatId)) {
-    sessionInfras.set(chatId, createSessionInfra(sharedInfra));
+    sessionInfras.set(chatId, createSessionInfra(sharedInfra, config));
   }
   return sessionInfras.get(chatId)!;
 }
@@ -97,6 +116,8 @@ export async function runGateway(channel?: string): Promise<void> {
       username: string,
       onToken?: (token: string) => void,
       onEvent?: (event: Record<string, unknown>) => void,
+      signal?: AbortSignal,
+      mode?: "normal" | "regenerate",
     ): Promise<string> => {
       const allowed =
         ctx === "telegram" ? config.telegramAllowedUsers : ctx === "discord" ? config.discordAllowedUsers : [];
@@ -124,11 +145,68 @@ export async function runGateway(channel?: string): Promise<void> {
 
       if (text === "/new" || text === "/reset") {
         agent.resetConversation();
+        if (ctx === "web") conversations.clearMessages(chatId);
         return direct("Fresh start. Go ahead.", false);
       }
       if (text === "/help") {
         sessions.unlock(chatId);
-        return `Ntox on ${ctx}.\n\nSend any message. I can read/write files, run commands, search the web, and code.\n\n/new — reset conversation\n/cron — scheduled automations\n/help — this message`;
+        return `Ntox on ${ctx}.\n\nSend any message. I can read/write files, run commands, search the web, and code.\n\n/new — reset conversation\n/cron — scheduled automations\n/approve <once|session|always|deny> <command> — allow or block a risky command\n/help — this message`;
+      }
+
+      sessions.touch(chatId);
+      const activeChannel = channelsByName.get(ctx);
+      const notifyTyping = activeChannel ? () => activeChannel.notifyTyping(chatId) : undefined;
+      let promptText = text;
+      if (ctx === "web" && /@(?:https?:\/\/|~\/|\.{0,2}\/|[A-Za-z]:\\|HEAD|main|master|dev)/.test(text)) {
+        try {
+          promptText = await processAtReferences(text);
+        } catch {
+          promptText = text;
+        }
+      }
+
+      const pendingKey = `${ctx}:${chatId}`;
+      const bridgeEvent = (event: Record<string, unknown>) => {
+        if (event.type === "tool_result" && !event.success && isApprovalRequired(event.error as string)) {
+          const command = extractApprovalCommand(String(event.error || ""));
+          if (command) {
+            pendingApprovals.set(pendingKey, { command, prompt: promptText });
+            if (ctx !== "web") {
+              const sender = channelSenders.get(ctx);
+              if (sender) void sender(chatId, renderApprovalRequest(command)).catch(() => {});
+            }
+          }
+        }
+        onEvent?.(event);
+      };
+
+      const approveParse = parseApproveCommand(text);
+      if (approveParse.kind !== "not-approve") {
+        if (approveParse.kind === "invalid") return direct(approveParse.message);
+        const pending = pendingApprovals.get(pendingKey);
+        const resolved = resolveApproval(approveParse.scope, approveParse.command, pending);
+        if (!resolved.ok) return direct(resolved.message);
+        approvalStore.store("shell", `shell:${resolved.command}`, resolved.decision);
+        if (pending && pending.command === resolved.command) pendingApprovals.delete(pendingKey);
+        if (!resolved.retryPrompt) return direct(renderApprovalOutcome(resolved));
+        try {
+          agent.removeLastTurn();
+          const output = new GatewayOutput(notifyTyping, onToken, bridgeEvent);
+          const result = await runAgentMessage(agent, resolved.retryPrompt, output, signal);
+          if (result.error) {
+            if (signal?.aborted || result.error.includes("cancelled")) {
+              return sanitizeOutput(output.flush());
+            }
+            return `Error: ${result.error.slice(0, 400)}`;
+          }
+          const safe = sanitizeOutput(result.response);
+          if (ctx !== "web") {
+            return safe.length > 4000 ? safe.slice(0, 3997) + "..." : safe;
+          }
+          return safe;
+        } finally {
+          sessions.unlock(chatId);
+        }
       }
 
       if (isAliveQuery(text)) {
@@ -140,15 +218,23 @@ export async function runGateway(channel?: string): Promise<void> {
         return direct(cronResponse);
       }
 
-      sessions.touch(chatId);
-      const channel = channelsByName.get(ctx);
-      const notifyTyping = channel ? () => channel.notifyTyping(chatId) : undefined;
       try {
-        const output = new GatewayOutput(notifyTyping, onToken, onEvent);
-        const result = await runAgentMessage(agent, text, output);
-        if (result.error) return `Error: ${result.error.slice(0, 400)}`;
+        if (mode === "regenerate") {
+          agent.removeLastTurn();
+        }
+        const output = new GatewayOutput(notifyTyping, onToken, bridgeEvent);
+        const result = await runAgentMessage(agent, promptText, output, signal);
+        if (result.error) {
+          if (signal?.aborted || result.error.includes("cancelled")) {
+            return sanitizeOutput(output.flush());
+          }
+          return `Error: ${result.error.slice(0, 400)}`;
+        }
         const safe = sanitizeOutput(result.response);
-        return safe.length > 4000 ? safe.slice(0, 3997) + "..." : safe;
+        if (ctx !== "web") {
+          return safe.length > 4000 ? safe.slice(0, 3997) + "..." : safe;
+        }
+        return safe;
       } finally {
         sessions.unlock(chatId);
       }
@@ -212,6 +298,7 @@ export async function runGateway(channel?: string): Promise<void> {
         token: config.whatsappToken,
         phoneNumberId: config.whatsappPhoneNumberId,
         verifyToken: config.whatsappVerifyToken,
+        appSecret: config.whatsappAppSecret,
         port: config.whatsappPort || 3001,
         onMessage: makeHandler("whatsapp"),
       }),
@@ -220,11 +307,40 @@ export async function runGateway(channel?: string): Promise<void> {
     if (sender) channelSenders.set("whatsapp", sender);
   }
   if (!channel || channel === "web") {
+    const inspect = createInspectServices({
+      getAgent: (sessionId) => sessions.get(sessionId),
+      getMemory: (sessionId) => getOrCreateSessionInfra(sessionId, shared).memory,
+      getPatterns: (sessionId) => getOrCreateSessionInfra(sessionId, shared).cognitiveKernel.getPatterns().list(),
+      rollbackTool: shared.tools.get("checkpoint"),
+    });
+    const settings = createSettingsService({ config, llm: shared.llm });
+    const readRoots = shared.policy.profile.readRoots.length ? shared.policy.profile.readRoots : [process.cwd()];
+    const voice: WebVoiceHandlers = {
+      async transcribe(audio, mimeType) {
+        const tool = shared.tools.get("stt");
+        if (!tool) return { success: false, error: "Voice input is not available on this gateway." };
+        const result = await tool.execute({ audio, filename: audioFilenameFor(mimeType) });
+        const data = result.data as { text?: string } | undefined;
+        return { success: result.success && Boolean(data?.text), text: data?.text, error: result.error };
+      },
+      async synthesize(text) {
+        const tool = shared.tools.get("tts");
+        if (!tool) return { success: false, error: "Voice output is not available on this gateway." };
+        const result = await tool.execute({ text: clampTtsText(text) });
+        const data = result.data as { audio?: string } | undefined;
+        return { success: result.success && Boolean(data?.audio), audio: data?.audio, error: result.error };
+      },
+    };
     channels.push(
       createWebChannel({
         port: config.webPort || 3000,
         host: config.webHost || "127.0.0.1",
         authToken: config.webAuthToken || "",
+        conversations,
+        inspect,
+        settings,
+        voice,
+        suggestPaths: (prefix) => suggestWorkspacePaths(prefix, readRoots),
         onMessage: makeHandler("web"),
         getStatus: () => ({
           model: config.model,
@@ -263,7 +379,7 @@ export async function runGateway(channel?: string): Promise<void> {
 
   cron.setExecutor(async (prompt) => {
     const sid = `cron_${Date.now()}`;
-    const sessionInfra = createSessionInfra(shared);
+    const sessionInfra = createSessionInfra(shared, config);
     const agent = new (await import("../core/agent.js")).Agent(
       createAgentConfig({ ...shared, ...sessionInfra }, config, sid, { skipReflection: true }),
     );

@@ -1,6 +1,6 @@
 import { LLMClient, countTokens } from "./llm.js";
 import { ToolRegistry } from "../tools/registry.js";
-import { MemoryStore } from "../memory/episodic.js";
+import { MemoryStore, renderPromptMemoryItems } from "../memory/episodic.js";
 import { UserModel } from "../memory/user-model.js";
 import { classifyQuery, getStrategyPrompt } from "../meta/strategist.js";
 import { Reflector } from "../meta/reflector.js";
@@ -14,6 +14,7 @@ import { Executive } from "../meta/executive.js";
 import { InterventionEngine, type InterventionContext } from "../meta/intervention.js";
 import { DisagreementEngine, type DisagreementContext } from "../meta/disagreement.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
+import { NtoxCognitiveLayer } from "../cognition/layer.js";
 import { StyleOptimizer, classifyResponseStyle } from "../meta/style-optimizer.js";
 import { scoreEffectiveness } from "../meta/effectiveness.js";
 import { scoreInteraction } from "../meta/interaction-score.js";
@@ -30,7 +31,7 @@ import {
 import type { SessionContext } from "../meta/session-intent.js";
 import { buildTimeContext, getTimeGuidance } from "../meta/time-adapter.js";
 import { SkillLibrary } from "../skills/library.js";
-import { TheoryMemory } from "../memory/theory-memory.js";
+import { TheoryMemory, renderTheoryItems } from "../memory/theory-memory.js";
 import { classifyMode, getModePrompt } from "../meta/response-mode.js";
 import { DebateOrchestrator, DEBATE_VOICES } from "./orchestrator.js";
 import {
@@ -55,18 +56,106 @@ import type {
   Message,
   CostUsage,
   ToolResult,
+  ToolCall,
+  ToolContext,
   QueryType,
   Reflection,
   SkillTriggerMatch,
   ThinkPhase,
   CognitiveTrace,
+  CritiqueResult,
   AgentTurnTrace,
   AgentToolTrace,
 } from "../types/index.js";
 import { checkForSurfaceReasoning } from "../research/false-success.js";
 import { searchTool } from "../tools/search.js";
+import { renderPlanContext } from "../tools/plan.js";
+import { deleteSessionSnapshot, loadSessionSnapshot, saveSessionSnapshot } from "./session-store.js";
 import { resetPolicyRuntime, type PolicyRuntime } from "./policy.js";
-import { buildContextBudgetLedger } from "./context-ledger.js";
+import {
+  buildContextBudgetLedger,
+  assembleBudgetedSystemPrompt,
+  assembleSelectedSystemPrompt,
+  type AssembledPrompt,
+} from "./context-ledger.js";
+import { Mind } from "../mind/mind.js";
+import { isRephrase, isThanked } from "../mind/predictor.js";
+import { hashText } from "../mind/util.js";
+import { compileContext, type CompilableItem } from "../mind/context-compiler.js";
+import { LLMPredictor, type PredictionAttempt } from "../mind/llm-predictor.js";
+import type { MindTurnResult } from "../mind/mind.js";
+import { modelCritique } from "../cognition/model-critique.js";
+import { extractOpenLoops, normalizeLoopGoal } from "../alive/open-loops.js";
+import type { ContextKind, MindTurnHandle, TurnSignals } from "../mind/types.js";
+
+const DEFAULT_SYSTEM_CONTEXT_TOKEN_BUDGET = 6000;
+const TOOL_CONCURRENCY = 4;
+const MAX_ACTION_NUDGES = 2;
+
+const LEGACY_TOOL_CALL_BLOCK = /<?\s*\/?\s*tool_call\s*>?\s*(\{[\s\S]*?\})\s*<?\s*\/?\s*tool_call\s*>?/gi;
+
+const ACTION_COMMITMENT_PATTERNS = [
+  /\b(creating|building|writing|setting up|putting together|scaffolding|generating|deploying)\b.{0,60}\b(now|sec|moment|second|right away)\b/i,
+  /\b(one|just a|gimme a) sec\b/i,
+  /\bworking on (it|that|this)\b/i,
+  /\bi'?m on it\b/i,
+  /\blet me (create|build|write|make|generate|set up|scaffold)\b/i,
+  /\bwill (now )?(create|build|write|make|generate|set up)\b/i,
+  /\babout to (create|build|write|make|generate)\b/i,
+  /\bcreating it now\b/i,
+  /\bbuilding it now\b/i,
+];
+
+export function commitsToImmediateAction(text: string): boolean {
+  if (!text || text.length > 2000) return false;
+  return ACTION_COMMITMENT_PATTERNS.some((p) => p.test(text));
+}
+
+export function extractLegacyXmlToolCalls(
+  text: string,
+  isKnownTool: (name: string) => boolean,
+): { calls: ToolCall[]; cleaned: string } {
+  const calls: ToolCall[] = [];
+  let cleaned = text;
+  for (const match of [...text.matchAll(LEGACY_TOOL_CALL_BLOCK)]) {
+    const raw = match[1];
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as { name?: unknown; args?: unknown; arguments?: unknown };
+      const name = typeof parsed.name === "string" ? parsed.name : "";
+      if (!name || !isKnownTool(name)) continue;
+      const args = parsed.args ?? parsed.arguments ?? {};
+      calls.push({
+        id: `xml_${calls.length}_${Date.now().toString(36)}`,
+        name,
+        arguments: typeof args === "string" ? args : JSON.stringify(args),
+      });
+      cleaned = cleaned.replace(match[0], "");
+    } catch {
+      continue;
+    }
+  }
+  return { calls, cleaned: cleaned.trim() };
+}
+
+interface PreparedToolCall {
+  tc: ToolCall;
+  args: Record<string, unknown>;
+  key: string;
+  trace: AgentToolTrace | null;
+  duplicate: boolean;
+  skipReason?: string;
+  durationMs?: number;
+}
+
+function isRestorableMessage(value: unknown): value is Message {
+  if (!value || typeof value !== "object") return false;
+  const message = value as Partial<Message>;
+  if (message.role !== "system" && message.role !== "user" && message.role !== "assistant" && message.role !== "tool") {
+    return false;
+  }
+  return typeof message.content === "string";
+}
 import { getFileChangesSince } from "../tools/change-tracker.js";
 import type { NtoxAliveBridge } from "../alive/ntox.js";
 import type { AliveAction, AlivePulse } from "../alive/engine.js";
@@ -91,9 +180,14 @@ export interface AgentConfig {
   kernelEnabled?: boolean;
   kernelBasePath?: string;
   sessionId: string;
+  sessionSource?: string;
   systemPrompt: string;
   memoryEnabled: boolean;
   memoryRetrievalCount: number;
+  systemContextBudget?: number;
+  contextCompilerEnabled?: boolean;
+  predictionLlmEnabled?: boolean;
+  modelCritiqueEnabled?: boolean;
   theoryEnabled?: boolean;
   strategyEnabled: boolean;
   mistakesEnabled: boolean;
@@ -103,6 +197,7 @@ export interface AgentConfig {
   policy?: PolicyRuntime;
   skipReflection?: boolean;
   alive?: NtoxAliveBridge;
+  mind?: Mind;
 }
 
 export interface AgentCallbacks {
@@ -135,6 +230,7 @@ export interface AgentRunOptions {
 export class Agent {
   private cfg: AgentConfig;
   private messages: Message[] = [];
+  private messageTokenCache: number[] = [];
   private skillsCount = 3;
   private lastCognitiveResult: ReturnType<CognitiveKernel["process"]> | null = null;
   private decisionKernel: DecisionKernel | null = null;
@@ -160,24 +256,66 @@ export class Agent {
     shiftCount: 0,
   };
   private theoryMemory: TheoryMemory;
+  private cognitiveLayer: NtoxCognitiveLayer;
+  private runTurnId = "";
   private searchCache = new Map<string, string>();
   private lastSearchEntity = "";
   private currentTrace: AgentTurnTrace | null = null;
   private lastTrace: AgentTurnTrace | null = null;
   private readonly alive?: NtoxAliveBridge;
+  private readonly mind?: Mind;
+  private mindTurn: MindTurnHandle | null = null;
+  private llmPredictor?: LLMPredictor;
+  private predictionAttempt: PredictionAttempt | null = null;
+  private mindAlivePredictionId: string | null = null;
+  private surpriseNotesThisSession = 0;
+  private surpriseReflectionsThisSession = 0;
+  private modelCritiqueUsedThisTurn = false;
+  private toolFailureThisTurn = false;
+  private falseSuccessThisTurn = false;
 
   constructor(cfg: AgentConfig) {
     this.cfg = cfg;
     this.theoryMemory = new TheoryMemory();
     this.alive = cfg.alive;
+    this.mind = cfg.mind;
+    if (cfg.predictionLlmEnabled === true && this.mind) {
+      this.llmPredictor = new LLMPredictor(cfg.llm, this.mind.predictor);
+    }
+    this.cognitiveLayer = new NtoxCognitiveLayer(
+      {
+        cognitionEnabled: false,
+        strategyEnabled: false,
+        memoryEnabled: cfg.memoryEnabled,
+        theoryEnabled: cfg.theoryEnabled ?? true,
+        mistakesEnabled: cfg.mistakesEnabled,
+        storeEnabled: true,
+        memoryRetrievalCount: cfg.memoryRetrievalCount,
+        embed: async () => [],
+      },
+      {
+        memory: cfg.memory,
+        theoryMemory: this.theoryMemory,
+        mistakes: cfg.mistakes,
+      },
+    );
   }
 
   setSkillsCount(n: number): void {
     this.skillsCount = n;
   }
 
+  getMind(): Mind | undefined {
+    return this.mind;
+  }
+
   addMessage(msg: Message): void {
+    this.pushMessage(msg);
+  }
+
+  private pushMessage(msg: Message): void {
     this.messages.push(msg);
+    this.messageTokenCache.push(countTokens(msg.content));
   }
 
   getMessages(): Message[] {
@@ -188,6 +326,7 @@ export class Agent {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       if (this.messages[i].role === "user") {
         this.messages.splice(i);
+        this.messageTokenCache.splice(i);
         this.lastAssistantResponse = this.findLastAssistantMessage();
         this.lastUserMessage = this.findLastUserMessage();
         this.lastTrace = null;
@@ -204,6 +343,61 @@ export class Agent {
       ...this.lastTrace,
       toolCalls: this.lastTrace.toolCalls.map((t) => ({ ...t, args: { ...t.args } })),
       skill: this.lastTrace.skill ? { ...this.lastTrace.skill } : undefined,
+    };
+  }
+
+  saveSession(): void {
+    if (this.messages.length === 0) return;
+    try {
+      saveSessionSnapshot({
+        version: 1,
+        sessionId: this.cfg.sessionId,
+        source: this.cfg.sessionSource || "agent",
+        savedAt: Date.now(),
+        createdAt: this.sessionStartTime,
+        messages: this.messages,
+        lastAssistantResponse: this.lastAssistantResponse,
+        lastUserMessage: this.lastUserMessage,
+        sessionStartTime: this.sessionStartTime,
+        correctionsThisSession: this.correctionsThisSession,
+        toolUsageThisSession: { ...this.toolUsageThisSession },
+        sessionContext: this.sessionContext,
+        lastTrace: this.lastTrace,
+      });
+    } catch (e) {
+      console.error("[session-save]", e);
+    }
+  }
+
+  restoreSession(sessionId: string = this.cfg.sessionId): {
+    restored: boolean;
+    messageCount: number;
+    savedAt?: number;
+    source?: string;
+  } {
+    if (sessionId !== this.cfg.sessionId) return { restored: false, messageCount: 0 };
+    const snapshot = loadSessionSnapshot(sessionId);
+    if (!snapshot) return { restored: false, messageCount: 0 };
+    this.messages = snapshot.messages.filter(isRestorableMessage).map((message) => ({ ...message }));
+    this.messageTokenCache = this.messages.map((message) => countTokens(message.content));
+    this.lastAssistantResponse = snapshot.lastAssistantResponse ?? null;
+    this.lastUserMessage = snapshot.lastUserMessage ?? null;
+    this.sessionStartTime = snapshot.sessionStartTime || snapshot.createdAt || Date.now();
+    this.correctionsThisSession = snapshot.correctionsThisSession ?? 0;
+    this.toolUsageThisSession = { ...(snapshot.toolUsageThisSession ?? {}) };
+    if (snapshot.sessionContext) {
+      this.sessionContext = {
+        ...this.sessionContext,
+        ...snapshot.sessionContext,
+        intent: snapshot.sessionContext.intent as SessionContext["intent"],
+      };
+    }
+    this.lastTrace = snapshot.lastTrace ?? null;
+    return {
+      restored: true,
+      messageCount: this.messages.length,
+      savedAt: snapshot.savedAt,
+      source: snapshot.source,
     };
   }
 
@@ -356,14 +550,9 @@ export class Agent {
 
     // ── /kernel commands ──────────────────────────────────────────
 
-    // Create file — natural language: "create a file called X with content Y" or "/kernel create X with content Y"
-    const createMatch = userInput.match(
-      /^(?:\/kernel\s+)?create\s+(?:a\s+)?(?:file|script|program)\s+(?:called\s+|named\s+)?(.+?)\s+(?:with\s+)?(?:content\s+)?([\s\S]+)$/i,
-    );
-    // Also match /kernel create <path> with content <content> without requiring "file"
-    const createExplicitMatch =
-      !createMatch && userInput.match(/^\/kernel\s+create\s+(.+?)\s+with\s+content\s+([\s\S]+)$/i);
-    const createData = createMatch || createExplicitMatch;
+    // Create file — only when explicitly scoped: "/kernel create X with content Y"
+    // (natural-language creation is left to the model + write tool)
+    const createData = userInput.match(/^\/kernel\s+create\s+(.+?)\s+with\s+content\s+([\s\S]+)$/i);
     if (createData) {
       const filePath = createData[1].trim().replace(/^\/+/, "");
       const content = createData[2].trim();
@@ -384,7 +573,7 @@ export class Agent {
     }
 
     // /kernel read <filepath>
-    const readMatch = userInput.match(/^(?:\/kernel\s+)?read\s+(?:file\s+)?(.+)$/i);
+    const readMatch = userInput.match(/^\/kernel\s+read\s+(?:file\s+)?(.+)$/i);
     if (readMatch) {
       const filePath = readMatch[1].trim();
       const readTool = this.cfg.tools.get("read");
@@ -401,7 +590,7 @@ export class Agent {
     }
 
     // /kernel run <command>
-    const runMatch = userInput.match(/^(?:\/kernel\s+)?run\s+(.+)$/i);
+    const runMatch = userInput.match(/^\/kernel\s+run\s+(.+)$/i);
     if (runMatch) {
       const command = runMatch[1].trim();
       const shellTool = this.cfg.tools.get("shell");
@@ -509,12 +698,22 @@ export class Agent {
 
   resetConversation(): void {
     this.messages = [];
+    this.messageTokenCache = [];
     this.lastAssistantResponse = null;
     this.lastUserMessage = null;
     this.toolUsageThisSession = {};
     this.searchCache.clear();
     this.sessionStartTime = Date.now();
     this.correctionsThisSession = 0;
+    this.surpriseNotesThisSession = 0;
+    this.surpriseReflectionsThisSession = 0;
+    this.lastTrace = null;
+    this.currentTrace = null;
+    try {
+      deleteSessionSnapshot(this.cfg.sessionId);
+    } catch {
+      /* best effort */
+    }
     this.sessionContext = {
       intent: "casual",
       startedAt: Date.now(),
@@ -526,7 +725,7 @@ export class Agent {
   }
 
   countTokens(): number {
-    return this.messages.reduce((s, m) => s + countTokens(m.content), 0);
+    return this.messageTokenCache.reduce((s, t) => s + t, 0);
   }
 
   private async resolveSearchContext(userInput: string): Promise<string> {
@@ -636,7 +835,7 @@ export class Agent {
   private async manageContextWindow(): Promise<void> {
     const budget = this.cfg.contextTokenBudget;
     const msgCap = this.cfg.maxContextMessages;
-    const currentTokens = this.countTokens();
+    let currentTokens = this.countTokens();
     const anchorEnd = this.messages.length > 0 && this.messages[0].role === "system" ? 1 : 0;
 
     if (this.messages.length <= msgCap && currentTokens <= budget * 0.8) return;
@@ -646,8 +845,10 @@ export class Agent {
     }
 
     const minKeep = anchorEnd + 2;
-    while (this.messages.length > minKeep && (this.countTokens() > budget || this.messages.length > msgCap)) {
+    while (this.messages.length > minKeep && (currentTokens > budget || this.messages.length > msgCap)) {
+      currentTokens -= this.messageTokenCache[anchorEnd] ?? 0;
       this.messages.splice(anchorEnd, 1);
+      this.messageTokenCache.splice(anchorEnd, 1);
     }
   }
 
@@ -698,16 +899,35 @@ export class Agent {
 
   async *run(userInput: string, callbacks: AgentCallbacks, options: AgentRunOptions = {}): AsyncGenerator<string> {
     const { cfg } = this;
+    const turnStartedAt = Date.now();
+    let turnCostUsd = 0;
+    let turnTokens = 0;
+    this.toolFailureThisTurn = false;
+    this.falseSuccessThisTurn = false;
+    this.modelCritiqueUsedThisTurn = false;
+    this.mindTurn = null;
+    this.predictionAttempt = null;
+    this.mindAlivePredictionId = null;
     this.startTrace(userInput);
+    this.runTurnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    this.cognitiveLayer.setStoreFlags({
+      memoryEnabled: cfg.memoryEnabled,
+      theoryEnabled: cfg.theoryEnabled ?? true,
+      mistakesEnabled: cfg.mistakesEnabled,
+      storeEnabled: true,
+      cognitionEnabled: false,
+      strategyEnabled: false,
+      memoryRetrievalCount: cfg.memoryRetrievalCount,
+    });
     callbacks.onPhase?.("thinking");
-    this.messages.push({ role: "user", content: userInput });
+    this.pushMessage({ role: "user", content: userInput });
 
     // 0a. Prompt injection guard
     const injectionCheck = detectPromptInjection(userInput);
     if (injectionCheck.blocked) {
       const msg = "[Security] Potential prompt injection blocked. Your message was not processed.";
       if (this.currentTrace) this.currentTrace.blockedReason = injectionCheck.reason;
-      this.messages.push({ role: "assistant", content: msg });
+      this.pushMessage({ role: "assistant", content: msg });
       callbacks.onToken(msg);
       this.lastAssistantResponse = msg;
       this.lastUserMessage = userInput;
@@ -747,7 +967,7 @@ export class Agent {
         const name = nameMatch[1].trim().replace(/\s{2,}/g, " ");
         cfg.userModel.setName(name);
         const response = `Got it — I'll call you ${name} from now on.`;
-        this.messages.push({ role: "assistant", content: response });
+        this.pushMessage({ role: "assistant", content: response });
         callbacks.onToken(response);
         this.lastAssistantResponse = response;
         this.lastUserMessage = userInput;
@@ -761,7 +981,7 @@ export class Agent {
         const job = jobMatch[1].trim();
         cfg.userModel.setExpertise(job, "intermediate");
         const response = `Got it — you work as **${job}**. I'll keep that in mind.`;
-        this.messages.push({ role: "assistant", content: response });
+        this.pushMessage({ role: "assistant", content: response });
         callbacks.onToken(response);
         this.lastAssistantResponse = response;
         this.lastUserMessage = userInput;
@@ -837,7 +1057,7 @@ export class Agent {
     const timeGuidance = getTimeGuidance(timeCtx);
 
     // 1. Strategy
-    let queryType: QueryType;
+    let queryType: QueryType = "general";
     let strategyPrompt = "";
     if (cfg.strategyEnabled) {
       callbacks.onPhase?.("analyzing");
@@ -848,6 +1068,63 @@ export class Agent {
       cfg.analytics.trackQueryType(queryType);
     }
 
+    if (this.mind) {
+      try {
+        const handle = this.mind.beginTurn({
+          turnId: this.runTurnId,
+          sessionId: cfg.sessionId,
+          query: userInput,
+          queryType,
+          responseMode,
+          strategy: queryType,
+        });
+        if (handle) {
+          this.mindTurn = handle;
+          try {
+            const stance = this.mind.capability.decideStance(handle.domains, handle.strategyVariant);
+            if (stance.variantOverride) handle.strategyVariant = stance.variantOverride;
+          } catch {
+            /* stance unavailable */
+          }
+          if (handle.strategyVariant !== "standard") {
+            const guidance = this.mind.strategyGuidance(handle.strategyVariant);
+            if (guidance) strategyPrompt += guidance;
+          }
+
+          const words = userInput.trim().split(/\s+/).length;
+          const casual = responseMode === "simple-query" || responseMode === "emotional-moment" || words <= 3;
+          if (this.llmPredictor && !casual) {
+            try {
+              const attempt = await this.llmPredictor.predict(userInput, queryType);
+              handle.prediction = attempt.prediction;
+              this.predictionAttempt = attempt;
+            } catch (e) {
+              console.error("[mind-predict]", e);
+              this.predictionAttempt = { prediction: handle.prediction, source: "heuristic", tokens: 0 };
+            }
+          } else {
+            this.predictionAttempt = { prediction: handle.prediction, source: "heuristic", tokens: 0 };
+          }
+
+          if (this.alive) {
+            try {
+              const alivePrediction = this.alive.engine.createPrediction({
+                statement: `Turn: ${handle.prediction.expectedOutcome}`,
+                confidence: handle.prediction.confidence,
+                expectation: { eventType: "turn_resolved", payload: { outcome: "ok" } },
+              });
+              this.mindAlivePredictionId = alivePrediction.id;
+            } catch (e) {
+              console.error("[alive-predict]", e);
+              this.mindAlivePredictionId = null;
+            }
+          }
+        }
+      } catch (e) {
+        console.error("[mind-begin]", e);
+      }
+    }
+
     // 2. Corrections
     let wasCorrection = false;
     if (cfg.mistakesEnabled && this.messages.length >= 2) {
@@ -856,7 +1133,14 @@ export class Agent {
         wasCorrection = true;
         this.correctionsThisSession++;
         const { topicKey, correction } = extractCorrection(userInput, prev);
-        cfg.mistakes.add(topicKey, userInput, prev, correction, "user-correction");
+        cfg.mistakes.add(topicKey, userInput, prev, correction, "user-correction", this.mindTurn?.row.seq);
+        if (cfg.memoryEnabled) {
+          try {
+            cfg.memory.applyCorrectionToDurableMemories({ correction, topicKey, wrongAnswer: prev });
+          } catch (e) {
+            console.error("[memory-correction]", e);
+          }
+        }
         if (callbacks.onCorrectionDetected) callbacks.onCorrectionDetected(topicKey, correction);
       }
     }
@@ -890,41 +1174,135 @@ export class Agent {
       }
     }
 
-    // 4. Mistakes context
-    let mistakesContext = "";
-    if (cfg.mistakesEnabled) mistakesContext = cfg.mistakes.buildMistakesContext(userInput);
-
-    // 5. Memory + pre-search — run in parallel
+    // 4-5. Cognitive layer: corrections/memory/theory/recovery context + embedding + search in parallel
     callbacks.onPhase?.("recalling");
+    let mistakesContext = "";
     let memoryContext = "";
     let theoryContext = "";
-    const embedPromise: Promise<number[] | null> = cfg.memoryEnabled
-      ? cfg.llm.embed(userInput).catch(() => null)
-      : Promise.resolve(null);
+    let recoveryContext = "";
+    const pendingContextRecords: {
+      section: string;
+      kind: ContextKind;
+      id: string;
+      text: string;
+      relevance: number;
+    }[] = [];
 
-    const [searchCtx, embedResult] = await Promise.all([this.resolveSearchContext(userInput), embedPromise]);
+    const embedPromise = cfg.memoryEnabled ? cfg.llm.embedWithMeta(userInput).catch(() => null) : Promise.resolve(null);
+
+    const [searchCtx, embedMeta] = await Promise.all([this.resolveSearchContext(userInput), embedPromise]);
     const searchContext = searchCtx;
     if (this.currentTrace) this.currentTrace.searchUsed = searchContext.length > 0;
-    const queryEmbedding = embedResult;
+    const queryEmbedding: number[] | null = embedMeta?.vector ?? null;
+    const embeddingModel: string | undefined = embedMeta?.model;
 
-    if (cfg.memoryEnabled) {
-      if (queryEmbedding && queryEmbedding.length > 0) {
-        memoryContext = cfg.memory.buildMemoryContext(queryEmbedding, cfg.memoryRetrievalCount);
-      } else {
-        memoryContext = cfg.memory.buildMemoryContext(null, cfg.memoryRetrievalCount);
+    if (cfg.memoryEnabled && (cfg.theoryEnabled ?? true)) {
+      const recentEpisodes = cfg.memory.getRecent(10);
+      this.theoryMemory.processEpisodesBulk(recentEpisodes);
+    }
+
+    try {
+      const layerCtx = await this.cognitiveLayer.beforeStep({
+        sessionId: cfg.sessionId,
+        userMessage: userInput,
+        turnId: this.runTurnId,
+        embedding: queryEmbedding,
+        embeddingModel,
+      });
+      for (const section of layerCtx.sections) {
+        if (section.name === "corrections") mistakesContext = section.content;
+        if (section.name === "memory") memoryContext = section.content;
+        if (section.name === "theories") theoryContext = section.content;
+        if (section.name === "recovery") recoveryContext = section.content;
       }
       if (memoryContext && callbacks.onMemoryRecall) {
         const recalled = memoryContext.split("\n").filter((l) => l.startsWith("[")).length;
         if (this.currentTrace) this.currentTrace.memoryRecallCount = recalled;
         callbacks.onMemoryRecall(recalled);
       }
-      if (cfg.theoryEnabled ?? true) {
-        const recentEpisodes = cfg.memory.getRecent(10);
-        this.theoryMemory.processEpisodesBulk(recentEpisodes);
+      if (theoryContext && this.currentTrace) {
+        this.currentTrace.theoryReason = "Relevant theory memory matched this input and was injected into context";
+      }
+    } catch (e) {
+      console.error("[cognitive-layer]", e);
+      if (cfg.mistakesEnabled) mistakesContext = cfg.mistakes.buildMistakesContext(userInput);
+      if (cfg.memoryEnabled) {
+        memoryContext = cfg.memory.buildMemoryContext(
+          queryEmbedding,
+          cfg.memoryRetrievalCount,
+          embeddingModel,
+          userInput,
+        );
+      }
+      if (cfg.memoryEnabled && (cfg.theoryEnabled ?? true)) {
         theoryContext = this.theoryMemory.buildTheoryContext(userInput);
-        if (theoryContext && this.currentTrace) {
-          this.currentTrace.theoryReason = "Relevant theory memory matched this input and was injected into context";
+      }
+    }
+
+    if (this.mindTurn && this.mind) {
+      if (this.mindTurn.disabledKind === "memory") {
+        memoryContext = "";
+      } else if (cfg.memoryEnabled) {
+        try {
+          const memoryItems = cfg.memory.buildMemoryItems(
+            queryEmbedding,
+            cfg.memoryRetrievalCount,
+            embeddingModel,
+            userInput,
+          );
+          const rankedMemory = this.mind.rankMemory(memoryItems);
+          memoryContext = renderPromptMemoryItems(rankedMemory);
+          for (const item of rankedMemory) {
+            pendingContextRecords.push({
+              section: "memory",
+              kind: item.kind,
+              id: item.id,
+              text: item.text,
+              relevance: item.relevance,
+            });
+          }
+        } catch (e) {
+          console.error("[mind-memory]", e);
         }
+      }
+
+      if (this.mindTurn.disabledKind === "theory") {
+        theoryContext = "";
+      } else if (cfg.theoryEnabled ?? true) {
+        try {
+          const theoryItems = this.theoryMemory.buildTheoryItems(userInput);
+          theoryContext = renderTheoryItems(theoryItems);
+          for (const item of theoryItems) {
+            pendingContextRecords.push({
+              section: "theory",
+              kind: item.kind,
+              id: item.id,
+              text: item.text,
+              relevance: item.relevance,
+            });
+          }
+        } catch (e) {
+          console.error("[mind-theory]", e);
+        }
+      }
+
+      if (mistakesContext) {
+        pendingContextRecords.push({
+          section: "mistakes",
+          kind: "correction" as ContextKind,
+          id: `corrections:${hashText(mistakesContext)}`,
+          text: mistakesContext,
+          relevance: 0.7,
+        });
+      }
+      if (recoveryContext) {
+        pendingContextRecords.push({
+          section: "recovery",
+          kind: "recovery" as ContextKind,
+          id: `recovery:${hashText(recoveryContext)}`,
+          text: recoveryContext,
+          relevance: 0.6,
+        });
       }
     }
 
@@ -943,8 +1321,19 @@ export class Agent {
       }
     }
 
+    if (cognitiveContext && this.mindTurn && this.mind) {
+      pendingContextRecords.push({
+        section: "cognition",
+        kind: "pattern" as ContextKind,
+        id: `patterns:${hashText(cognitiveContext)}`,
+        text: cognitiveContext,
+        relevance: 0.6,
+      });
+    }
+
     // 7. User profile
     const userContext = cfg.userModel.buildUserContext();
+    const planContext = renderPlanContext(cfg.sessionId);
 
     // 7b. Narrative — session continuity
     let narrativeContext = "";
@@ -999,23 +1388,18 @@ export class Agent {
     if (alivePulse) this.publishAliveActions(alivePulse, callbacks);
     const aliveContext = this.alive?.consumeWakeContext() ?? "";
 
-    // 9. Build system prompt
-    const parts = [cfg.systemPrompt];
-
-    if (strategyPrompt && !cfg.cognitiveKernel.isEnabled()) parts.push("\n\n" + strategyPrompt);
-    if (cognitiveContext) parts.push(cognitiveContext);
-    if (memoryContext) parts.push(memoryContext);
-    if (theoryContext) parts.push(theoryContext);
-    if (mistakesContext) parts.push(mistakesContext);
-    if (userContext) parts.push(userContext);
-    if (narrativeContext) parts.push(narrativeContext);
-    if (mentalModelContext) parts.push(mentalModelContext);
-    if (executiveContext) parts.push(executiveContext);
-    if (skillContext) parts.push(skillContext);
-    if (searchContext) parts.push(searchContext);
-    if (aliveContext) parts.push(`\n\n${aliveContext}`);
-
-    // Library skill frameworks
+    if (this.mindTurn && this.mind) {
+      const topSkillMatch = skillMatches[0];
+      if (topSkillMatch && skillContext) {
+        pendingContextRecords.push({
+          section: "skills",
+          kind: "skill" as ContextKind,
+          id: `skill:${topSkillMatch.skill.name}`,
+          text: skillContext,
+          relevance: topSkillMatch.confidence,
+        });
+      }
+    }
     if (cfg.skillLibrary && userInput.trim().split(/\s+/).length >= 3) {
       try {
         const remainingMatches = skillMatches.slice(1);
@@ -1055,19 +1439,162 @@ export class Agent {
         /* library not available */
       }
     }
-    if (libraryFrameworkContext) parts.push(libraryFrameworkContext);
-
-    // Mode-specific system prompt override
+    // 9. Build system prompt — static sections first (prompt-cache friendly),
+    // volatile sections last, enforced token budget with priority dropping
     const modePrompt = getModePrompt(responseMode, userInput);
-    if (modePrompt) {
-      parts.push(`\n\n${modePrompt}`);
+    let identityContext = "";
+    let capabilityContext = "";
+    if (this.mindTurn && this.mind) {
+      try {
+        identityContext = this.mind.identitySummary();
+        if (identityContext) {
+          pendingContextRecords.push({
+            section: "identity",
+            kind: "identity" as ContextKind,
+            id: "identity",
+            text: identityContext,
+            relevance: 0.8,
+          });
+        }
+        capabilityContext = this.mind.capabilityGuidance(this.mindTurn.domains);
+      } catch (e) {
+        console.error("[mind-identity]", e);
+      }
+    }
+    const systemContextBudget = cfg.systemContextBudget ?? DEFAULT_SYSTEM_CONTEXT_TOKEN_BUDGET;
+
+    const sectionSpecs: {
+      name: string;
+      text: string;
+      priority: number;
+      pinned: boolean;
+      kind?: ContextKind;
+      id?: string;
+    }[] = [
+      { name: "mode", text: modePrompt ? `\n\n${modePrompt}` : "", priority: 100, pinned: true },
+      { name: "user", text: userContext, priority: 90, pinned: true },
+      { name: "plan", text: planContext, priority: 88, pinned: true },
+      {
+        name: "skills",
+        text: skillContext,
+        priority: 85,
+        pinned: false,
+        kind: "skill",
+        id: pendingContextRecords.find((r) => r.section === "skills")?.id,
+      },
+      { name: "memory", text: memoryContext, priority: 75, pinned: false },
+      {
+        name: "cognition",
+        text: cognitiveContext,
+        priority: 72,
+        pinned: false,
+        kind: "pattern",
+        id: `patterns:${hashText(cognitiveContext)}`,
+      },
+      { name: "narrative", text: narrativeContext, priority: 70, pinned: false },
+      { name: "theory", text: theoryContext, priority: 65, pinned: false },
+      {
+        name: "mistakes",
+        text: mistakesContext,
+        priority: 60,
+        pinned: false,
+        kind: "correction",
+        id: `corrections:${hashText(mistakesContext)}`,
+      },
+      {
+        name: "recovery",
+        text: recoveryContext ? `\n\n${recoveryContext}` : "",
+        priority: 58,
+        pinned: false,
+        kind: "recovery",
+        id: `recovery:${hashText(recoveryContext)}`,
+      },
+      { name: "search", text: searchContext, priority: 55, pinned: false },
+      { name: "skillFrameworks", text: libraryFrameworkContext, priority: 50, pinned: false },
+      { name: "alive", text: aliveContext ? `\n\n${aliveContext}` : "", priority: 45, pinned: false },
+      {
+        name: "strategy",
+        text: strategyPrompt && !cfg.cognitiveKernel.isEnabled() ? "\n\n" + strategyPrompt : "",
+        priority: 40,
+        pinned: true,
+      },
+      { name: "mentalModel", text: mentalModelContext, priority: 35, pinned: false },
+      { name: "executive", text: executiveContext, priority: 30, pinned: false },
+      { name: "identity", text: identityContext, priority: 26, pinned: false, kind: "identity", id: "identity" },
+      { name: "capability", text: capabilityContext, priority: 22, pinned: false },
+      {
+        name: "session",
+        text: sessionGuidance ? `\n\n## Session Context\n${sessionGuidance}` : "",
+        priority: 20,
+        pinned: true,
+      },
+      { name: "time", text: timeGuidance ? `\n\n## Time Context\n${timeGuidance}` : "", priority: 15, pinned: true },
+      {
+        name: "style",
+        text: styleGuidance ? `\n\n## Communication Style\n${styleGuidance}` : "",
+        priority: 10,
+        pinned: true,
+      },
+    ];
+
+    const useCompiler = this.mindTurn != null && this.mind != null && cfg.contextCompilerEnabled !== false;
+    let assembled: AssembledPrompt;
+    let droppedSections: string[] = [];
+
+    if (useCompiler && this.mind) {
+      const reliabilityBySection = new Map<string, number>();
+      for (const rec of pendingContextRecords) {
+        const current = reliabilityBySection.get(rec.section) ?? 0;
+        const rel = this.mind.reliability.score(rec.kind, rec.id);
+        reliabilityBySection.set(rec.section, current === 0 ? rel : (current + rel) / 2);
+      }
+
+      const baseTokens = Math.ceil(cfg.systemPrompt.length / 4);
+      const cognitiveBudget = Math.max(400, systemContextBudget - baseTokens);
+      const items: CompilableItem[] = sectionSpecs
+        .filter((s) => s.text)
+        .map((s) => ({
+          kind: s.kind ?? ("pattern" as ContextKind),
+          id: s.id ?? s.name,
+          text: s.text,
+          tokens: Math.ceil(s.text.length / 4),
+          relevance: s.priority / 100,
+          reliability: reliabilityBySection.get(s.name) ?? 0.5,
+          pinned: s.pinned,
+          order: s.priority,
+        }));
+      const compiled = compileContext(items, cognitiveBudget);
+      const selected = new Set(compiled.included.map((i) => i.id));
+      const selectedNames = new Set(
+        sectionSpecs.filter((s) => s.text && selected.has(s.id ?? s.name)).map((s) => s.name),
+      );
+      assembled = assembleSelectedSystemPrompt(
+        cfg.systemPrompt,
+        sectionSpecs.map(({ name, text, priority }) => ({ name, text, priority })),
+        selectedNames,
+      );
+      droppedSections = assembled.dropped;
+    } else {
+      assembled = assembleBudgetedSystemPrompt(
+        cfg.systemPrompt,
+        sectionSpecs.map(({ name, text, priority }) => ({ name, text, priority })),
+        systemContextBudget,
+      );
     }
 
-    if (styleGuidance) parts.push(`\n\n## Communication Style\n${styleGuidance}`);
-    if (sessionGuidance) parts.push(`\n\n## Session Context\n${sessionGuidance}`);
-    if (timeGuidance) parts.push(`\n\n## Time Context\n${timeGuidance}`);
+    if (this.mind && this.mindTurn) {
+      const includedSections = new Set(assembled.included);
+      for (const rec of pendingContextRecords) {
+        if (includedSections.has(rec.section)) {
+          this.mind.recordContextText(this.mindTurn, rec.kind, rec.id, rec.text, rec.relevance);
+        }
+      }
+    }
 
-    const fullSystemPrompt = parts.join("");
+    const fullSystemPrompt = assembled.prompt;
+    if (this.currentTrace && assembled.dropped.length > 0) {
+      this.currentTrace.droppedContextSections = assembled.dropped;
+    }
     if (this.currentTrace) {
       this.currentTrace.contextBudget = buildContextBudgetLedger({
         system: cfg.systemPrompt,
@@ -1078,18 +1605,25 @@ export class Agent {
         mistakes: mistakesContext,
         user: userContext,
         narrative: narrativeContext,
+        plan: planContext,
         mentalModel: mentalModelContext,
         executive: executiveContext,
         skills: skillContext + libraryFrameworkContext,
         search: searchContext,
         mode: modePrompt,
-        session: sessionGuidance,
+        session: sessionGuidance + identityContext + capabilityContext,
         time: timeGuidance,
         full: fullSystemPrompt,
       });
     }
 
     const openaiTools = cfg.tools.toOpenAITools();
+    const toolContext = {
+      sessionId: cfg.sessionId,
+      turnId: this.runTurnId,
+      workspaceRoot: cfg.policy?.profile.workspaceRoot,
+      tools: cfg.tools,
+    };
 
     // 9a. Debate detection — route complex research questions to multi-agent debate
     const isDebateQuery =
@@ -1099,23 +1633,35 @@ export class Agent {
         /\b(?:why|how|should|is it|are there|what are the implications)\b/i.test(userInput));
 
     if (isDebateQuery && !cfg.cognitiveKernel.isEnabled()) {
-      const cleanQuery = userInput.replace(/^\/debate\s*/i, "");
-      callbacks.onPhase?.("responding");
-      const orchestrator = new DebateOrchestrator(cfg.llm);
-      try {
-        const result = await orchestrator.debate(cleanQuery, "", (voice, step) => {
-          callbacks.onThinking?.(`${voice} (${step}/${DEBATE_VOICES.length})`);
-        });
-        const debateOutput = result.synthesis;
-        callbacks.onToken(debateOutput);
-        this.messages.push({ role: "assistant", content: debateOutput });
-        this.lastAssistantResponse = debateOutput;
-        this.lastUserMessage = userInput;
-        this.finishTrace(debateOutput);
-        yield debateOutput;
-        return;
-      } catch (e) {
-        console.error("[debate] failed, falling through to standard mode:", e);
+      let skipDebate = false;
+      if (this.mind && this.mindTurn) {
+        try {
+          skipDebate = this.mind.capability.decideStance(this.mindTurn.domains, "standard").skipDebate;
+        } catch {
+          skipDebate = false;
+        }
+      }
+      if (skipDebate) {
+        if (this.currentTrace) this.currentTrace.debateSkipped = "capability-confident";
+      } else {
+        const cleanQuery = userInput.replace(/^\/debate\s*/i, "");
+        callbacks.onPhase?.("responding");
+        const orchestrator = new DebateOrchestrator(cfg.llm);
+        try {
+          const result = await orchestrator.debate(cleanQuery, "", (voice, step) => {
+            callbacks.onThinking?.(`${voice} (${step}/${DEBATE_VOICES.length})`);
+          });
+          const debateOutput = result.synthesis;
+          callbacks.onToken(debateOutput);
+          this.pushMessage({ role: "assistant", content: debateOutput });
+          this.lastAssistantResponse = debateOutput;
+          this.lastUserMessage = userInput;
+          this.finishTrace(debateOutput);
+          yield debateOutput;
+          return;
+        } catch (e) {
+          console.error("[debate] failed, falling through to standard mode:", e);
+        }
       }
     }
 
@@ -1124,6 +1670,7 @@ export class Agent {
     let done = false;
     let fullResponse = "";
     let attempts = 0;
+    let actionNudges = 0;
     const failedToolCalls = new Map<string, string>();
 
     while (!done && attempts < 10) {
@@ -1132,78 +1679,16 @@ export class Agent {
       let responseBuffer = "";
 
       const streamIter = cfg.llm.stream(this.messages, fullSystemPrompt, openaiTools, options.signal);
-      let hasToolCalls = false;
+      const pendingToolCalls: ToolCall[] = [];
       try {
         for await (const chunk of streamIter) {
-          if (chunk.usage) callbacks.onUsage(chunk.usage);
+          if (chunk.usage) {
+            callbacks.onUsage(chunk.usage);
+            turnCostUsd += chunk.usage.cost;
+            turnTokens += chunk.usage.inputTokens + chunk.usage.outputTokens;
+          }
           if (chunk.toolCalls && chunk.toolCalls.length > 0) {
-            hasToolCalls = true;
-            const toolCalls = chunk.toolCalls;
-            this.messages.push({ role: "assistant", content: responseBuffer || "(tool call)", tool_calls: toolCalls });
-
-            for (const tc of toolCalls) {
-              let args: Record<string, unknown> = {};
-              try {
-                args = JSON.parse(tc.arguments || "{}");
-              } catch {
-                /* use empty */
-              }
-              callbacks.onToolCall(tc.name, args);
-              cfg.analytics.trackToolCall(tc.name);
-              this.toolUsageThisSession[tc.name] = (this.toolUsageThisSession[tc.name] || 0) + 1;
-              const toolKey = this.stableToolKey(tc.name, args);
-              let toolTrace: AgentToolTrace | null = null;
-              if (this.currentTrace) {
-                toolTrace = { name: tc.name, args: this.sanitizeTraceArgs(args) };
-                this.currentTrace.toolCalls.push(toolTrace);
-              }
-
-              const tool = cfg.tools.get(tc.name);
-              if (tool) {
-                const priorFailure = failedToolCalls.get(toolKey);
-                const startedAt = Date.now();
-                const result = priorFailure
-                  ? {
-                      success: false,
-                      error: `Repeated failed tool call skipped: ${priorFailure}`,
-                      data: {
-                        guidance:
-                          "Change the arguments, choose another tool, or answer without retrying the same failed call.",
-                      },
-                    }
-                  : await tool.execute(args);
-                if (toolTrace) {
-                  toolTrace.success = result.success;
-                  if (result.error) toolTrace.error = result.error;
-                  toolTrace.durationMs = Date.now() - startedAt;
-                  toolTrace.autoCheckpointId = this.extractAutoCheckpointId(result);
-                  if (priorFailure) toolTrace.reason = "repeat-skipped";
-                }
-                if (!result.success && !priorFailure) failedToolCalls.set(toolKey, result.error || "failed");
-                const resultContent = this.compressToolResult(result);
-                if (this.currentTrace?.contextBudget) {
-                  this.currentTrace.contextBudget.toolResults += Math.ceil(resultContent.length / 4);
-                  this.currentTrace.contextBudget.total += Math.ceil(resultContent.length / 4);
-                }
-                callbacks.onToolResult(tc.name, result, args);
-                this.recordAliveToolOutcome(tc.name, result, args, toolTrace?.durationMs, callbacks);
-                this.messages.push({
-                  role: "tool",
-                  tool_call_id: tc.id,
-                  content: resultContent,
-                });
-              } else {
-                if (toolTrace) {
-                  toolTrace.success = false;
-                  toolTrace.error = `Unknown tool: ${tc.name}`;
-                }
-                this.messages.push({
-                  role: "tool",
-                  tool_call_id: tc.id,
-                  content: JSON.stringify({ success: false, error: `Unknown tool: ${tc.name}` }),
-                });
-              }
-            }
+            pendingToolCalls.push(...chunk.toolCalls);
             continue;
           }
           if (chunk.delta) {
@@ -1217,24 +1702,32 @@ export class Agent {
           this.finishTrace(fullResponse + responseBuffer, "cancelled");
           throw new Error("cancelled", { cause: e });
         }
-        this.messages.push({ role: "assistant", content: `[Stream error: ${errMsg}]` });
+        this.pushMessage({ role: "assistant", content: `[Stream error: ${errMsg}]` });
         this.finishTrace(fullResponse + responseBuffer, errMsg);
         throw e;
       }
 
-      if (hasToolCalls) {
+      if (pendingToolCalls.length === 0 && responseBuffer && openaiTools.length > 0) {
+        const legacy = extractLegacyXmlToolCalls(responseBuffer, (name) => this.cfg.tools.get(name) !== undefined);
+        if (legacy.calls.length > 0) {
+          pendingToolCalls.push(...legacy.calls);
+          responseBuffer = legacy.cleaned;
+        }
+      }
+
+      if (pendingToolCalls.length > 0) {
+        this.pushMessage({ role: "assistant", content: responseBuffer || "(tool call)", tool_calls: pendingToolCalls });
+        await this.executeToolBatch(pendingToolCalls, toolContext, failedToolCalls, callbacks);
         fullResponse += responseBuffer;
         continue;
       }
 
-      fullResponse += responseBuffer;
-
       // Tool-build enforcement
-      if (responseMode === "tool-build" && attempts < 3 && !hasToolCalls) {
+      if (responseMode === "tool-build" && attempts < 3) {
         const correction =
           "[BUILD MODE] You explained instead of building. Create the file NOW using the write tool. No explanation. No questions. Just build it.";
-        this.messages.push({ role: "assistant", content: responseBuffer });
-        this.messages.push({ role: "user", content: correction });
+        this.pushMessage({ role: "assistant", content: responseBuffer });
+        this.pushMessage({ role: "user", content: correction });
         continue;
       }
 
@@ -1258,9 +1751,20 @@ export class Agent {
           abstractionExtracted: "",
           tokenCount: responseBuffer.length,
         };
-        const surfaceCheck = checkForSurfaceReasoning(trace);
+        let critique: CritiqueResult | undefined;
+        if (cfg.cognitiveKernel.isEnabled() && this.lastCognitiveResult) {
+          try {
+            critique = cfg.cognitiveKernel
+              .getCritic()
+              .critique(userInput, responseBuffer, this.lastCognitiveResult.primitive);
+          } catch {
+            critique = undefined;
+          }
+        }
+        const surfaceCheck = checkForSurfaceReasoning(trace, critique);
         if (surfaceCheck.isSurface) {
           this.falseSuccessRetriesThisSession++;
+          this.falseSuccessThisTurn = true;
           if (cfg.mistakesEnabled) {
             cfg.mistakes.add(
               "shallow-reasoning",
@@ -1268,6 +1772,7 @@ export class Agent {
               responseBuffer,
               `Surface reasoning: ${surfaceCheck.details.join("; ")}`,
               "self-reflection",
+              this.mindTurn?.row.seq,
             );
           }
           try {
@@ -1279,17 +1784,91 @@ export class Agent {
           } catch {
             /* best effort */
           }
-          this.messages.push({ role: "assistant", content: responseBuffer });
-          this.messages.push({
-            role: "user",
-            content:
-              "[SELF-CORRECTION] Your previous answer used surface-level reasoning. Re-answer with deeper causal reasoning: identify mechanisms, state assumptions, include a self-critique of limitations, and use first-principles thinking.",
-          });
+          let retryMessage =
+            "[SELF-CORRECTION] Your previous answer used surface-level reasoning. Re-answer with deeper causal reasoning: identify mechanisms, state assumptions, include a self-critique of limitations, and use first-principles thinking.";
+          if (cfg.modelCritiqueEnabled === true && !this.modelCritiqueUsedThisTurn) {
+            this.modelCritiqueUsedThisTurn = true;
+            try {
+              const structured = await modelCritique(cfg.llm, { query: userInput, response: responseBuffer });
+              if (structured && structured.gaps.length > 0) {
+                retryMessage = `[MODEL CRITIQUE] Identified gaps:\n${structured.gaps.map((g) => `- ${g}`).join("\n")}\nRe-answer addressing each gap; keep what was already right.`;
+                if (this.currentTrace) {
+                  this.currentTrace.modelCritique = { gaps: structured.gaps.length, retried: true };
+                }
+              }
+            } catch {
+              /* heuristic message stays */
+            }
+          }
+          this.pushMessage({ role: "assistant", content: responseBuffer });
+          this.pushMessage({ role: "user", content: retryMessage });
           continue;
+        }
+
+        const highStakesTools = new Set(["write", "edit", "shell", "subagent"]);
+        const highStakes = (this.currentTrace?.toolCalls ?? []).some(
+          (t) => highStakesTools.has(t.name) && t.success !== false,
+        );
+        if (
+          cfg.modelCritiqueEnabled === true &&
+          !this.modelCritiqueUsedThisTurn &&
+          highStakes &&
+          this.falseSuccessRetriesThisSession < 3
+        ) {
+          this.modelCritiqueUsedThisTurn = true;
+          try {
+            const structured = await modelCritique(cfg.llm, { query: userInput, response: responseBuffer });
+            if (this.currentTrace) {
+              this.currentTrace.modelCritique = { gaps: structured?.gaps.length ?? 0, retried: false };
+            }
+            if (structured?.retry && structured.gaps.length > 0) {
+              this.falseSuccessRetriesThisSession++;
+              this.falseSuccessThisTurn = true;
+              if (this.currentTrace) this.currentTrace.modelCritique = { gaps: structured.gaps.length, retried: true };
+              if (cfg.mistakesEnabled) {
+                cfg.mistakes.add(
+                  "model-critique",
+                  userInput,
+                  responseBuffer,
+                  `Gaps: ${structured.gaps.join("; ")}`,
+                  "self-reflection",
+                  this.mindTurn?.row.seq,
+                );
+              }
+              this.pushMessage({ role: "assistant", content: responseBuffer });
+              this.pushMessage({
+                role: "user",
+                content: `[MODEL CRITIQUE] Identified gaps:\n${structured.gaps.map((g) => `- ${g}`).join("\n")}\nRe-answer addressing each gap; keep what was already right.`,
+              });
+              continue;
+            }
+          } catch {
+            /* heuristic-only */
+          }
         }
       }
 
-      this.messages.push({ role: "assistant", content: responseBuffer });
+      if (
+        !done &&
+        openaiTools.length > 0 &&
+        actionNudges < MAX_ACTION_NUDGES &&
+        attempts < 6 &&
+        responseMode !== "simple-query" &&
+        responseMode !== "profile-update" &&
+        commitsToImmediateAction(responseBuffer)
+      ) {
+        actionNudges++;
+        this.pushMessage({ role: "assistant", content: responseBuffer });
+        this.pushMessage({
+          role: "user",
+          content:
+            "[ACTION REQUIRED] You announced you would act but made no tool call. Use the tools NOW to perform the action (write the file, run the command) — or state clearly that you cannot. Do not announce future actions without executing them.",
+        });
+        continue;
+      }
+
+      fullResponse += responseBuffer;
+      this.pushMessage({ role: "assistant", content: responseBuffer });
 
       this.lastAssistantResponse = fullResponse;
       this.lastUserMessage = userInput;
@@ -1395,12 +1974,24 @@ export class Agent {
 
       // Slow post-processing: background
       try {
-        if (cfg.memoryEnabled && queryEmbedding && queryEmbedding.length > 0) {
-          try {
-            cfg.memory.addEpisode(cfg.sessionId, userInput, responseBuffer, queryEmbedding);
+        try {
+          const learning = await this.cognitiveLayer.afterTurn({
+            sessionId: cfg.sessionId,
+            turnId: this.runTurnId,
+            userMessage: userInput,
+            assistantResponse: responseBuffer,
+            embedding: queryEmbedding,
+            embeddingModel,
+          });
+          if (learning.memoryId && callbacks.onMemoryStore) callbacks.onMemoryStore();
+          if (learning.errors.length > 0) {
+            console.error("[cognitive-layer-after]", learning.errors.join("; "));
+          }
+        } catch (e) {
+          console.error("[cognitive-layer-after]", e);
+          if (cfg.memoryEnabled && queryEmbedding && queryEmbedding.length > 0) {
+            cfg.memory.addEpisode(cfg.sessionId, userInput, responseBuffer, queryEmbedding, embeddingModel);
             if (callbacks.onMemoryStore) callbacks.onMemoryStore();
-          } catch (e) {
-            console.error("[memory]", e);
           }
         }
         if (cfg.cognitiveKernel.isEnabled() && this.lastCognitiveResult) {
@@ -1416,7 +2007,273 @@ export class Agent {
         console.error("[post-process]", e);
       }
 
+      if (this.alive) {
+        try {
+          const knownGoals = new Set(
+            this.alive.engine.getState().openLoops.map((loop) => normalizeLoopGoal(loop.goal)),
+          );
+          let activeCount = this.alive.engine.getState().openLoops.length;
+          const extracted = extractOpenLoops(fullResponse, 2);
+          for (const loop of extracted) {
+            if (activeCount >= 25) break;
+            const key = normalizeLoopGoal(loop.goal);
+            if (knownGoals.has(key)) continue;
+            this.alive.createOpenLoop(loop);
+            knownGoals.add(key);
+            activeCount += 1;
+          }
+        } catch (e) {
+          console.error("[alive-open-loops]", e);
+        }
+      }
+
+      if (this.mind && this.mindTurn) {
+        const finishedHandle = this.mindTurn;
+        try {
+          const signals: TurnSignals = {
+            corrected: wasCorrection,
+            rephrased: isRephrase(userInput),
+            thanked: isThanked(userInput),
+            abandoned: fullResponse.trim().length === 0 && responseBuffer.trim().length === 0,
+            falseSuccess: this.falseSuccessThisTurn,
+            toolFailure: this.toolFailureThisTurn,
+          };
+          const correction = wasCorrection
+            ? { topicKey: userInput.slice(0, 80), correction: userInput.slice(0, 500) }
+            : undefined;
+          const predTokens = this.predictionAttempt?.tokens ?? 0;
+          const result = this.mind.finishTurn(finishedHandle, signals, {
+            costUsd: turnCostUsd,
+            tokens: turnTokens + predTokens,
+            latencyMs: Date.now() - turnStartedAt,
+            retries: Math.max(0, attempts - 1),
+            ...(droppedSections.length > 0 ? { droppedSections } : {}),
+            ...(this.predictionAttempt ? { predictionSource: this.predictionAttempt.source } : {}),
+            ...(predTokens > 0 ? { predictionTokens: predTokens } : {}),
+            ...(correction ? { correction } : {}),
+          });
+          this.mindTurn = null;
+
+          if (result) {
+            const error = result.prediction.error;
+            if (error > 0.6) {
+              await this.handleSurprise(userInput, responseBuffer, result, signals, error, cfg, callbacks);
+            }
+            if (this.alive && this.mindAlivePredictionId) {
+              try {
+                const pulse = this.alive.recordEvent({
+                  type: "turn_resolved",
+                  source: "ntox-mind",
+                  payload: {
+                    outcome: result.score >= 0 ? "ok" : "bad",
+                    score: result.score,
+                    corrected: signals.corrected,
+                    predictionError: error,
+                    queryType: finishedHandle.row.queryType,
+                    responseMode: finishedHandle.row.responseMode,
+                  },
+                  predictionId: this.mindAlivePredictionId,
+                  significance: Math.min(1, error),
+                });
+                this.publishAliveActions(pulse, callbacks);
+              } catch (e) {
+                console.error("[alive-turn-resolved]", e);
+              }
+            }
+          }
+        } catch (e) {
+          console.error("[mind-finish]", e);
+        }
+      }
+
+      this.saveSession();
       return;
+    }
+  }
+
+  private async handleSurprise(
+    userInput: string,
+    responseBuffer: string,
+    result: MindTurnResult,
+    signals: TurnSignals,
+    error: number,
+    cfg: AgentConfig,
+    callbacks: AgentCallbacks,
+  ): Promise<void> {
+    if (cfg.memoryEnabled && this.surpriseNotesThisSession < 3) {
+      this.surpriseNotesThisSession++;
+      try {
+        const p = result.prediction;
+        cfg.memory.addDurableMemory(
+          "note",
+          `Surprise: expected "${p.prediction.expectedOutcome}" (conf ${p.prediction.confidence.toFixed(2)}, intent ${p.prediction.intent}) for "${userInput.slice(0, 120)}" but got corrected=${signals.corrected} rephrased=${signals.rephrased} toolFailure=${signals.toolFailure} thanked=${signals.thanked} (error ${error.toFixed(2)})`,
+          "surprise",
+          0.5,
+          "agent",
+        );
+      } catch (e) {
+        console.error("[surprise-memory]", e);
+      }
+    }
+    if (cfg.reflector && this.surpriseReflectionsThisSession < 3) {
+      this.surpriseReflectionsThisSession++;
+      try {
+        const reflection = await cfg.reflector.reflect(userInput, responseBuffer);
+        if (reflection && callbacks.onReflection) callbacks.onReflection(reflection);
+      } catch (e) {
+        console.error("[surprise-reflect]", e);
+      }
+    }
+  }
+
+  private async executeToolBatch(
+    toolCalls: ToolCall[],
+    toolContext: ToolContext,
+    failedToolCalls: Map<string, string>,
+    callbacks: AgentCallbacks,
+  ): Promise<void> {
+    const prepared: PreparedToolCall[] = toolCalls.map((tc) => {
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(tc.arguments || "{}");
+      } catch {
+        /* keep empty args */
+      }
+      const key = this.stableToolKey(tc.name, args);
+      let trace: AgentToolTrace | null = null;
+      if (this.currentTrace) {
+        trace = { name: tc.name, args: this.sanitizeTraceArgs(args) };
+        this.currentTrace.toolCalls.push(trace);
+      }
+      return { tc, args, key, trace, duplicate: false };
+    });
+
+    for (const item of prepared) {
+      const priorFailure = failedToolCalls.get(item.key);
+      if (priorFailure) item.skipReason = priorFailure;
+    }
+
+    for (const item of prepared) {
+      callbacks.onToolCall(item.tc.name, item.args);
+      this.cfg.analytics.trackToolCall(item.tc.name);
+      this.toolUsageThisSession[item.tc.name] = (this.toolUsageThisSession[item.tc.name] || 0) + 1;
+    }
+
+    const groups: PreparedToolCall[][] = [];
+    let parallelGroup: PreparedToolCall[] = [];
+    let groupSeen = new Set<string>();
+    for (const item of prepared) {
+      const tool = this.cfg.tools.get(item.tc.name);
+      if (tool?.parallelSafe === true && !item.skipReason) {
+        if (groupSeen.has(item.key)) {
+          item.duplicate = true;
+        } else {
+          groupSeen.add(item.key);
+        }
+        parallelGroup.push(item);
+        continue;
+      }
+      if (parallelGroup.length > 0) {
+        groups.push(parallelGroup);
+        parallelGroup = [];
+        groupSeen = new Set<string>();
+      }
+      groups.push([item]);
+    }
+    if (parallelGroup.length > 0) groups.push(parallelGroup);
+
+    for (const group of groups) {
+      await this.runToolGroup(group, toolContext, failedToolCalls, callbacks);
+    }
+  }
+
+  private async runToolGroup(
+    group: PreparedToolCall[],
+    toolContext: ToolContext,
+    failedToolCalls: Map<string, string>,
+    callbacks: AgentCallbacks,
+  ): Promise<void> {
+    const results: ToolResult[] = new Array(group.length);
+    let cursor = 0;
+    const workerCount = Math.min(TOOL_CONCURRENCY, group.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const index = cursor++;
+        if (index >= group.length) return;
+        const item = group[index];
+        const skipReason = item.skipReason ?? (item.duplicate ? "duplicate in batch" : undefined);
+        if (skipReason) {
+          const error =
+            skipReason === "duplicate in batch"
+              ? "Duplicate tool call in the same batch skipped."
+              : `Repeated failed tool call skipped: ${skipReason}`;
+          results[index] = {
+            success: false,
+            error,
+            data: {
+              guidance: "Change the arguments, choose another tool, or answer without retrying the same failed call.",
+            },
+          };
+          continue;
+        }
+        const tool = this.cfg.tools.get(item.tc.name);
+        if (!tool) {
+          results[index] = { success: false, error: `Unknown tool: ${item.tc.name}` };
+          continue;
+        }
+        const startedAt = Date.now();
+        try {
+          results[index] = await tool.execute(item.args, toolContext);
+        } catch (e) {
+          results[index] = { success: false, error: e instanceof Error ? e.message : String(e) };
+        }
+        item.durationMs = Date.now() - startedAt;
+      }
+    });
+    await Promise.all(workers);
+
+    for (let i = 0; i < group.length; i++) {
+      const item = group[i];
+      const skipReason = item.skipReason ?? (item.duplicate ? "duplicate in batch" : undefined);
+      const result = results[i] ?? { success: false, error: "Tool call produced no result" };
+      if (item.trace) {
+        item.trace.success = result.success;
+        if (result.error) item.trace.error = result.error;
+        item.trace.durationMs = item.durationMs;
+        item.trace.autoCheckpointId = this.extractAutoCheckpointId(result);
+        if (skipReason) item.trace.reason = "repeat-skipped";
+      }
+      if (!result.success) this.toolFailureThisTurn = true;
+      if (this.mind && this.mindTurn) {
+        this.mind.recordTool(this.mindTurn, {
+          name: item.tc.name,
+          success: result.success,
+          durationMs: item.durationMs,
+          argsHash: item.key,
+        });
+      }
+      if (!result.success && !skipReason) failedToolCalls.set(item.key, result.error || "failed");
+      const resultContent = this.compressToolResult(result);
+      if (this.currentTrace?.contextBudget) {
+        const tokens = Math.ceil(resultContent.length / 4);
+        this.currentTrace.contextBudget.toolResults += tokens;
+        this.currentTrace.contextBudget.total += tokens;
+      }
+      callbacks.onToolResult(item.tc.name, result, item.args);
+      this.recordAliveToolOutcome(item.tc.name, result, item.args, item.durationMs, callbacks);
+      try {
+        await this.cognitiveLayer.afterTool({
+          sessionId: this.cfg.sessionId,
+          turnId: this.runTurnId,
+          toolName: item.tc.name,
+          success: result.success,
+          error: result.error,
+          durationMs: item.durationMs,
+        });
+      } catch {
+        /* best effort */
+      }
+      this.pushMessage({ role: "tool", tool_call_id: item.tc.id, content: resultContent });
     }
   }
 
@@ -1503,6 +2360,7 @@ export class Agent {
       console.error("[session] Failed to record session:", msg);
     }
 
+    this.saveSession();
     return awarenessSummary;
   }
 

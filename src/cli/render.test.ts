@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  renderBriefCard,
   renderHelp,
   renderLastTurn,
   renderModelsMenu,
@@ -8,7 +9,9 @@ import {
   renderTurnSummary,
   summarizeToolResult,
 } from "./render.js";
+import { stripAnsi, visibleWidth } from "./theme.js";
 import type { AgentTurnTrace } from "../types/index.js";
+import type { Briefing } from "../meta/briefing.js";
 
 describe("tool result rendering", () => {
   it("summarizes web_read method and title", () => {
@@ -41,14 +44,14 @@ describe("tool result rendering", () => {
 
 describe("guide rendering", () => {
   it("renders help as a quick guide", () => {
-    const rendered = renderHelp();
+    const rendered = stripAnsi(renderHelp());
     expect(rendered).toContain("ntox quick guide");
     expect(rendered).toContain("/last");
     expect(rendered).toContain("/retry");
   });
 
   it("renders practical tips", () => {
-    const rendered = renderTips();
+    const rendered = stripAnsi(renderTips());
     expect(rendered).toContain("practical Ntox tips");
     expect(rendered).toContain("/rollback");
   });
@@ -56,12 +59,14 @@ describe("guide rendering", () => {
 
 describe("model menu rendering", () => {
   it("keeps displayed model numbers aligned with selector indexes across providers", () => {
-    const rendered = renderModelsMenu(
-      [
-        { id: "openai/gpt", name: "GPT" },
-        { id: "anthropic/claude", name: "Claude" },
-      ],
-      "",
+    const rendered = stripAnsi(
+      renderModelsMenu(
+        [
+          { id: "openai/gpt", name: "GPT" },
+          { id: "anthropic/claude", name: "Claude" },
+        ],
+        "",
+      ),
     );
 
     expect(rendered).toContain(" 2. Claude");
@@ -97,5 +102,41 @@ describe("last turn rendering", () => {
     const rendered = renderLastTurn(trace);
     expect(rendered).toContain("/rollback cp_1");
     expect(rendered).toContain("/trace for details");
+  });
+});
+
+describe("brief card rendering", () => {
+  const brief: Briefing = {
+    type: "return",
+    generatedAt: 1,
+    question: "What is the biggest thing you could do today?",
+    sections: [
+      { label: "Goals", content: "- ship the CLI redesign\n- write tests" },
+      { label: "Risks", content: "- [medium] scope creep" },
+      { label: "Away", content: "12h since last session" },
+    ],
+  };
+
+  it("renders sections and question inside a rounded panel", () => {
+    const rendered = renderBriefCard(brief, 80);
+    const plain = stripAnsi(rendered);
+    expect(plain).toContain("brief");
+    expect(plain).toContain("return");
+    expect(plain).toContain("GOALS");
+    expect(plain).toContain("RISKS");
+    expect(plain).toContain("biggest thing");
+    expect(plain).toContain("╭");
+    expect(plain).toContain("╰");
+  });
+
+  it("keeps every line within the requested width", () => {
+    const rendered = renderBriefCard(brief, 60);
+    for (const line of rendered.split("\n")) {
+      expect(visibleWidth(line)).toBe(60);
+    }
+  });
+
+  it("returns empty string for none briefs", () => {
+    expect(renderBriefCard({ type: "none", sections: [], generatedAt: 1, question: null })).toBe("");
   });
 });

@@ -89,6 +89,7 @@ export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
               "Send me any message and I'll help you with coding, research, analysis, or anything else.\n" +
               "Commands:\n" +
               "/new - start fresh conversation\n" +
+              "/approve once|session|always|deny <command> - allow or block a risky command\n" +
               "/help - show this message",
           );
           continue;
@@ -101,6 +102,7 @@ export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
             "NTOX Telegram Bot\n\n" +
               "Just send me a message and I'll respond.\n" +
               "/new - reset conversation\n" +
+              "/approve once|session|always|deny <command> - allow or block a risky command\n" +
               "/help - this message",
           );
           continue;

@@ -5,7 +5,8 @@ import type { AgentCallbacks } from "../core/agent.js";
 import { loadConfig } from "../core/config.js";
 import type { NtoxConfig } from "../types/index.js";
 import { judgeResponse, type JudgeScore } from "./judge.js";
-import { ALL_ROUNDS } from "./dataset.js";
+import { ALL_ROUNDS, type BenchmarkRound } from "./dataset.js";
+import { average, computeDomainDeltas, percentDelta, round as roundTo } from "./metrics.js";
 
 export interface QueryResult {
   queryId: string;
@@ -45,6 +46,7 @@ async function runSingleQuery(
   const config = { ...baseConfig, ...configOverride };
   const shared = createSharedInfra(config);
   const session = createSessionInfra(shared);
+  session.cognitiveKernel.setEnabled(kernelEnabled);
   const sessionId = `bench_${kernelEnabled ? "on" : "off"}_${Date.now()}`;
 
   const agentConfig = createAgentConfig({ ...shared, ...session }, config, sessionId, {
@@ -88,12 +90,13 @@ export async function runBenchmark(
   judgeLLM: LLMClient,
   onProgress?: (msg: string) => void,
   configOverride?: Partial<NtoxConfig>,
+  options?: { rounds?: BenchmarkRound[] },
 ): Promise<BenchmarkReport> {
   const config = loadConfig();
   const rounds: RoundResult[] = [];
-  const domainScores: Record<string, { on: number[]; off: number[] }> = {};
+  const domainPairs: { domain: string; on: number; off: number }[] = [];
 
-  for (const round of ALL_ROUNDS) {
+  for (const round of options?.rounds ?? ALL_ROUNDS) {
     const log = (msg: string) => {
       onProgress?.(msg);
     };
@@ -115,7 +118,7 @@ export async function runBenchmark(
       log("    Scoring...");
       const onScore = await judgeResponse(judgeLLM, q.query, onResult.response);
 
-      const delta = Math.round(((onScore.overall - offScore.overall) / offScore.overall) * 1000) / 10;
+      const delta = percentDelta(onScore.overall, offScore.overall);
 
       results.push({
         queryId: q.id,
@@ -137,16 +140,14 @@ export async function runBenchmark(
         delta,
       });
 
-      if (!domainScores[q.domain]) domainScores[q.domain] = { on: [], off: [] };
-      domainScores[q.domain].on.push(onScore.overall);
-      domainScores[q.domain].off.push(offScore.overall);
+      domainPairs.push({ domain: q.domain, on: onScore.overall, off: offScore.overall });
 
       log(`    ON: ${onScore.overall}/10 | OFF: ${offScore.overall}/10 | Delta: ${delta > 0 ? "+" : ""}${delta}%`);
     }
 
-    const kernelOnAvg = avg(results.map((r) => r.kernelOn.score.overall));
-    const kernelOffAvg = avg(results.map((r) => r.kernelOff.score.overall));
-    const deltaPercent = Math.round(((kernelOnAvg - kernelOffAvg) / kernelOffAvg) * 1000) / 10;
+    const kernelOnAvg = average(results.map((r) => r.kernelOn.score.overall));
+    const kernelOffAvg = average(results.map((r) => r.kernelOff.score.overall));
+    const deltaPercent = percentDelta(kernelOnAvg, kernelOffAvg);
 
     rounds.push({
       name: round.name,
@@ -162,29 +163,17 @@ export async function runBenchmark(
     );
   }
 
-  const overallOn = avg(rounds.flatMap((r) => r.results.map((q) => q.kernelOn.score.overall)));
-  const overallOff = avg(rounds.flatMap((r) => r.results.map((q) => q.kernelOff.score.overall)));
-  const overallDelta = Math.round(((overallOn - overallOff) / overallOff) * 1000) / 10;
-
-  const domainDeltas: Record<string, number> = {};
-  for (const [domain, scores] of Object.entries(domainScores)) {
-    const onAvg = avg(scores.on);
-    const offAvg = avg(scores.off);
-    domainDeltas[domain] = Math.round(((onAvg - offAvg) / offAvg) * 1000) / 10;
-  }
+  const overallOn = average(rounds.flatMap((r) => r.results.map((q) => q.kernelOn.score.overall)));
+  const overallOff = average(rounds.flatMap((r) => r.results.map((q) => q.kernelOff.score.overall)));
+  const overallDelta = percentDelta(overallOn, overallOff);
 
   return {
     rounds,
-    overallKernelOn: Math.round(overallOn * 10) / 10,
-    overallKernelOff: Math.round(overallOff * 10) / 10,
+    overallKernelOn: roundTo(overallOn),
+    overallKernelOff: roundTo(overallOff),
     overallDelta,
-    domainDeltas,
+    domainDeltas: computeDomainDeltas(domainPairs),
     timestamp: Date.now(),
     model: config.model,
   };
-}
-
-function avg(nums: number[]): number {
-  if (nums.length === 0) return 0;
-  return nums.reduce((a, b) => a + b, 0) / nums.length;
 }

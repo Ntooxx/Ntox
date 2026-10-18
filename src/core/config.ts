@@ -15,6 +15,12 @@ const ConfigSchema = z.object({
   embeddingModel: z.string().min(1),
   memoryEnabled: z.boolean(),
   memoryRetrievalCount: z.number().int().min(1).max(100),
+  systemContextBudget: z.number().int().min(200).max(20_000),
+  contextCompilerEnabled: z.boolean(),
+  predictionLlmEnabled: z.boolean(),
+  modelCritiqueEnabled: z.boolean(),
+  idleEnabled: z.boolean(),
+  idleSelfPlay: z.boolean(),
   metaStrategyEnabled: z.boolean(),
   metaReflectionEnabled: z.boolean(),
   metaMistakesEnabled: z.boolean(),
@@ -30,11 +36,14 @@ const ConfigSchema = z.object({
   whatsappToken: z.string(),
   whatsappPhoneNumberId: z.string(),
   whatsappVerifyToken: z.string(),
+  whatsappAppSecret: z.string(),
   whatsappPort: z.number().int().min(1024).max(65535),
   dockerEnabled: z.boolean(),
   webPort: z.number().int().min(1024).max(65535),
   webHost: z.string().min(1),
   webAuthToken: z.string(),
+  apiPort: z.number().int().min(1024).max(65535),
+  apiAuthToken: z.string(),
   introEnabled: z.boolean(),
   verboseCallbacks: z.boolean(),
   defaultProfileId: z.string().min(1),
@@ -69,6 +78,8 @@ const DEFAULT_ALLOWED_TOOLS = [
   "image",
   "subagent",
   "checkpoint",
+  "plan",
+  "process",
   "browse",
   "job_tracker",
   "profile_eval",
@@ -93,6 +104,7 @@ export const COST_PATH = join(NTOX_DIR, "costs.json");
 export const MODELS_CACHE_PATH = join(NTOX_DIR, "models-cache.json");
 export const MEMORY_DIR = join(NTOX_DIR, "memory");
 export const EPISODES_PATH = join(MEMORY_DIR, "episodes.json");
+export const EPISODES_JSONL_PATH = join(MEMORY_DIR, "episodes.jsonl");
 export const DURABLE_MEMORY_PATH = join(MEMORY_DIR, "durable.json");
 export const MISTAKES_PATH = join(MEMORY_DIR, "mistakes.json");
 export const SKILLS_DIR = join(NTOX_DIR, "skills");
@@ -136,6 +148,14 @@ const DEFAULT_CONFIG: NtoxConfig = {
     "Match the user's tone. If they're technical, be technical. If casual, be casual.",
     "Use markdown code blocks ``` for code snippets. Always specify the language after the opening ```.",
 
+    "## Agentic Workflow",
+    "For any task that needs more than two steps, create a plan with the plan tool before acting. Put the overall goal and concrete tasks in it.",
+    "Keep exactly one plan task in_progress. Update statuses as work advances and mark a task complete only when it is actually done.",
+    "Give every code-changing task a verify command such as npm test, npm run build, or npm run lint. Completing a task runs that command and fails when it does not pass.",
+    "For dev servers, watchers, or long builds, use the process tool instead of a blocking shell call. Start it, read output, and kill it when done.",
+    "When verification fails, read the output, fix the cause, and retry. Do not claim success or mark the task complete while a verify command is failing.",
+    "If a step is blocked, record the blocker in the task notes and try a different approach instead of repeating the same failed call.",
+
     "## Files and Workspace",
     "The user has a project. Always read relevant files before making changes.",
     "Check package.json, tsconfig.json, and existing source files to understand conventions.",
@@ -154,7 +174,7 @@ const DEFAULT_CONFIG: NtoxConfig = {
 
     "## Memory and Profile",
     "You have access to the user's profile (name, expertise, preferences) and past conversation memories.",
-    "A memory file at .ntox/memory.md contains summaries of older conversations — read it when context is relevant.",
+    "A memory file at ~/.ntox/memory/memory.md contains summaries of older conversations — read it when context is relevant.",
     "Use remembered facts to personalize responses.",
     "When the user shares personal info (name, job, preferences), acknowledge it and the system will save it.",
     "Do NOT repeatedly ask the user who they are if you have their name in the profile context.",
@@ -180,7 +200,13 @@ const DEFAULT_CONFIG: NtoxConfig = {
   ].join("\n"),
   embeddingModel: "openai/text-embedding-3-small",
   memoryEnabled: true,
-  memoryRetrievalCount: 5,
+  memoryRetrievalCount: 20,
+  systemContextBudget: 6000,
+  contextCompilerEnabled: true,
+  predictionLlmEnabled: true,
+  modelCritiqueEnabled: true,
+  idleEnabled: true,
+  idleSelfPlay: false,
   metaStrategyEnabled: true,
   metaReflectionEnabled: false,
   metaMistakesEnabled: true,
@@ -196,11 +222,14 @@ const DEFAULT_CONFIG: NtoxConfig = {
   whatsappToken: "",
   whatsappPhoneNumberId: "",
   whatsappVerifyToken: "",
+  whatsappAppSecret: "",
   whatsappPort: 3001,
   dockerEnabled: false,
   webPort: 3000,
   webHost: "127.0.0.1",
   webAuthToken: "",
+  apiPort: 3100,
+  apiAuthToken: "",
   introEnabled: true,
   verboseCallbacks: false,
   defaultProfileId: "default",
@@ -227,6 +256,30 @@ export function getNtoxDir(): string {
 }
 
 export function loadConfig(): NtoxConfig {
+  const config = loadConfigRaw();
+  return process.env.NTOX_LITE === "1" ? applyLitePreset(config) : config;
+}
+
+function applyLitePreset(config: NtoxConfig): NtoxConfig {
+  return {
+    ...config,
+    cognitiveEnabled: false,
+    theoryEnabled: false,
+    metaStrategyEnabled: false,
+    metaReflectionEnabled: false,
+    metaMistakesEnabled: false,
+    introEnabled: false,
+    animationLevel: "off",
+  };
+}
+
+const LEGACY_XML_TOOL_PROMPT = /output EXACTLY this XML block|<\/?tool_call/i;
+
+export function hasLegacyToolPrompt(systemPrompt: string): boolean {
+  return LEGACY_XML_TOOL_PROMPT.test(systemPrompt);
+}
+
+function loadConfigRaw(): NtoxConfig {
   if (!existsSync(CONFIG_PATH)) {
     saveConfig(DEFAULT_CONFIG);
     return { ...DEFAULT_CONFIG };
@@ -235,6 +288,14 @@ export function loadConfig(): NtoxConfig {
     const raw = readFileSync(CONFIG_PATH, "utf-8");
     const parsed = JSON.parse(raw) as Partial<NtoxConfig>;
     const merged = normalizeConfig({ ...DEFAULT_CONFIG, ...parsed });
+    if (typeof parsed.systemPrompt === "string" && hasLegacyToolPrompt(parsed.systemPrompt)) {
+      merged.systemPrompt = DEFAULT_CONFIG.systemPrompt;
+      try {
+        saveConfig(merged);
+      } catch {
+        /* in-memory repair is enough */
+      }
+    }
     const validation = validateConfig(merged);
     if (!validation.valid) {
       console.error("[config] validation warnings:", validation.errors.join("; "));
@@ -251,12 +312,18 @@ export function normalizeConfig(config: NtoxConfig): NtoxConfig {
     Array.isArray(config.profiles) && config.profiles.length > 0 ? config.profiles : DEFAULT_CONFIG.profiles;
   const normalizedProfiles = profiles.map((profile) => {
     const workspaceRoot = resolve(profile.workspaceRoot || process.cwd());
+    const allowedTools =
+      profile.allowedTools.length > 0
+        ? profile.allowedTools.includes("checkpoint")
+          ? [...profile.allowedTools, ...["plan", "process"].filter((tool) => !profile.allowedTools.includes(tool))]
+          : profile.allowedTools
+        : DEFAULT_ALLOWED_TOOLS;
     return {
       ...profile,
       workspaceRoot,
       readRoots: profile.readRoots.length > 0 ? profile.readRoots.map((p) => resolve(p)) : [workspaceRoot],
       writeRoots: profile.writeRoots.length > 0 ? profile.writeRoots.map((p) => resolve(p)) : [workspaceRoot],
-      allowedTools: profile.allowedTools.length > 0 ? profile.allowedTools : DEFAULT_ALLOWED_TOOLS,
+      allowedTools,
     };
   });
   const defaultProfileId = normalizedProfiles.some((p) => p.id === config.defaultProfileId)

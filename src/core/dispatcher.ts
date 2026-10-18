@@ -1,8 +1,10 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { LLMClient } from "./llm.js";
+import { LLMClient, warnIfToolsUnsupported } from "./llm.js";
 import type { AgentConfig, AgentCallbacks } from "./agent.js";
 import { Agent } from "./agent.js";
+import { TokenFilter } from "./message-handler.js";
+import { createStreamingSanitizer } from "./guard.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { shellTool } from "../tools/shell.js";
 import { readTool, writeTool, globTool, lsTool, editTool } from "../tools/filesystem.js";
@@ -15,6 +17,8 @@ import { sttTool } from "../tools/stt.js";
 import { imageTool } from "../tools/image.js";
 import { subagentTool } from "../tools/subagent.js";
 import { checkpointTool } from "../tools/checkpoint.js";
+import { planTool } from "../tools/plan.js";
+import { processTool } from "../tools/process.js";
 import { browseTool } from "../tools/browse.js";
 import { jobTrackerTool } from "../tools/job-tracker.js";
 import { createProfileEvalTool } from "../tools/profile-eval.js";
@@ -37,10 +41,11 @@ import { AliveEngine } from "../alive/engine.js";
 import { NtoxAliveHostAdapters } from "../alive/host.js";
 import { JsonFileAliveStore } from "../alive/store.js";
 import { NtoxAliveBridge } from "../alive/ntox.js";
+import { Mind } from "../mind/mind.js";
 import type { NtoxConfig, CostUsage, WorkspaceProfile } from "../types/index.js";
 import type { SessionStore } from "../gateway/types.js";
 import { createPolicyRuntime, enforceToolPolicy, getDefaultProfile, type PolicyRuntime } from "./policy.js";
-import { getNtoxDir } from "./config.js";
+import { getNtoxDir, loadCachedModels } from "./config.js";
 
 export interface AgentInfra {
   llm: LLMClient;
@@ -62,6 +67,7 @@ export interface AgentInfra {
   policy: PolicyRuntime;
   alive?: NtoxAliveBridge;
   aliveHosts?: NtoxAliveHostAdapters;
+  mind: Mind;
 }
 
 export interface SharedInfra {
@@ -73,6 +79,7 @@ export interface SharedInfra {
   policy: PolicyRuntime;
   alive: NtoxAliveBridge;
   aliveHosts: NtoxAliveHostAdapters;
+  mind: Mind;
 }
 
 export interface SessionInfra {
@@ -99,6 +106,12 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
     config.apiBaseUrl,
     config.provider,
   );
+
+  try {
+    warnIfToolsUnsupported(loadCachedModels() ?? [], config.model);
+  } catch {
+    /* catalog cache unavailable */
+  }
 
   const selectedProfile = profile || getDefaultProfile(config.profiles, config.defaultProfileId);
   const runtimeProfile =
@@ -128,6 +141,8 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
     imageTool,
     subagentTool,
     checkpointTool,
+    planTool,
+    processTool,
     browseTool,
     jobTrackerTool,
     createProfileEvalTool(llm),
@@ -148,11 +163,15 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
     workspaceRoot: runtimeProfile.workspaceRoot,
   });
 
-  return { llm, tools, skillRegistry, skillExecutor, skillLibrary, policy, alive, aliveHosts };
+  const mind = new Mind();
+
+  return { llm, tools, skillRegistry, skillExecutor, skillLibrary, policy, alive, aliveHosts, mind };
 }
 
-export function createSessionInfra(shared: SharedInfra): SessionInfra {
+export function createSessionInfra(shared: SharedInfra, config?: NtoxConfig): SessionInfra {
   const analytics = new Analytics();
+  const cognitiveKernel = new CognitiveKernel(shared.skillRegistry);
+  if (config?.cognitiveEnabled) cognitiveKernel.setEnabled(true);
   return {
     memory: new MemoryStore(),
     userModel: new UserModel(),
@@ -164,13 +183,13 @@ export function createSessionInfra(shared: SharedInfra): SessionInfra {
     executive: new Executive(),
     intervention: new InterventionEngine(),
     disagreement: new DisagreementEngine(),
-    cognitiveKernel: new CognitiveKernel(shared.skillRegistry),
+    cognitiveKernel,
   };
 }
 
 export function createAgentInfra(config: NtoxConfig): AgentInfra {
   const shared = createSharedInfra(config);
-  const session = createSessionInfra(shared);
+  const session = createSessionInfra(shared, config);
   return { ...shared, ...session };
 }
 
@@ -199,12 +218,17 @@ export function createAgentConfig(
     cognitiveKernel: infra.cognitiveKernel,
     policy: infra.policy,
     alive: infra.alive,
+    mind: infra.mind,
     kernelEnabled: true,
     kernelBasePath: homedir(),
     sessionId,
     systemPrompt: config.systemPrompt,
     memoryEnabled: config.memoryEnabled,
     memoryRetrievalCount: config.memoryRetrievalCount,
+    systemContextBudget: config.systemContextBudget,
+    contextCompilerEnabled: config.contextCompilerEnabled,
+    predictionLlmEnabled: config.predictionLlmEnabled,
+    modelCritiqueEnabled: config.modelCritiqueEnabled,
     theoryEnabled: config.theoryEnabled,
     strategyEnabled: config.metaStrategyEnabled,
     mistakesEnabled: config.metaMistakesEnabled,
@@ -320,16 +344,27 @@ export interface MessageResult {
   error: string | null;
 }
 
-export async function runAgentMessage(agent: Agent, text: string, output: MessageOutput): Promise<MessageResult> {
+export async function runAgentMessage(
+  agent: Agent,
+  text: string,
+  output: MessageOutput,
+  signal?: AbortSignal,
+): Promise<MessageResult> {
   output.onStart?.();
   let response = "";
   const toolCalls: string[] = [];
+  const tokenFilter = new TokenFilter();
+  const sanitizer = createStreamingSanitizer();
 
   try {
     const callbacks: AgentCallbacks = {
       onToken: (token) => {
-        response += token;
-        output.onToken(token);
+        const filtered = tokenFilter.filter(token);
+        if (!filtered) return;
+        const safe = sanitizer.push(filtered);
+        if (!safe) return;
+        response += safe;
+        output.onToken(safe);
       },
       onToolCall: (name, args) => {
         toolCalls.push(name);
@@ -351,7 +386,7 @@ export async function runAgentMessage(agent: Agent, text: string, output: Messag
       onAliveAction: (action) => output.onAliveAction?.(action),
     };
 
-    const stream = agent.run(text, callbacks);
+    const stream = agent.run(text, callbacks, signal ? { signal } : {});
     for await (const _ of stream) {
       /* drain */
     }
@@ -359,6 +394,12 @@ export async function runAgentMessage(agent: Agent, text: string, output: Messag
     output.onEnd?.();
     const msg = e instanceof Error ? e.message : String(e);
     return { response: "", toolCalls, error: msg };
+  }
+
+  const tail = sanitizer.flush();
+  if (tail) {
+    response += tail;
+    output.onToken(tail);
   }
 
   output.onEnd?.();
@@ -423,6 +464,14 @@ export class GatewayOutput implements MessageOutput {
   }
   onStrategy(type: Parameters<NonNullable<AgentCallbacks["onStrategy"]>>[0]): void {
     this.externalOnEvent?.({ type: "strategy", strategy: type });
+  }
+  onUsage(usage: CostUsage): void {
+    this.externalOnEvent?.({
+      type: "usage",
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cost: usage.cost,
+    });
   }
   onCorrectionDetected(topicKey: string, correction: string): void {
     this.externalOnEvent?.({ type: "correction", topicKey, correction });

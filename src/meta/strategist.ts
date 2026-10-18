@@ -3,19 +3,16 @@ import type { QueryType } from "../types/index.js";
 const CODING_KEYWORDS = [
   "code",
   "function",
-  "class",
   "bug",
-  "error",
   "syntax",
   "compile",
   "debug",
-  "api",
   "npm",
   "python",
   "javascript",
   "typescript",
   "rust",
-  "go",
+  "golang",
   "java",
   "c++",
   "ruby",
@@ -23,26 +20,27 @@ const CODING_KEYWORDS = [
   "swift",
   "kotlin",
   "sql",
-  "query",
   "database",
   "algorithm",
   "data structure",
   "array",
-  "string",
-  "object",
   "variable",
   "async",
-  "promise",
   "callback",
   "loop",
-  "conditional",
   "import",
   "export",
-  "test",
-  "unit test",
   "refactor",
   "optimize",
   "performance",
+  "compiler",
+  "script",
+  "program",
+  "git",
+  "deploy",
+  "endpoint",
+  "regex",
+  "json",
 ];
 
 const FACTUAL_KEYWORDS = [
@@ -139,8 +137,10 @@ const PLANNING_KEYWORDS = [
 ];
 
 function countMatches(text: string, keywords: string[]): number {
-  const lower = text.toLowerCase();
-  return keywords.filter((kw) => lower.includes(kw)).length;
+  return keywords.filter((kw) => {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\b${escaped}(?:s|es|ing|ed)?\\b`, "i").test(text);
+  }).length;
 }
 
 export function classifyQuery(query: string): QueryType {

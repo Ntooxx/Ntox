@@ -93,6 +93,7 @@ function extractSnippets(html: string): string[] {
 
 export const searchTool: Tool = {
   name: "search",
+  parallelSafe: true,
   description:
     "Search the web for information. Use this when you need up-to-date information about a topic, product, person, or anything you're unsure about.",
   parameters: {

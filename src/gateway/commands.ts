@@ -1,4 +1,5 @@
 import type { NtoxAliveBridge } from "../alive/ntox.js";
+import { APPROVAL_SCOPES, SCOPE_TO_DECISION, type ApprovalDecision, type ApprovalScope } from "../tools/approval.js";
 
 type AliveSnapshot = ReturnType<NtoxAliveBridge["inspect"]>;
 
@@ -69,4 +70,77 @@ export function renderAliveStatus(snapshot: AliveSnapshot): string {
 export function recordDirectGatewayResponse(agent: GatewayTranscript, userText: string, response: string): void {
   agent.addMessage({ role: "user", content: userText });
   agent.addMessage({ role: "assistant", content: response });
+}
+
+export interface PendingApproval {
+  command: string;
+  prompt: string;
+}
+
+export type ApproveParse =
+  | { kind: "not-approve" }
+  | { kind: "invalid"; message: string }
+  | { kind: "approve"; scope: ApprovalScope; command: string | null };
+
+export const APPROVE_USAGE = "Usage: /approve <once|session|always|deny> <command>";
+
+export function parseApproveCommand(text: string): ApproveParse {
+  const trimmed = text.trim();
+  if (!/^\/approve(\s|$)/i.test(trimmed)) return { kind: "not-approve" };
+
+  const rest = trimmed.replace(/^\/approve\s*/i, "");
+  if (!rest) return { kind: "invalid", message: APPROVE_USAGE };
+
+  const splitAt = rest.search(/\s/);
+  const scopeToken = (splitAt === -1 ? rest : rest.slice(0, splitAt)).toLowerCase();
+  if (!APPROVAL_SCOPES.includes(scopeToken as ApprovalScope)) {
+    return { kind: "invalid", message: `Unknown scope "${scopeToken}". ${APPROVE_USAGE}` };
+  }
+
+  const command = splitAt === -1 ? "" : rest.slice(splitAt).trim();
+  return { kind: "approve", scope: scopeToken as ApprovalScope, command: command || null };
+}
+
+export interface ApprovalResolution {
+  ok: true;
+  scope: ApprovalScope;
+  decision: ApprovalDecision;
+  command: string;
+  retryPrompt: string | null;
+}
+
+export type ApprovalOutcome = ApprovalResolution | { ok: false; message: string };
+
+export function resolveApproval(
+  scope: ApprovalScope,
+  command: string | null,
+  pending?: PendingApproval,
+): ApprovalOutcome {
+  const target = (command ?? pending?.command ?? "").trim();
+  if (!target) return { ok: false, message: `Nothing waiting for approval. ${APPROVE_USAGE}` };
+
+  const decision = SCOPE_TO_DECISION[scope];
+  const matchesPending = pending !== undefined && pending.command === target;
+
+  return {
+    ok: true,
+    scope,
+    decision,
+    command: target,
+    retryPrompt: decision === "deny" || !matchesPending ? null : pending.prompt,
+  };
+}
+
+export function renderApprovalRequest(command: string): string {
+  return [
+    `Approval required: ${command}`,
+    "",
+    `Reply: /approve once ${command}`,
+    "Scopes: once | session | always | deny",
+  ].join("\n");
+}
+
+export function renderApprovalOutcome(resolution: ApprovalResolution): string {
+  if (resolution.decision === "deny") return `Denied: ${resolution.command}`;
+  return `Approved (${resolution.scope}): ${resolution.command}`;
 }

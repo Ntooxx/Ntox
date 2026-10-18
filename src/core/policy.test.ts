@@ -13,7 +13,7 @@ function profile(root: string): WorkspaceProfile {
     workspaceRoot: root,
     readRoots: [root],
     writeRoots: [root],
-    allowedTools: ["read", "write", "shell", "web_fetch", "web_read", "browse"],
+    allowedTools: ["read", "write", "shell", "process", "web_fetch", "web_read", "browse"],
     shellPolicy: "approval-required",
     networkPolicy: "fetch-only",
     autoCheckpoint: true,
@@ -84,6 +84,25 @@ describe("policy", () => {
       execute: async () => ({ success: true }),
     };
     const result = await enforceToolPolicy(tool, runtime).execute({ command: "npm test", workdir: tmpdir() });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("outside workspace");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("denies process workdir outside workspace", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime(profile(root));
+    const tool: Tool = {
+      name: "process",
+      description: "",
+      parameters: {},
+      execute: async () => ({ success: true }),
+    };
+    const result = await enforceToolPolicy(tool, runtime).execute({
+      action: "start",
+      command: "npm run dev",
+      workdir: tmpdir(),
+    });
     expect(result.success).toBe(false);
     expect(result.error).toContain("outside workspace");
     rmSync(root, { recursive: true, force: true });

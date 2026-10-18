@@ -3,6 +3,13 @@
 ## [0.1.0] - Unreleased
 
 ### Added
+- Milestone M5 (identity and proof): identity narrative with evidence-backed positions, revision log, and atomic persistence
+- Opinion formation: repeatedly observed mental-model entries promote to identity positions; outcomes strengthen or challenge them
+- Cognitive fingerprint profile (patterns, theories, strategy weights, skills, positions, voice) with a divergence score against a fresh instance
+- Meta-theory transfer experiments: distant-domain theory pairing, transfer hypotheses, held-out scoring, and a base-rate keep gate
+- Blind voice A/B harness: LLM judge or heuristic fallback, randomized presentation order, cumulative identification rate
+- ALIVE-1 benchmark: per-run records of learning slope, correction recurrence, transfer lift, calibration ECE, autonomy yield, identity divergence, cost per solved task, and NCB; weekly curve and M5 acceptance assessment
+- `/mind identity`, `/mind divergence`, `/mind transfer`, and `/mind alive` commands
 - Cognitive kernel with pattern compilation and 8D cognitive vector space
 - Theory memory: observations → patterns → theories → meta-theories
 - False-success self-correction for shallow reasoning

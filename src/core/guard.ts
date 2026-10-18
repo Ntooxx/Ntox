@@ -67,3 +67,102 @@ export function sanitizeInput(input: string): string {
     .replace(/\(system[^)]*\)/gi, "")
     .trim();
 }
+
+const PRIVATE_KEY_BEGIN = "-----BEGIN";
+const PRIVATE_KEY_END = /-----END [A-Z0-9 ]*PRIVATE KEY-----/;
+
+const SECRET_START_PATTERNS: RegExp[] = [
+  /sk-/,
+  /-----BEGIN/,
+  /Bearer\s/i,
+  /ghp_/,
+  /github_pat_/,
+  /glpat-/,
+  /\bAKIA[0-9A-Z]/,
+  /[0-9]{8,10}:/,
+  /api[_-]?key[=:]/i,
+  /(^|[^a-z])token[=:]/i,
+  /postgres(?:ql)?:\/\//i,
+  /mongodb(?:\+srv)?:\/\//i,
+];
+
+export class StreamingSanitizer {
+  private buf = "";
+  private emitted = 0;
+  private readonly hold: number;
+
+  constructor(hold: number = 64) {
+    this.hold = hold;
+  }
+
+  private firstSecretStart(from: number): number {
+    let earliest = -1;
+    for (const pattern of SECRET_START_PATTERNS) {
+      const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+      const re = new RegExp(pattern.source, flags);
+      re.lastIndex = from;
+      const match = re.exec(this.buf);
+      if (match && match.index >= from) {
+        if (earliest === -1 || match.index < earliest) earliest = match.index;
+      }
+    }
+    return earliest;
+  }
+
+  push(token: string): string {
+    if (!token) return "";
+    this.buf += token;
+    const safe = sanitizeOutput(this.buf);
+
+    const beginIdx = safe.indexOf(PRIVATE_KEY_BEGIN);
+    if (beginIdx >= 0 && !PRIVATE_KEY_END.test(safe.slice(beginIdx))) {
+      const maxEmit = beginIdx;
+      if (maxEmit <= this.emitted) return "";
+      const out = safe.slice(this.emitted, maxEmit);
+      this.emitted += out.length;
+      return out;
+    }
+
+    let limit = safe.length - this.hold;
+    const secretStart = this.firstSecretStart(this.emitted);
+    if (secretStart >= 0) limit = Math.min(limit, secretStart);
+
+    if (safe !== this.buf) {
+      let diverge = 0;
+      const minLen = Math.min(safe.length, this.buf.length);
+      while (diverge < minLen && safe[diverge] === this.buf[diverge]) diverge++;
+      limit = Math.min(limit, diverge);
+    }
+
+    if (limit <= this.emitted) return "";
+    const out = safe.slice(this.emitted, limit);
+    this.emitted += out.length;
+
+    if (this.buf.length > 8192) {
+      this.buf = safe;
+      this.emitted = Math.min(this.emitted, this.buf.length);
+    }
+    return out;
+  }
+
+  flush(): string {
+    let safe = sanitizeOutput(this.buf);
+    const beginIdx = safe.search(/-----BEGIN/);
+    if (beginIdx >= 0 && !PRIVATE_KEY_END.test(safe.slice(beginIdx))) {
+      safe = `${safe.slice(0, beginIdx)}[REDACTED]`;
+    }
+    const out = safe.slice(Math.min(this.emitted, safe.length));
+    this.buf = "";
+    this.emitted = 0;
+    return out;
+  }
+
+  reset(): void {
+    this.buf = "";
+    this.emitted = 0;
+  }
+}
+
+export function createStreamingSanitizer(hold?: number): StreamingSanitizer {
+  return new StreamingSanitizer(hold);
+}

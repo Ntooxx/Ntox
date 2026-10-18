@@ -1,4 +1,5 @@
 export { AliveEngine } from "./engine.js";
+export { extractOpenLoops, normalizeLoopGoal } from "./open-loops.js";
 export { InMemoryAliveStore, JsonFileAliveStore } from "./store.js";
 export type {
   AliveAction,

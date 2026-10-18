@@ -4,11 +4,23 @@ export interface ToolResult {
   error?: string;
 }
 
+export interface ToolAccess {
+  get(name: string): Tool | undefined;
+}
+
+export interface ToolContext {
+  sessionId?: string;
+  turnId?: string;
+  workspaceRoot?: string;
+  tools?: ToolAccess;
+}
+
 export interface Tool {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  execute: (args: Record<string, unknown>) => Promise<ToolResult>;
+  parallelSafe?: boolean;
+  execute: (args: Record<string, unknown>, context?: ToolContext) => Promise<ToolResult>;
 }
 
 export type ShellPolicy = "disabled" | "workspace" | "approval-required";
@@ -51,6 +63,7 @@ export interface ModelInfo {
     completion: number;
   };
   context_length: number;
+  supported_parameters?: string[];
 }
 
 export interface CostUsage {
@@ -82,6 +95,12 @@ export interface NtoxConfig {
   embeddingModel: string;
   memoryEnabled: boolean;
   memoryRetrievalCount: number;
+  systemContextBudget: number;
+  contextCompilerEnabled: boolean;
+  predictionLlmEnabled: boolean;
+  modelCritiqueEnabled: boolean;
+  idleEnabled: boolean;
+  idleSelfPlay: boolean;
   metaStrategyEnabled: boolean;
   metaReflectionEnabled: boolean;
   metaMistakesEnabled: boolean;
@@ -97,11 +116,14 @@ export interface NtoxConfig {
   whatsappToken: string;
   whatsappPhoneNumberId: string;
   whatsappVerifyToken: string;
+  whatsappAppSecret: string;
   whatsappPort: number;
   dockerEnabled: boolean;
   webPort: number;
   webHost: string;
   webAuthToken: string;
+  apiPort: number;
+  apiAuthToken: string;
   introEnabled: boolean;
   verboseCallbacks: boolean;
   defaultProfileId: string;
@@ -116,6 +138,7 @@ export interface Episode {
   assistantResponse: string;
   summary: string;
   embedding: number[];
+  embeddingModel?: string;
 }
 
 export interface MemoryQueryResult {
@@ -144,6 +167,7 @@ export interface DurableMemory {
   provenance: string;
   lastUsedAt?: number;
   contradictionCount: number;
+  sourceEpisodeIds?: string[];
   history: {
     text: string;
     timestamp: number;
@@ -170,6 +194,11 @@ export interface MistakeEntry {
   source: "user-correction" | "self-reflection";
   timestamp: number;
   fixed: boolean;
+  seq?: number;
+  recurrences?: number;
+  followUps?: number;
+  lastRecurrenceDistance?: number;
+  injections?: number;
 }
 
 export type Verbosity = "concise" | "balanced" | "detailed";
@@ -350,6 +379,7 @@ export interface ContextBudgetLedger {
   theory: number;
   mistakes: number;
   user: number;
+  plan: number;
   narrative: number;
   mentalModel: number;
   executive: number;
@@ -377,7 +407,10 @@ export interface AgentTurnTrace {
   policyDecisions: PolicyDecision[];
   checkpointIds: string[];
   contextBudget?: ContextBudgetLedger;
+  droppedContextSections?: string[];
   theoryReason?: string;
+  debateSkipped?: string;
+  modelCritique?: { gaps: number; retried: boolean };
   retries: number;
   blockedReason?: string;
   error?: string;

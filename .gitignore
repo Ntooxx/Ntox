@@ -4,12 +4,15 @@ data/
 ntox/
 .ntox_history
 !skills/
-experiments/
+experiments/*
+!experiments/alive/
+!experiments/benchmark/
 *.log
 shell-audit.log
 coverage/
 .env
 .ntox/
+.ntox-ci/
 .external/
 !skills/
 Horizon.md
@@ -17,3 +20,4 @@ Horizon.md
 /part*.js
 /ledger*.txt
 /*.html
+neon-game/

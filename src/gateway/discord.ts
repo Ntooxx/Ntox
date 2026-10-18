@@ -44,6 +44,7 @@ async function apiCall(
   path: string,
   method: string = "GET",
   body?: Record<string, unknown>,
+  retryCount = 0,
 ): Promise<Response> {
   await rateLimit.waitIfNeeded();
   const res = await fetch(`${DISCORD_API}${path}`, {
@@ -55,11 +56,11 @@ async function apiCall(
     body: body ? JSON.stringify(body) : undefined,
   });
   rateLimit.update(res.headers);
-  if (res.status === 429) {
+  if (res.status === 429 && retryCount < 5) {
     const retryAfter = parseInt(res.headers.get("retry-after") || "1", 10) * 1000;
     console.error(`[discord] 429 rate limited, retrying after ${retryAfter}ms`);
     await new Promise((r) => setTimeout(r, retryAfter));
-    return apiCall(token, path, method, body);
+    return apiCall(token, path, method, body, retryCount + 1);
   }
   return res;
 }

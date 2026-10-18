@@ -1,11 +1,39 @@
 import { describe, it, expect } from "vitest";
-import { shellTool, validateShellCommand } from "./shell.js";
+import { shellTool, validateShellCommand, detectRmRecursiveForce } from "./shell.js";
 
 describe("shellTool safety", () => {
   it("blocks rm -rf /", async () => {
     const r = await shellTool.execute({ command: "rm -rf /" });
     expect(r.success).toBe(false);
     expect(r.error).toContain("blocked");
+  });
+
+  it("blocks split rm -r -f flags", async () => {
+    const r = await shellTool.execute({ command: "rm -r -f /tmp/data" });
+    expect(r.success).toBe(false);
+    expect(r.error).toContain("blocked");
+    expect(r.error).toContain("recursive+force");
+  });
+
+  it("blocks rm -fr flag order", async () => {
+    const r = await shellTool.execute({ command: "rm -fr ./build" });
+    expect(r.success).toBe(false);
+    expect(r.error).toContain("blocked");
+  });
+
+  it("blocks rm with long flags split across tokens", async () => {
+    const r = await shellTool.execute({ command: "rm --recursive --force ./dist" });
+    expect(r.success).toBe(false);
+    expect(r.error).toContain("blocked");
+  });
+
+  it("does not flag rm --force alone as recursive", () => {
+    expect(detectRmRecursiveForce("rm --force ./single-file")).toBe(false);
+    expect(detectRmRecursiveForce("rm -f ./single-file")).toBe(false);
+  });
+
+  it("allows plain rm -r without force", () => {
+    expect(detectRmRecursiveForce("rm -r ./empty-dir")).toBe(false);
   });
 
   it("blocks curl|sh pipe", async () => {

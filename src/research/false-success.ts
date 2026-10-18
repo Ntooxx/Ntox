@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { CognitiveTrace, ThinkingMetrics } from "../types/index.js";
+import { CognitiveTrace, CritiqueResult, ThinkingMetrics } from "../types/index.js";
 import { NTOX_DIR } from "../core/config.js";
 
 interface FalseSuccessRecord {
@@ -96,30 +96,39 @@ export function detectFalseSuccess(trace: CognitiveTrace, metrics: ThinkingMetri
   return null;
 }
 
-export function checkForSurfaceReasoning(trace: CognitiveTrace): {
+export function checkForSurfaceReasoning(
+  trace: CognitiveTrace,
+  critique?: CritiqueResult,
+): {
   isSurface: boolean;
   surfaceScore: number;
   depthScore: number;
   details: string[];
 } {
-  const text = (trace.finalAnswer + " " + trace.problemRepresentation + " " + trace.selfCritique).toLowerCase();
-  const surfaceCount = SURFACE_SIGNALS.filter((s) => text.includes(s)).length;
-  const depthCount = DEPTH_SIGNALS.filter((d) => text.includes(d)).length;
-  const total = surfaceCount + depthCount;
-  if (total === 0) return { isSurface: false, surfaceScore: 0, depthScore: 0, details: [] };
-  const ratio = total > 0 ? surfaceCount / total : 1;
   const details: string[] = [];
-  if (ratio > 0.7) details.push(`High surface-to-depth ratio: ${Math.round(ratio * 100)}% surface connectors`);
-  if (surfaceCount > depthCount * 2 && depthCount < 2)
-    details.push("Answer flows from conclusion to conclusion without mechanism");
+
+  if (critique) {
+    const avg = (critique.completeness + critique.accuracy) / 2;
+    const surfaceScore = Math.round((1 - avg) * 10) / 10;
+    const depthScore = Math.round(avg * 10) / 10;
+    if (critique.completeness < 0.4) {
+      details.push(`Low completeness score from critic: ${critique.completeness.toFixed(2)}`);
+    }
+    if (critique.accuracy < 0.4) {
+      details.push(`Low accuracy score from critic: ${critique.accuracy.toFixed(2)}`);
+    }
+    details.push(...critique.gaps);
+    return {
+      isSurface: critique.completeness < 0.4 || critique.accuracy < 0.4,
+      surfaceScore,
+      depthScore,
+      details,
+    };
+  }
+
   if (trace.selfCritique.length < 30) details.push("Self-critique absent or trivial");
   if (trace.assumptions.length === 0) details.push("No assumptions stated — reasoning may be implicit");
-  return {
-    isSurface: ratio > 0.7 || (surfaceCount > depthCount * 2 && depthCount < 2),
-    surfaceScore: Math.round(surfaceCount * 10) / 10,
-    depthScore: Math.round(depthCount * 10) / 10,
-    details,
-  };
+  return { isSurface: false, surfaceScore: 0, depthScore: 0, details };
 }
 
 export function getAllFalseSuccesses(): FalseSuccessRecord[] {

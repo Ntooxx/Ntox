@@ -58,3 +58,29 @@ export function renderFileChanges(changesToRender: FileChange[], cwd = process.c
   }
   return out.join("\n").trimEnd();
 }
+
+export interface DiffLine {
+  type: "del" | "add" | "meta";
+  text: string;
+}
+
+export interface StructuredFileChange {
+  path: string;
+  action: "write" | "edit" | "rollback";
+  timestamp: number;
+  lines: DiffLine[];
+}
+
+export function diffFileChange(change: FileChange): StructuredFileChange {
+  const lines: DiffLine[] = lineDiff(change.before, change.after).map((line) => {
+    if (line.startsWith(" ...")) return { type: "meta", text: "..." };
+    if (line.startsWith("-")) return { type: "del", text: line.slice(1) };
+    if (line.startsWith("+")) return { type: "add", text: line.slice(1) };
+    return { type: "meta", text: line };
+  });
+  return { path: change.path, action: change.action, timestamp: change.timestamp, lines };
+}
+
+export function getStructuredFileChanges(timestamp: number): StructuredFileChange[] {
+  return getFileChangesSince(timestamp).map(diffFileChange);
+}

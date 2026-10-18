@@ -10,36 +10,31 @@ import type {
   ToolResult,
   AgentTurnTrace,
 } from "../types/index.js";
+import type { Briefing } from "../meta/briefing.js";
 import { getCommandGroups } from "./commands.js";
+import {
+  accents,
+  gradient,
+  hintLine,
+  metaLine,
+  paint,
+  palette,
+  panel,
+  pill,
+  stripAnsi,
+  termWidth,
+  dimRgb,
+} from "./theme.js";
 
-export function termWidth(): number {
-  return Math.min(process.stdout.columns || 80, 120);
-}
+export { termWidth } from "./theme.js";
 
 function div(n = -1): string {
   const w = n > 0 ? n : termWidth();
-  return chalk.dim("\u2500".repeat(w));
+  return paint(dimRgb(palette.faint, 0.9), "━".repeat(w));
 }
 
 export function renderPanel(title: string, content: string[], width?: number): string {
-  const w = width ?? termWidth();
-  const inner = w - 4;
-  const top = title
-    ? `\u250c ${chalk.bold(title)} ${chalk.dim("\u2500".repeat(Math.max(0, inner - title.length - 2)))} \u2510`
-    : `\u250c ${chalk.dim("\u2500".repeat(inner))} \u2510`;
-  const lines = [chalk.dim(top)];
-  for (const line of content) {
-    const trimmed = line.length > inner ? line.slice(0, inner - 1) + "\u2026" : line;
-    const padding = inner - trimmed.length;
-    lines.push(`${chalk.dim("\u2502")} ${trimmed}${" ".repeat(padding)} ${chalk.dim("\u2502")}`);
-  }
-  const bottom = `\u2514 ${chalk.dim("\u2500".repeat(inner))} \u2518`;
-  lines.push(chalk.dim(bottom));
-  return lines.join("\n");
-}
-
-function boxed(content: string, inner: number): string {
-  return `${chalk.dim("\u2502")} ${content}${" ".repeat(Math.max(0, inner - content.length))} ${chalk.dim("\u2502")}`;
+  return panel(title, content, width !== undefined ? { width } : {});
 }
 
 export function renderHeaderBar(
@@ -47,29 +42,25 @@ export function renderHeaderBar(
   providerLabel?: string,
   extra?: { ctxPct?: number; memoryCount?: number; sessionCost?: number },
 ): string {
-  const model = (modelName.split("/").pop() || modelName).slice(0, 20);
-  const prov = (providerLabel || "openrouter").slice(0, 14);
-  const inner = termWidth() - 4;
-  const parts: string[] = [`${chalk.cyan("\u25B6 NTOX")}`];
-  parts.push(chalk.dim(model));
-  parts.push(chalk.dim(prov));
+  const model = (modelName.split("/").pop() || modelName).slice(0, 28);
+  const prov = (providerLabel || "openrouter").slice(0, 16);
+  const parts: string[] = [];
+  parts.push(pill("model", model, (s) => accents.ink(s)));
+  parts.push(pill("via", prov, (s) => accents.title(s)));
   if (extra?.ctxPct !== undefined) {
-    const ctxColor = extra.ctxPct > 80 ? chalk.red : extra.ctxPct > 50 ? chalk.yellow : chalk.dim;
-    parts.push(`${chalk.dim("ctx")} ${ctxColor(`${extra.ctxPct.toFixed(0)}%`)}`);
+    const ctxColor =
+      extra.ctxPct > 80 ? accents.bad : extra.ctxPct > 60 ? accents.warn : (s: string) => accents.soft(s);
+    parts.push(pill("ctx", `${extra.ctxPct.toFixed(0)}%`, ctxColor));
   }
   if (extra?.memoryCount !== undefined) {
-    parts.push(`${chalk.dim("mem")} ${chalk.cyan(String(extra.memoryCount))}`);
+    parts.push(pill("mem", String(extra.memoryCount), (s) => accents.violet(s)));
   }
   if (extra?.sessionCost !== undefined && extra.sessionCost > 0) {
-    parts.push(chalk.yellow(formatCost(extra.sessionCost)));
+    parts.push(accents.gold(formatCost(extra.sessionCost)));
   }
-  const content = parts.join(` ${chalk.dim("\u2502")} `);
-  const trimmed = content.length > inner ? content.slice(0, inner - 1) + "\u2026" : content;
-  return [
-    chalk.dim(`\u250c ${"\u2501".repeat(inner)} \u2510`),
-    boxed(trimmed, inner),
-    chalk.dim(`\u2514 ${"\u2501".repeat(inner)} \u2518`),
-  ].join("\n");
+  const brand = gradient(" NTOX ", palette.accent, palette.violet);
+  const body = metaLine([brand, ...parts]);
+  return panel("", [body], { accent: palette.accent });
 }
 
 export function renderStatusBar(
@@ -77,40 +68,37 @@ export function renderStatusBar(
   trace?: AgentTurnTrace | null,
   extra?: { memoryCount?: number; skillsCount?: number; mistakeCount?: number },
 ): string {
-  const inner = termWidth() - 4;
   const parts: string[] = [];
-  parts.push(chalk.dim(`in ${formatTokenCount(usage.inputTokens)}`));
-  parts.push(chalk.dim(`out ${formatTokenCount(usage.outputTokens)}`));
+  parts.push(pill("in", formatTokenCount(usage.inputTokens), (s) => accents.soft(s)));
+  parts.push(pill("out", formatTokenCount(usage.outputTokens), (s) => accents.ink(s)));
   const cost = (usage.inputTokens / 1000) * 0.00015 + (usage.outputTokens / 1000) * 0.0006;
-  parts.push(chalk.yellow(formatCost(cost)));
+  parts.push(accents.gold(formatCost(cost)));
+  if (trace?.completedAt) {
+    const secs = ((trace.completedAt - trace.startedAt) / 1000).toFixed(1);
+    parts.push(accents.soft(`${secs}s`));
+  }
   if (trace) {
     const tools = trace.toolCalls.length;
-    if (tools > 0) parts.push(`${chalk.dim("tools")} ${chalk.cyan(String(tools))}`);
+    if (tools > 0) parts.push(pill("tools", String(tools), (s) => accents.title(s)));
     const files = trace.fileChanges?.length || 0;
-    if (files > 0) parts.push(`${chalk.dim("files")} ${chalk.cyan(String(files))}`);
+    if (files > 0) parts.push(pill("files", String(files), (s) => accents.violet(s)));
   }
-  if (extra?.memoryCount !== undefined) parts.push(`${chalk.dim("mem")} ${chalk.cyan(String(extra.memoryCount))}`);
-  if (extra?.skillsCount !== undefined) parts.push(`${chalk.dim("skills")} ${chalk.cyan(String(extra.skillsCount))}`);
-  const content = parts.join(` ${chalk.dim("\u2502")} `);
-  const trimmed = content.length > inner ? content.slice(0, inner - 1) + "\u2026" : content;
-  return [
-    chalk.dim(`\u250c ${"\u2500".repeat(inner)} \u2510`),
-    boxed(trimmed, inner),
-    chalk.dim(`\u2514 ${"\u2500".repeat(inner)} \u2518`),
-  ].join("\n");
+  if (extra?.memoryCount !== undefined) parts.push(pill("mem", String(extra.memoryCount), (s) => accents.soft(s)));
+  if (extra?.skillsCount !== undefined) parts.push(pill("skills", String(extra.skillsCount), (s) => accents.soft(s)));
+  return panel("", [metaLine(parts)], { accent: dimRgb(palette.accent, 0.55) });
 }
 
 export function renderUserPrompt(msgCount: number, modelName?: string): string {
   const model = modelName ? chalk.dim(` ${modelName.split("/").pop() || ""}`) : "";
-  return `${chalk.green("\u25B6")}${chalk.dim(`[${msgCount}]`)}${model} ${chalk.dim("\u25B8")} `;
+  return `${accents.title("❯")} ${chalk.dim(`[${msgCount}]`)}${model} ${accents.soft("›")} `;
 }
 
 export function renderAssistantLabel(): string {
-  return chalk.hex("#00ccff")("\u2502") + " ";
+  return paint(palette.accent, "│") + " ";
 }
 
 export function renderUserLabel(): string {
-  return chalk.green("\u25B6") + " ";
+  return accents.good("›") + " ";
 }
 
 export function renderDivider(): string {
@@ -118,8 +106,8 @@ export function renderDivider(): string {
 }
 
 export function renderInlineTag(tag: string, color?: (s: string) => string): string {
-  const c = color || chalk.dim;
-  return `\n${chalk.dim("\u2502")} ${c("\u2500")} ${c(tag)} ${chalk.dim("\u2502")}`;
+  const c = color || ((s: string) => accents.soft(s));
+  return `\n${paint(dimRgb(palette.accent, 0.65), "│")} ${c("·")} ${c(tag)}`;
 }
 
 export function renderWelcome(modelName: string, providerLabel?: string): string {
@@ -131,14 +119,15 @@ export function renderHelp(): string {
 
   const cols: string[] = [];
   for (const g of groups) {
-    let s = `  ${chalk.bold(g.title)}\n`;
+    let s = `  ${chalk.bold(accents.title(g.title))}\n`;
     for (const [cmd, desc] of g.items) {
       s += `    ${chalk.cyan(cmd.padEnd(16))} ${chalk.dim(desc)}\n`;
     }
     cols.push(s);
   }
   return [
-    chalk.bold("\n  ntox quick guide"),
+    "",
+    `  ${gradient("ntox quick guide", palette.accent, palette.violet)}`,
     "",
     `  ${chalk.cyan("chat normally")} and let Ntox decide when tools help`,
     `  use ${chalk.cyan("/last")} after a busy turn, ${chalk.cyan("/retry")} when an answer is off, ${chalk.cyan("/rollback")} after bad file edits`,
@@ -157,7 +146,7 @@ export function renderTips(): string {
     ["Tune noise", "Use /ui minimal for quiet, /ui normal for daily use, /ui debug for internals."],
     ["Make memory explicit", "Use /remember preference <text> for facts you want Ntox to keep."],
   ];
-  const lines = [chalk.bold("\n  practical Ntox tips"), ""];
+  const lines = ["", `  ${gradient("practical Ntox tips", palette.accent, palette.violet)}`, ""];
   for (const [title, body] of tips) {
     lines.push(`  ${chalk.cyan(title.padEnd(15))} ${chalk.dim(body)}`);
   }
@@ -186,12 +175,12 @@ export function renderTurnSummary(trace: AgentTurnTrace): string {
 
 export function renderLastTurn(trace: AgentTurnTrace | null): string {
   if (!trace) return chalk.dim("\nNo last turn yet.");
-  const lines = [chalk.bold("\nLast turn"), `  ${renderTurnSummary(trace)}`];
+  const lines = ["", `  ${gradient("last turn", palette.accent, palette.violet)}`, `  ${renderTurnSummary(trace)}`];
   if (trace.toolCalls.length > 0) {
     const calls = trace.toolCalls.map((call) => {
-      const status = call.success === false ? chalk.red("fail") : call.success ? chalk.green("ok") : chalk.dim("?");
+      const status = call.success === false ? accents.bad("fail") : call.success ? accents.good("ok") : chalk.dim("?");
       const duration = call.durationMs !== undefined ? chalk.dim(` ${call.durationMs}ms`) : "";
-      return `${call.name} ${status}${duration}`;
+      return `${chalk.cyan(call.name)} ${status}${duration}`;
     });
     lines.push(`  ${chalk.dim("tools")}     ${calls.join(", ")}`);
   }
@@ -201,7 +190,7 @@ export function renderLastTurn(trace: AgentTurnTrace | null): string {
   }
   if (trace.checkpointIds.length > 0) lines.push(`  ${chalk.dim("recover")}   /rollback ${trace.checkpointIds.at(-1)}`);
   if (trace.error) lines.push(`  ${chalk.dim("error")}     ${trace.error}`);
-  lines.push(chalk.dim("  /trace for details  /diff for file changes  /retry to rerun"));
+  lines.push(hintLine("  /trace for details  /diff for file changes  /retry to rerun"));
   return lines.join("\n");
 }
 
@@ -219,19 +208,19 @@ export function renderConfig(
   uiMode?: string,
 ): string {
   const m: string[] = [];
-  m.push(`${chalk.dim("provider")}    ${chalk.cyan(provider || "openrouter")}`);
-  m.push(`${chalk.dim("model")}       ${chalk.yellow(modelId)}`);
+  m.push(`${chalk.dim("provider")}    ${accents.title(provider || "openrouter")}`);
+  m.push(`${chalk.dim("model")}       ${accents.gold(modelId)}`);
   m.push(`${chalk.dim("max tokens")}  ${maxTokens}`);
   m.push(`${chalk.dim("temperature")} ${temperature}`);
   if (contextLength) m.push(`${chalk.dim("context")}     ${formatTokenCount(contextLength)}`);
   if (embeddingModel) m.push(`${chalk.dim("embedding")}   ${embeddingModel}`);
   if (apiBaseUrl) m.push(`${chalk.dim("base url")}    ${chalk.dim(apiBaseUrl)}`);
   if (memoryEnabled !== undefined)
-    m.push(`${chalk.dim("memory")}      ${memoryEnabled ? chalk.green("on") : chalk.dim("off")}`);
+    m.push(`${chalk.dim("memory")}      ${memoryEnabled ? accents.good("on") : chalk.dim("off")}`);
   if (memoryCount !== undefined) m.push(`${chalk.dim("episodes")}    ${memoryCount}`);
-  if (uiMode) m.push(`${chalk.dim("ui")}          ${chalk.cyan(uiMode)}`);
-  if (telegramToken) m.push(`${chalk.dim("telegram")}    ${chalk.green("set")}`);
-  return `\n${chalk.bold("config")}\n  ${m.join("\n  ")}\n`;
+  if (uiMode) m.push(`${chalk.dim("ui")}          ${accents.title(uiMode)}`);
+  if (telegramToken) m.push(`${chalk.dim("telegram")}    ${accents.good("set")}`);
+  return `\n${gradient("config", palette.accent, palette.violet)}\n  ${m.join("\n  ")}\n`;
 }
 
 export function renderCosts(
@@ -244,13 +233,13 @@ export function renderCosts(
   embeddingFallbacks = 0,
 ): string {
   const lines = [
-    `${chalk.bold("costs")}`,
-    `  ${chalk.dim("session")}   in ${formatTokenCount(inT)}  out ${formatTokenCount(outT)}  ${chalk.yellow(formatCost(cost))}`,
-    `  ${chalk.dim("lifetime")}  in ${formatTokenCount(totalIn)}  out ${formatTokenCount(totalOut)}  ${chalk.yellow(formatCost(totalCost))}`,
+    `${gradient("costs", palette.accent, palette.violet)}`,
+    `  ${chalk.dim("session")}   in ${formatTokenCount(inT)}  out ${formatTokenCount(outT)}  ${accents.gold(formatCost(cost))}`,
+    `  ${chalk.dim("lifetime")}  in ${formatTokenCount(totalIn)}  out ${formatTokenCount(totalOut)}  ${accents.gold(formatCost(totalCost))}`,
   ];
   if (embeddingFallbacks > 0) {
     lines.push(
-      `  ${chalk.dim("embedding")} ${chalk.yellow(`API unavailable — ${embeddingFallbacks} fallback${embeddingFallbacks === 1 ? "" : "s"} to local hashing`)}`,
+      `  ${chalk.dim("embedding")} ${accents.warn(`API unavailable — ${embeddingFallbacks} fallback${embeddingFallbacks === 1 ? "" : "s"} to local hashing`)}`,
     );
   }
   return lines.join("\n");
@@ -268,7 +257,7 @@ export function renderUsageBar(
   const parts: string[] = [];
   parts.push(chalk.dim(`in ${formatTokenCount(usage.inputTokens)}`));
   parts.push(chalk.dim(`out ${formatTokenCount(usage.outputTokens)}`));
-  parts.push(chalk.yellow(formatCost(tc)));
+  parts.push(accents.gold(formatCost(tc)));
   if (extraContext) {
     const pct = (extraContext.used / extraContext.limit) * 100;
     parts.push(chalk.dim(`ctx ${pct.toFixed(0)}%`));
@@ -278,7 +267,7 @@ export function renderUsageBar(
 }
 
 export function renderModelsMenu(models: { id: string; name: string }[], current: string): string {
-  const lines: string[] = [`${chalk.bold(`models (${models.length})`)}`];
+  const lines: string[] = ["", `${gradient(`models (${models.length})`, palette.accent, palette.violet)}`];
   const grouped = new Map<string, typeof models>();
   for (const m of models) {
     const p = m.id.split("/")[0] || "other";
@@ -286,15 +275,15 @@ export function renderModelsMenu(models: { id: string; name: string }[], current
     grouped.get(p)!.push(m);
   }
   for (const [p, list] of grouped) {
-    lines.push(`  ${chalk.cyan(p.toUpperCase())}`);
+    lines.push(`  ${accents.title(p.toUpperCase())}`);
     for (let i = 0; i < Math.min(list.length, 20); i++) {
       const m = list[i];
-      const active = m.id === current ? chalk.green(" *") : "";
-      lines.push(`  ${chalk.dim(String(models.indexOf(m) + 1).padStart(2))}. ${chalk.yellow(m.name)}${active}`);
+      const active = m.id === current ? accents.good(" ◂ active") : "";
+      lines.push(`  ${chalk.dim(String(models.indexOf(m) + 1).padStart(2))}. ${accents.gold(m.name)}${active}`);
     }
     if (list.length > 20) lines.push(chalk.dim(`  ... +${list.length - 20} more`));
   }
-  lines.push(chalk.dim(`  /model <number> or /model <name> to switch  /model refresh to update OpenRouter models`));
+  lines.push(hintLine(`  /model <number> or /model <name> to switch  /model refresh to update OpenRouter models`));
   return lines.join("\n");
 }
 
@@ -309,12 +298,13 @@ export function renderMemoryStats(stats: MemoryStats): string {
   const from = stats.oldestTimestamp ? new Date(stats.oldestTimestamp).toISOString().slice(0, 10) : "n/a";
   const to = stats.newestTimestamp ? new Date(stats.newestTimestamp).toISOString().slice(0, 10) : "n/a";
   return [
-    `${chalk.bold("memory")}`,
-    `  ${chalk.dim("episodes")} ${chalk.cyan(String(stats.totalEpisodes))}`,
+    "",
+    `${gradient("memory", palette.accent, palette.violet)}`,
+    `  ${chalk.dim("episodes")} ${accents.title(String(stats.totalEpisodes))}`,
     `  ${chalk.dim("sessions")} ${stats.totalSessions}`,
     `  ${chalk.dim("range")}    ${from}..${to}`,
     `  ${chalk.dim("size")}     ${(stats.memorySizeBytes / 1024).toFixed(1)} KB`,
-    `  ${chalk.dim("/memory search <q>  /memory last <n>  /memory clear")}`,
+    hintLine(`  /memory search <q>  /memory last <n>  /memory clear`),
   ].join("\n");
 }
 
@@ -329,20 +319,20 @@ export function renderMetaStats(
   lastReflection: Reflection | null,
   mistakeStats: { total: number; bySource: Record<string, number> },
 ): string {
-  const m: string[] = [`${chalk.bold("meta")}`];
-  m.push(`  ${chalk.dim("strategy")}   ${metaConfig.strategyEnabled ? chalk.green("on") : chalk.dim("off")}`);
-  m.push(`  ${chalk.dim("reflection")} ${metaConfig.reflectionEnabled ? chalk.green("on") : chalk.dim("off")}`);
+  const m: string[] = ["", `${gradient("meta", palette.accent, palette.violet)}`];
+  m.push(`  ${chalk.dim("strategy")}   ${metaConfig.strategyEnabled ? accents.good("on") : chalk.dim("off")}`);
+  m.push(`  ${chalk.dim("reflection")} ${metaConfig.reflectionEnabled ? accents.good("on") : chalk.dim("off")}`);
   m.push(
-    `  ${chalk.dim("mistakes")}   ${metaConfig.mistakesEnabled ? chalk.green("on") : chalk.dim("off")} (${mistakeStats.total})`,
+    `  ${chalk.dim("mistakes")}   ${metaConfig.mistakesEnabled ? accents.good("on") : chalk.dim("off")} (${mistakeStats.total})`,
   );
   m.push(`  ${chalk.dim("confidence")} ${(metaConfig.minConfidenceThreshold * 100).toFixed(0)}% min`);
-  if (lastStrategy) m.push(`  ${chalk.dim("strategy")}   ${chalk.magenta(lastStrategy)}`);
+  if (lastStrategy) m.push(`  ${chalk.dim("strategy")}   ${accents.violet(lastStrategy)}`);
   if (lastReflection) {
     const c = lastReflection.confidence;
-    const color = c >= 0.7 ? chalk.green : c >= 0.4 ? chalk.yellow : chalk.red;
+    const color = c >= 0.7 ? accents.good : c >= 0.4 ? accents.warn : accents.bad;
     m.push(`  ${chalk.dim("conf")}       ${color((c * 100).toFixed(0) + "%")}`);
     if (lastReflection.knowledgeGaps.length) {
-      m.push(`  ${chalk.dim("gaps")}       ${chalk.yellow(lastReflection.knowledgeGaps.join(", "))}`);
+      m.push(`  ${chalk.dim("gaps")}       ${accents.warn(lastReflection.knowledgeGaps.join(", "))}`);
     }
   }
   return m.join("\n");
@@ -350,19 +340,22 @@ export function renderMetaStats(
 
 export function renderMistakeList(mistakes: MistakeEntry[]): string {
   if (mistakes.length === 0) return chalk.dim("  no mistakes logged");
-  const m: string[] = [`${chalk.bold(`mistakes (${mistakes.length})`)}`];
+  const m: string[] = ["", `${gradient(`mistakes (${mistakes.length})`, palette.accent, palette.violet)}`];
   for (const mk of mistakes) {
     const date = new Date(mk.timestamp).toISOString().slice(0, 10);
-    const src = mk.source === "user-correction" ? chalk.green("user") : chalk.blue("self");
+    const src = mk.source === "user-correction" ? accents.good("user") : accents.title("self");
     m.push(`  ${chalk.cyan(mk.id)} ${chalk.dim(date)} ${src}  ${chalk.dim(mk.topicKey)}`);
   }
   return m.join("\n");
 }
 
 export function renderSkillsMenu(domains: string[], total: number): string {
-  const m: string[] = [`${chalk.bold(`skill library (${total} skills, ${domains.length} domains)`)}`];
+  const m: string[] = [
+    "",
+    `${gradient(`skill library (${total} skills, ${domains.length} domains)`, palette.accent, palette.violet)}`,
+  ];
   for (const d of domains) m.push(`  ${chalk.cyan(d)}`);
-  m.push(chalk.dim(`  /menu skills <domain> to browse`));
+  m.push(hintLine(`  /menu skills <domain> to browse`));
   return m.join("\n");
 }
 
@@ -370,22 +363,21 @@ export function renderDomainSkills(
   domain: string,
   skills: { name: string; importance: number; description: string; voices: string[] }[],
 ): string {
-  const m: string[] = [`${chalk.bold(`${domain} (${skills.length})`)}`];
+  const m: string[] = ["", `${gradient(`${domain} (${skills.length})`, palette.accent, palette.violet)}`];
   for (let i = 0; i < skills.length; i++) {
     const s = skills[i];
     const voices = s.voices.length > 0 ? chalk.dim(` [${s.voices.join(", ")}]`) : "";
-    m.push(`  ${chalk.cyan(String(i + 1))}. ${s.name} ${chalk.yellow(String(s.importance))}/10${voices}`);
+    m.push(`  ${chalk.cyan(String(i + 1))}. ${s.name} ${accents.gold(String(s.importance))}/10${voices}`);
     m.push(`     ${chalk.dim(s.description.slice(0, 80))}`);
   }
-  m.push(chalk.dim(`  /skill load <number>  or  /skill load <name>`));
+  m.push(hintLine(`  /skill load <number>  or  /skill load <name>`));
   return m.join("\n");
 }
 
 export function renderToolPill(name: string, status: "running" | "done" | "failed"): string {
-  const icon =
-    status === "running" ? chalk.dim("\u25F7") : status === "done" ? chalk.green("\u2713") : chalk.red("\u2717");
-  const color = status === "running" ? chalk.dim : status === "done" ? chalk.green : chalk.red;
-  return `${chalk.dim("tool:")} ${color(name)} ${icon}`;
+  const icon = status === "running" ? accents.soft("◌") : status === "done" ? accents.good("✓") : accents.bad("✗");
+  const color = status === "running" ? (s: string) => accents.soft(s) : status === "done" ? accents.good : accents.bad;
+  return `${accents.soft("tool")} ${accents.soft("·")} ${color(name)} ${icon}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -396,7 +388,7 @@ function oneLine(value: unknown, max = 120): string {
   const text = String(value ?? "")
     .replace(/\s+/g, " ")
     .trim();
-  return text.length > max ? `${text.slice(0, max - 1)}...` : text;
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 function checkpointSuffix(data: Record<string, unknown>): string {
@@ -417,7 +409,7 @@ export function summarizeToolResult(name: string, result: ToolResult): string {
     const title = oneLine(data.title, 70);
     const method = oneLine(data.method || (Array.isArray(data.steps) ? asRecord(data.steps.at(-1)).method : ""), 20);
     const diagnostics = Array.isArray(data.diagnostics) ? data.diagnostics.map(String).slice(0, 2).join(", ") : "";
-    return [method, title || oneLine(data.url, 70), diagnostics ? chalk.yellow(diagnostics) : ""]
+    return [method, title || oneLine(data.url, 70), diagnostics ? accents.warn(diagnostics) : ""]
       .filter(Boolean)
       .join(" ");
   }
@@ -431,18 +423,17 @@ export function summarizeToolResult(name: string, result: ToolResult): string {
 }
 
 export function renderToolEvent(name: string, result: ToolResult, elapsedMs?: number): string {
-  const icon = result.success ? chalk.green("\u2713") : chalk.red("\u2717");
+  const icon = result.success ? accents.good("✓") : accents.bad("✗");
   const elapsed = elapsedMs !== undefined ? chalk.dim(` ${elapsedMs}ms`) : "";
   const detail = summarizeToolResult(name, result);
-  const color = result.success ? chalk.green : chalk.red;
-  const label = `${chalk.dim("tool:")} ${color(name)} ${icon}${elapsed}${detail ? chalk.dim(" - ") + detail : ""}`;
-  const inner = termWidth() - 4;
-  return `\n${chalk.dim("\u2502")} ${chalk.dim("\u2500")} ${label} ${chalk.dim("\u2500".repeat(Math.max(0, inner - label.length - 4)))} ${chalk.dim("\u2502")}`;
+  const color = result.success ? accents.good : accents.bad;
+  const head = `${accents.soft("tool")} ${accents.soft("·")} ${color(name)} ${icon}${elapsed}`;
+  return detail ? `${head} ${accents.soft("▸")} ${chalk.dim(detail)}` : head;
 }
 
 export function renderMemoryPulse(action: "stored" | "recalled", count: number): string {
-  const color = action === "stored" ? chalk.green : chalk.cyan;
-  return `${chalk.dim("mem:")} ${color(action)} ${chalk.dim(count)}`;
+  const color = action === "stored" ? accents.good : accents.title;
+  return `${accents.soft("mem")} ${accents.soft("·")} ${color(action)} ${chalk.dim(count)}`;
 }
 
 export function renderConvergenceLine(progress: number): string {
@@ -451,9 +442,71 @@ export function renderConvergenceLine(progress: number): string {
   const leftLen = Math.floor(half * progress);
   const rightLen = Math.floor(half * progress);
 
-  const left = "\u2500".repeat(leftLen) + (progress < 1 ? "\u257A" : "");
-  const right = (progress < 1 ? "\u2578" : "") + "\u2500".repeat(rightLen);
-  const center = progress >= 1 ? chalk.cyan("\u25CF") : chalk.dim("\u25CB");
+  const left = "─".repeat(leftLen) + (progress < 1 ? "╾" : "");
+  const right = (progress < 1 ? "╼" : "") + "─".repeat(rightLen);
+  const center = progress >= 1 ? accents.title("●") : chalk.dim("○");
 
-  return `${chalk.dim(left)} ${center} ${chalk.dim(right)}`;
+  return `${accents.soft(left)} ${center} ${accents.soft(right)}`;
+}
+
+const BRIEF_SECTION_STYLE: Record<string, { icon: string; color: (s: string) => string }> = {
+  focus: { icon: "◈", color: accents.title },
+  goals: { icon: "▣", color: accents.good },
+  risks: { icon: "▲", color: accents.bad },
+  constraints: { icon: "◇", color: accents.warn },
+  recent: { icon: "…", color: accents.violet },
+  away: { icon: "◔", color: (s: string) => accents.gold(s) },
+};
+
+function wrapBriefLine(text: string, width: number): string[] {
+  const plain = stripAnsi(text);
+  if (plain.length <= width) return [text];
+  const words = plain.split(/\s+/);
+  const lines: string[] = [];
+  let cur = "";
+  for (const word of words) {
+    if (!cur) cur = word;
+    else if (cur.length + 1 + word.length <= width) cur += ` ${word}`;
+    else {
+      lines.push(cur);
+      cur = word;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+export function renderBriefCard(brief: Briefing, width?: number): string {
+  if (brief.type === "none") return "";
+  const w = width ?? Math.min(termWidth(), 100);
+  const inner = w - 6;
+  const body: string[] = [""];
+  const typeLabel = paint(palette.violet, brief.type);
+
+  for (const section of brief.sections) {
+    const style = BRIEF_SECTION_STYLE[section.label.toLowerCase()] ?? { icon: "▪", color: accents.title };
+    body.push(`  ${style.color(style.icon)} ${chalk.bold(style.color(section.label.toUpperCase()))}`);
+    const rawLines = section.content.split("\n");
+    for (const raw of rawLines) {
+      const isBullet = /^\s*-\s/.test(raw);
+      const text = isBullet ? raw.replace(/^\s*-\s/, "") : raw;
+      const indent = isBullet ? "    " : "    ";
+      for (const line of wrapBriefLine(text, inner - 6)) {
+        body.push(isBullet ? `  ${style.color("•")} ${line}` : `${indent}${chalk.dim(line)}`);
+      }
+    }
+    body.push("");
+  }
+
+  if (brief.question) {
+    for (const line of wrapBriefLine(brief.question, inner - 6)) {
+      body.push(`  ${accents.gold("?")} ${accents.gold(line)}`);
+    }
+    body.push("");
+  }
+
+  return panel(` ${gradient("brief", palette.accent, palette.violet)} ${accents.soft("·")} ${typeLabel} `, body, {
+    accent: palette.accent,
+    width: w,
+  });
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { existsSync, unlinkSync } from "node:fs";
-import { NTOX_DIR, loadConfig, saveConfig, validateConfig } from "./config.js";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { NTOX_DIR, hasLegacyToolPrompt, loadConfig, normalizeConfig, saveConfig, validateConfig } from "./config.js";
 import type { NtoxConfig } from "../types/index.js";
 
 describe("validateConfig", () => {
@@ -15,6 +15,12 @@ describe("validateConfig", () => {
     embeddingModel: "openai/text-embedding-3-small",
     memoryEnabled: true,
     memoryRetrievalCount: 5,
+    systemContextBudget: 6000,
+    contextCompilerEnabled: true,
+    predictionLlmEnabled: true,
+    modelCritiqueEnabled: true,
+    idleEnabled: true,
+    idleSelfPlay: false,
     metaStrategyEnabled: true,
     metaReflectionEnabled: false,
     metaMistakesEnabled: true,
@@ -30,11 +36,14 @@ describe("validateConfig", () => {
     whatsappToken: "",
     whatsappPhoneNumberId: "",
     whatsappVerifyToken: "",
+    whatsappAppSecret: "",
     whatsappPort: 3001,
     dockerEnabled: false,
     webPort: 3000,
     webHost: "127.0.0.1",
     webAuthToken: "",
+    apiPort: 3100,
+    apiAuthToken: "",
     introEnabled: true,
     verboseCallbacks: false,
     defaultProfileId: "default",
@@ -70,6 +79,16 @@ describe("validateConfig", () => {
   it("rejects temperature out of range", () => {
     expect(validateConfig({ ...valid, temperature: 3 }).valid).toBe(false);
     expect(validateConfig({ ...valid, temperature: -0.5 }).valid).toBe(false);
+  });
+
+  it("adds the plan and process tools to legacy default allowlists", () => {
+    const normalized = normalizeConfig({
+      ...valid,
+      profiles: [{ ...valid.profiles[0], allowedTools: ["read", "write", "checkpoint"] }],
+    });
+    expect(normalized.profiles[0].allowedTools).toContain("plan");
+    expect(normalized.profiles[0].allowedTools).toContain("process");
+    expect(normalized.profiles[0].allowedTools).toContain("read");
   });
 
   it("rejects metaMinConfidence out of range", () => {
@@ -143,5 +162,23 @@ describe("config", () => {
     expect(loaded.model).toBe("ollama/llama3");
     expect(loaded.maxTokens).toBe(4096); // default preserved
     expect(loaded.memoryEnabled).toBe(true); // default preserved
+  });
+
+  it("detects legacy XML tool-call prompts", () => {
+    expect(hasLegacyToolPrompt("To call a tool, output EXACTLY this XML block (no surrounding text)")).toBe(true);
+    expect(hasLegacyToolPrompt("wrap it in <tool_call> tags")).toBe(true);
+    expect(hasLegacyToolPrompt("Tools are available via native function calling")).toBe(false);
+  });
+
+  it("repairs a stale legacy XML tool-call systemPrompt on load", () => {
+    const stale =
+      'You are Ntox.\n## Tools\nTo call a tool, output EXACTLY this XML block (no surrounding text, no markdown fences):\n<tool_call>{"name":"read","args":{}}</tool_call>\nAfter the tool result appears, continue your response.';
+    saveConfig({ model: "xiaomi/mimo-v2.6-flash", systemPrompt: stale } as NtoxConfig);
+    const loaded = loadConfig();
+    expect(loaded.model).toBe("xiaomi/mimo-v2.6-flash");
+    expect(hasLegacyToolPrompt(loaded.systemPrompt)).toBe(false);
+    expect(loaded.systemPrompt).toContain("native function calling");
+    const onDisk = JSON.parse(readFileSync(cfgPath(), "utf-8")) as NtoxConfig;
+    expect(hasLegacyToolPrompt(onDisk.systemPrompt)).toBe(false);
   });
 });

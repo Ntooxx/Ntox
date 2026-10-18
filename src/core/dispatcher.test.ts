@@ -130,4 +130,44 @@ describe("runAgentMessage", () => {
     const result = await runAgentMessage(agent, "hello", output);
     expect(result.error).toBe("fail");
   });
+
+  it("filters system-reminder tags from streamed tokens", async () => {
+    const agent = {
+      run: vi.fn().mockImplementation((_text: string, callbacks: { onToken: (t: string) => void }) => {
+        return (async function* () {
+          callbacks.onToken("hello <system-reminder>internal</system-reminder> world");
+          yield "done";
+        })();
+      }),
+    } as unknown as Agent;
+    const output = new GatewayOutput();
+    const result = await runAgentMessage(agent, "hello", output);
+    expect(result.error).toBeNull();
+    expect(result.response).toBe("hello  world");
+    expect(result.response).not.toContain("system-reminder");
+    expect(result.response).not.toContain("internal");
+  });
+});
+
+describe("createSessionInfra cognitive kernel", () => {
+  async function makeShared() {
+    const { SkillRegistry } = await import("../skills/registry.js");
+    return { skillRegistry: new SkillRegistry() } as unknown as import("./dispatcher.js").SharedInfra;
+  }
+
+  it("enables the cognitive kernel when config.cognitiveEnabled is true", async () => {
+    const { createSessionInfra } = await import("./dispatcher.js");
+    const on = createSessionInfra(await makeShared(), {
+      cognitiveEnabled: true,
+    } as import("../types/index.js").NtoxConfig);
+    expect(on.cognitiveKernel.isEnabled()).toBe(true);
+  });
+
+  it("keeps the cognitive kernel disabled when config.cognitiveEnabled is false", async () => {
+    const { createSessionInfra } = await import("./dispatcher.js");
+    const off = createSessionInfra(await makeShared(), {
+      cognitiveEnabled: false,
+    } as import("../types/index.js").NtoxConfig);
+    expect(off.cognitiveKernel.isEnabled()).toBe(false);
+  });
 });

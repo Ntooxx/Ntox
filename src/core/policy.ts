@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, relative, isAbsolute, join } from "node:path";
-import type { PolicyDecision, Tool, ToolResult, WorkspaceProfile } from "../types/index.js";
+import type { PolicyDecision, Tool, ToolContext, ToolResult, WorkspaceProfile } from "../types/index.js";
 import { checkpointTool } from "../tools/checkpoint.js";
 import { NTOX_DIR } from "./config.js";
 
@@ -21,6 +21,7 @@ const PATH_KEYS: Record<string, string[]> = {
   glob: ["path"],
   grep: ["path"],
   shell: ["workdir"],
+  process: ["workdir"],
   checkpoint: ["path"],
 };
 
@@ -95,14 +96,16 @@ function checkNetwork(runtime: PolicyRuntime, tool: string, args: Record<string,
 function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, unknown>): ToolResult | null {
   const keys = PATH_KEYS[tool] || [];
   const fallback =
-    tool === "shell" || tool === "ls" || tool === "glob" || tool === "grep" ? runtime.profile.workspaceRoot : "";
+    tool === "shell" || tool === "process" || tool === "ls" || tool === "glob" || tool === "grep"
+      ? runtime.profile.workspaceRoot
+      : "";
   for (const key of keys) {
     if (!args[key] && !fallback) {
       if (tool === "checkpoint") continue;
       return deny(runtime, tool, `Missing required path argument: ${key}`);
     }
     const path = argPath(args, key, fallback);
-    if (tool === "shell") {
+    if (tool === "shell" || tool === "process") {
       if (runtime.profile.shellPolicy === "disabled")
         return deny(runtime, tool, `Shell disabled for profile ${runtime.profile.id}`, path);
       if (!isWithinRoot(path, [runtime.profile.workspaceRoot]))
@@ -176,7 +179,7 @@ function attachCheckpoint(result: ToolResult, checkpointId: string | null): Tool
 export function enforceToolPolicy(tool: Tool, runtime: PolicyRuntime): Tool {
   return {
     ...tool,
-    async execute(args) {
+    async execute(args, context?: ToolContext) {
       if (runtime.profile.allowedTools.length > 0 && !runtime.profile.allowedTools.includes(tool.name)) {
         return deny(runtime, tool.name, `Tool not allowed for profile ${runtime.profile.id}`);
       }
@@ -184,14 +187,14 @@ export function enforceToolPolicy(tool: Tool, runtime: PolicyRuntime): Tool {
         const networkDecision = checkNetwork(runtime, tool.name, args);
         if (networkDecision) return networkDecision;
       }
-      if (READ_TOOLS.has(tool.name) || WRITE_TOOLS.has(tool.name) || tool.name === "shell") {
+      if (READ_TOOLS.has(tool.name) || WRITE_TOOLS.has(tool.name) || tool.name === "shell" || tool.name === "process") {
         const pathDecision = checkPaths(runtime, tool.name, args);
         if (pathDecision) return pathDecision;
       } else {
         record(runtime, tool.name, true, "Tool allowed");
       }
       const checkpointId = await maybeCheckpoint(runtime, tool.name, args);
-      return attachCheckpoint(await tool.execute(args), checkpointId);
+      return attachCheckpoint(await tool.execute(args, context), checkpointId);
     },
   };
 }

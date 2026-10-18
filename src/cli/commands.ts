@@ -49,6 +49,11 @@ export const COMMANDS: CommandDef[] = [
   { name: "menu skills", description: "browse skill library", group: "memory" },
 
   { name: "meta", description: "meta-cognition status", group: "diagnostics" },
+  { name: "mind", description: "learning ledger & aliveness", group: "diagnostics" },
+  { name: "mind identity", description: "narrative, values, positions", group: "diagnostics" },
+  { name: "mind divergence", description: "trained vs fresh fingerprint distance", group: "diagnostics" },
+  { name: "mind transfer", description: "meta-theory transfer experiments", group: "diagnostics" },
+  { name: "mind alive", description: "ALIVE-1 metrics and M5 status", group: "diagnostics" },
   { name: "analytics", description: "usage stats", group: "diagnostics" },
   { name: "trace", description: "last turn trace", group: "diagnostics" },
   { name: "alive", description: "host events and wake state", group: "diagnostics" },

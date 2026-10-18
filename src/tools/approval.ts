@@ -4,6 +4,17 @@ import { getBaseDir } from "../core/config.js";
 
 export type ApprovalDecision = "allow-once" | "allow-session" | "allow-always" | "deny";
 
+export type ApprovalScope = "once" | "session" | "always" | "deny";
+
+export const APPROVAL_SCOPES: ApprovalScope[] = ["once", "session", "always", "deny"];
+
+export const SCOPE_TO_DECISION: Record<ApprovalScope, ApprovalDecision> = {
+  once: "allow-once",
+  session: "allow-session",
+  always: "allow-always",
+  deny: "deny",
+};
+
 interface StoredApproval {
   toolName: string;
   pattern: string;

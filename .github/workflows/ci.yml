@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 jobs:
   test:
@@ -23,3 +26,74 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run coverage
+
+  benchmark:
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Check benchmark credentials
+        id: creds
+        env:
+          KEY: ${{ secrets.NTOX_API_KEY || secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Cognitive benchmark skipped — no NTOX_API_KEY/OPENROUTER_API_KEY secret configured"
+          fi
+      - name: Run cognitive benchmark (kernel ON vs OFF)
+        if: steps.creds.outputs.available == 'true'
+        env:
+          NTOX_API_KEY: ${{ secrets.NTOX_API_KEY || secrets.OPENROUTER_API_KEY }}
+          BENCH_ROUNDS: "1"
+          BENCH_OUT_DIR: experiments/benchmark
+          NTOX_DIR: ${{ runner.temp }}/ntox-bench
+        run: node dist/benchmark/run-ci.js
+      - name: Upload benchmark report
+        if: always() && steps.creds.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cognitive-benchmark
+          path: experiments/benchmark/
+          if-no-files-found: ignore
+
+  alive:
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Run ALIVE-1 benchmark
+        env:
+          NTOX_DIR: ${{ runner.temp }}/ntox-alive
+        run: node scripts/bench-alive.mjs | tee alive-report.md
+      - name: Publish ALIVE-1 summary
+        if: always()
+        run: |
+          if [ -f alive-report.md ]; then
+            cat alive-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload ALIVE-1 report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alive-1
+          path: |
+            alive-report.md
+            ${{ runner.temp }}/ntox-alive/benchmarks/
+          if-no-files-found: ignore

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   diagnoseFetchedContent,
   extractHtmlTitle,
@@ -6,6 +6,10 @@ import {
   htmlToReadableMarkdown,
   webFetchTool,
 } from "./web.js";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("webFetchTool — URL validation", () => {
   it("blocks file:// protocol", async () => {
@@ -66,6 +70,20 @@ describe("webFetchTool — URL validation", () => {
     expect(r.success).toBe(false);
     expect(r.error).toContain("maximum length");
   });
+
+  it("revalidates redirect targets and blocks private hosts", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://169.254.169.254/latest/meta-data/" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await webFetchTool.execute({ url: "https://example.com/redirect" });
+    expect(r.success).toBe(false);
+    expect(r.error).toContain("Blocked host");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("htmlToBasicMarkdown", () => {
@@ -112,7 +130,7 @@ describe("web fetch extraction diagnostics", () => {
 });
 
 describe("htmlToReadableMarkdown", () => {
-  it("uses readability for article-like pages", () => {
+  it("uses readability for article-like pages", async () => {
     const html = `
       <html>
         <head><title>Readable Page</title></head>
@@ -127,7 +145,7 @@ describe("htmlToReadableMarkdown", () => {
       </html>
     `;
 
-    const extracted = htmlToReadableMarkdown(html, "https://example.com/readable");
+    const extracted = await htmlToReadableMarkdown(html, "https://example.com/readable");
     expect(extracted.extractor).toBe("readability");
     expect(extracted.title).toContain("Readable Page");
     expect(extracted.content).toContain("useful article content");

@@ -82,4 +82,58 @@ describe("MistakeJournal", () => {
     j.clearAll();
     expect(j.getAll().length).toBe(0);
   });
+
+  it("counts a recurrence only within 20 turns", () => {
+    const j = new MistakeJournal();
+    j.add("recurrence-topic", "q1", "w", "c", "user-correction", 100);
+    j.add("recurrence-topic", "q2", "w", "c", "user-correction", 105);
+    let stats = j.getStats();
+    expect(stats.followUps).toBe(1);
+    expect(stats.recurrences).toBe(1);
+    expect(stats.recurrenceRate).toBe(1);
+
+    j.add("recurrence-topic", "q3", "w", "c", "user-correction", 200);
+    stats = j.getStats();
+    expect(stats.followUps).toBe(2);
+    expect(stats.recurrences).toBe(1);
+    expect(stats.recurrenceRate).toBe(0.5);
+    const entry = j.getAll().find((m) => m.topicKey === "recurrence-topic");
+    expect(entry?.lastRecurrenceDistance).toBe(5);
+  });
+
+  it("does not count a follow-up beyond the window as recurrence", () => {
+    const j = new MistakeJournal();
+    j.add("distant-topic", "q1", "w", "c", "user-correction", 10);
+    j.add("distant-topic", "q2", "w", "c", "user-correction", 31);
+    const stats = j.getStats();
+    expect(stats.followUps).toBe(1);
+    expect(stats.recurrences).toBe(0);
+  });
+
+  it("force-injects topic-matched corrections beyond the relevance limit", () => {
+    const j = new MistakeJournal();
+    j.add(
+      "distractor",
+      "database connection pool settings timeout retry",
+      "database connection pool settings timeout retry",
+      "database connection pool settings timeout retry should be increased to sixty seconds",
+      "user-correction",
+    );
+    j.add("port", "what about port", "port is 80", "port is 443", "user-correction");
+
+    const ranked = j.getRelevantMistakes("the port is open with database connection pool settings timeout retry", 1);
+    expect(ranked.length).toBe(2);
+    expect(ranked[0].topicKey).toBe("port");
+    expect(ranked[1].topicKey).toBe("distractor");
+  });
+
+  it("counts injections when context is built", () => {
+    const j = new MistakeJournal();
+    j.add("injection-topic", "q", "w", "c", "user-correction");
+    j.buildMistakesContext("tell me about injection-topic now");
+    j.buildMistakesContext("injection-topic again please");
+    const entry = j.getAll().find((m) => m.topicKey === "injection-topic");
+    expect(entry?.injections).toBe(2);
+    expect(j.getStats().injected).toBe(2);
+  });
 });

@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import { LineWriter } from "./line-writer.js";
 import { termWidth } from "./render.js";
+import { accents, dimRgb, paint, palette } from "./theme.js";
 
 type ProseMode = "normal" | "heading" | "list" | "fence";
 
@@ -136,11 +137,12 @@ export class ChatRenderer {
     }
     if (mode === "heading" && /^#{1,6}\s/.test(line.trimStart())) {
       this.prose.flush();
-      this.out.write(`${this.prefix}${chalk.bold.cyan(line.replace(/^#{1,6}\s*/, ""))}\n`);
+      const text = line.replace(/^#{1,6}\s*/, "");
+      this.out.write(`${this.prefix}${chalk.bold(paint(palette.accent, text))}\n`);
       return;
     }
     if (mode === "list" && /^\s*(?:[-*]|\d+\.)\s/.test(line)) {
-      this.prose.write(line.replace(/^\s*[-*]\s/, "  - ").replace(/^\s*(\d+\.)\s/, "  $1 "));
+      this.prose.write(line.replace(/^\s*[-*]\s/, `  ${accents.title("•")} `).replace(/^\s*(\d+\.)\s/, "  $1 "));
       this.prose.newline();
       return;
     }
@@ -181,22 +183,27 @@ export class ChatRenderer {
   private renderCodeStart(lang: string): void {
     this.prose.flush();
     const w = this.codeWidth();
-    const label = lang ? `${chalk.cyan(lang)}` : "";
-    const title = label
-      ? `${label} ${chalk.dim("\u2500".repeat(Math.max(0, w - label.length - 1)))}`
-      : chalk.dim("\u2500".repeat(w));
-    this.out.write(`${this.prefix}${chalk.dim(`\u250c ${title} \u2510`)}\n`);
+    const border = paint(dimRgb(palette.accent, 0.55), "─");
+    const corner = paint(dimRgb(palette.accent, 0.8), "┌");
+    const cornerR = paint(dimRgb(palette.accent, 0.8), "┐");
+    const label = lang ? accents.title(lang) : "";
+    const title = label ? `${label} ${border.repeat(Math.max(0, w - lang.length - 1))}` : border.repeat(w);
+    this.out.write(`${this.prefix}${corner} ${title} ${cornerR}\n`);
   }
 
   private renderCodeEnd(): void {
     const w = this.codeWidth();
-    this.out.write(`${this.prefix}${chalk.dim(`\u2514 ${"\u2500".repeat(w)} \u2518`)}\n`);
+    const border = paint(dimRgb(palette.accent, 0.55), "─");
+    const corner = paint(dimRgb(palette.accent, 0.8), "└");
+    const cornerR = paint(dimRgb(palette.accent, 0.8), "┘");
+    this.out.write(`${this.prefix}${corner} ${border.repeat(w)} ${cornerR}\n`);
   }
 
   private renderCodeLine(line: string): void {
     const w = this.codeWidth();
     const clamped = clampVisible(line, w);
     const padding = w - stripAnsi(clamped).length;
-    this.out.write(`${this.prefix}${chalk.dim("\u2502")} ${clamped}${" ".repeat(padding)} ${chalk.dim("\u2502")}\n`);
+    const gutter = paint(dimRgb(palette.accent, 0.5), "│");
+    this.out.write(`${this.prefix}${gutter} ${clamped}${" ".repeat(padding)} ${gutter}\n`);
   }
 }

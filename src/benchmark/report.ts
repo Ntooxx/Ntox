@@ -2,6 +2,7 @@ import { writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { NTOX_DIR } from "../core/config.js";
 import type { BenchmarkReport } from "./runner.js";
+import { assessDelta } from "./metrics.js";
 
 export function generateReport(report: BenchmarkReport): string {
   const lines: string[] = [];
@@ -25,9 +26,7 @@ export function generateReport(report: BenchmarkReport): string {
   lines.push(`| Domain | Delta | Assessment |`);
   lines.push(`|--------|-------|------------|`);
   for (const [domain, delta] of Object.entries(report.domainDeltas)) {
-    const assessment =
-      delta > 15 ? "Strong improvement" : delta > 5 ? "Moderate improvement" : delta > -5 ? "Neutral" : "Regression";
-    lines.push(`| ${domain} | ${fmtDelta(delta)} | ${assessment} |`);
+    lines.push(`| ${domain} | ${fmtDelta(delta)} | ${assessDelta(delta)} |`);
   }
   lines.push("");
 

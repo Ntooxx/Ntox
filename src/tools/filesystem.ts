@@ -30,6 +30,7 @@ function requireNonEmptyString(args: Record<string, unknown>, key: string): stri
 
 export const readTool: Tool = {
   name: "read",
+  parallelSafe: true,
   description: "Read a file from the filesystem. Returns the file contents.",
   parameters: {
     type: "object",
@@ -85,6 +86,7 @@ export const writeTool: Tool = {
 
 export const globTool: Tool = {
   name: "glob",
+  parallelSafe: true,
   description: "Find files matching a glob pattern. Uses ** for recursive.",
   parameters: {
     type: "object",
@@ -117,6 +119,7 @@ export const globTool: Tool = {
 
 export const lsTool: Tool = {
   name: "ls",
+  parallelSafe: true,
   description: "List files and directories in a path.",
   parameters: {
     type: "object",

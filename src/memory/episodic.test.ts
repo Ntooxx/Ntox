@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync, readFileSync, writeFileSync } from "node:fs";
 import { MemoryStore, cosineSimilarity } from "./episodic.js";
-import { DURABLE_MEMORY_PATH, EPISODES_PATH } from "../core/config.js";
+import { DURABLE_MEMORY_PATH, EPISODES_PATH, EPISODES_JSONL_PATH } from "../core/config.js";
 
 describe("cosineSimilarity", () => {
   it("returns 1 for identical vectors", () => {
@@ -33,6 +33,7 @@ describe("cosineSimilarity", () => {
 describe("MemoryStore", () => {
   afterEach(() => {
     if (existsSync(EPISODES_PATH)) unlinkSync(EPISODES_PATH);
+    if (existsSync(EPISODES_JSONL_PATH)) unlinkSync(EPISODES_JSONL_PATH);
     if (existsSync(DURABLE_MEMORY_PATH)) unlinkSync(DURABLE_MEMORY_PATH);
   });
 
@@ -54,6 +55,54 @@ describe("MemoryStore", () => {
     store.addEpisode("s1", "hello world", "hi there", makeEmbedding(1));
     expect(store.count()).toBe(1);
     expect(store.getRecent(1).length).toBe(1);
+  });
+
+  it("persists episodes as append-only JSONL and reloads them", () => {
+    const store = new MemoryStore();
+    store.addEpisode("s1", "first message", "first reply", makeEmbedding(1));
+    store.addEpisode("s1", "second message", "second reply", makeEmbedding(2));
+    expect(existsSync(EPISODES_JSONL_PATH)).toBe(true);
+
+    const raw = readFileSync(EPISODES_JSONL_PATH, "utf-8");
+    expect(raw.trimEnd().split("\n").length).toBe(2);
+
+    const reloaded = new MemoryStore();
+    expect(reloaded.count()).toBe(2);
+    expect(reloaded.getRecent(1)[0].userMessage).toBe("second message");
+  });
+
+  it("migrates legacy episodes.json to JSONL on load", () => {
+    const legacy = [
+      {
+        id: "ep_legacy",
+        timestamp: Date.now(),
+        sessionId: "s1",
+        userMessage: "legacy msg",
+        assistantResponse: "legacy reply",
+        summary: "legacy msg",
+        embedding: makeEmbedding(3),
+      },
+    ];
+    writeFileSync(EPISODES_PATH, JSON.stringify(legacy));
+
+    const store = new MemoryStore();
+    expect(store.count()).toBe(1);
+    expect(existsSync(EPISODES_JSONL_PATH)).toBe(true);
+
+    const reloaded = new MemoryStore();
+    expect(reloaded.count()).toBe(1);
+    expect(reloaded.getRecent(1)[0].id).toBe("ep_legacy");
+  });
+
+  it("compacts oversized stores on load", () => {
+    const store = new MemoryStore();
+    for (let i = 0; i < 1201; i++) {
+      store.addEpisode("s1", `msg ${i}`, `reply ${i}`, makeEmbedding(i));
+    }
+
+    const reloaded = new MemoryStore();
+    expect(reloaded.count()).toBe(1000);
+    expect(reloaded.getRecent(1)[0].userMessage).toBe("msg 1200");
   });
 
   it("retrieves by embedding similarity", () => {
@@ -197,11 +246,107 @@ describe("MemoryStore", () => {
     expect(store.retrieve([], 5, 0.5)).toEqual([]);
   });
 
+  it("skips episodes embedded with a different model", () => {
+    const store = new MemoryStore();
+    store.addEpisode("s1", "about dogs", "woof", makeEmbedding(1), "remote:openrouter/openai/text-embedding-3-small");
+    store.addEpisode("s2", "about cats", "meow", makeEmbedding(1), "local-hash");
+
+    const remote = store.retrieve(makeEmbedding(1), 5, 0.1, "remote:openrouter/openai/text-embedding-3-small");
+    expect(remote).toHaveLength(1);
+    expect(remote[0].episode.userMessage).toBe("about dogs");
+
+    const local = store.retrieve(makeEmbedding(1), 5, 0.1, "local-hash");
+    expect(local).toHaveLength(1);
+    expect(local[0].episode.userMessage).toBe("about cats");
+  });
+
+  it("includes legacy episodes without an embedding model tag", () => {
+    const store = new MemoryStore();
+    store.addEpisode("s1", "legacy episode", "ok", makeEmbedding(1));
+
+    const results = store.retrieve(makeEmbedding(1), 5, 0.1, "local-hash");
+    expect(results).toHaveLength(1);
+    expect(results[0].episode.userMessage).toBe("legacy episode");
+  });
+
   it("persists and reloads from disk", () => {
     const store1 = new MemoryStore();
     store1.addEpisode("s1", "persisted message", "ok", makeEmbedding(1));
     const store2 = new MemoryStore();
     expect(store2.count()).toBe(1);
     expect(store2.getAll()[0].userMessage).toBe("persisted message");
+  });
+
+  it("hybrid retrieval surfaces keyword-strong docs that cosine alone misses", () => {
+    const store = new MemoryStore();
+    const queryVec = [1, 0];
+    const weakCosTarget = [0.1, Math.sqrt(0.99)];
+    const midCosNoise = [0.5, Math.sqrt(0.75)];
+    store.addEpisode("s1", "nginx port configuration lives in ports.conf", "ok", weakCosTarget, "local-hash");
+    store.addEpisode("s1", "tomato soup recipe with basil", "ok", midCosNoise, "local-hash");
+
+    const cosineOnly = store.buildMemoryItems(queryVec, 3, "local-hash");
+    expect(cosineOnly).toHaveLength(1);
+    expect(cosineOnly[0].text).toContain("tomato soup");
+
+    const hybrid = store.buildMemoryItems(queryVec, 3, "local-hash", "nginx port configuration");
+    expect(hybrid[0].text).toContain("nginx port configuration");
+  });
+
+  it("falls back to BM25 keyword retrieval when no embedding exists", () => {
+    const store = new MemoryStore();
+    store.addEpisode("s1", "the quarterly revenue report is ready", "ok", makeEmbedding(1));
+    store.addEpisode("s1", "cat pictures are funny", "ok", makeEmbedding(2));
+
+    const items = store.buildMemoryItems(null, 2, undefined, "quarterly revenue report");
+    expect(items).toHaveLength(1);
+    expect(items[0].text).toContain("quarterly revenue report");
+  });
+
+  it("consolidates near-duplicate episodes into a durable fact with provenance", () => {
+    const store = new MemoryStore();
+    store.addEpisode("s1", "user prefers dark mode in the editor", "ok", makeEmbedding(1));
+    store.addEpisode("s2", "user prefers dark mode in the editor.", "ok", makeEmbedding(2));
+
+    const report = store.consolidateEpisodes({ threshold: 0.6 });
+    expect(report.clusters).toBe(1);
+    expect(report.created).toBe(1);
+
+    const fact = store.listDurableMemories().find((m) => m.provenance === "consolidation");
+    expect(fact).toBeDefined();
+    expect(fact?.sourceEpisodeIds).toHaveLength(2);
+    expect(fact?.confidence).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it("merges clustered candidates into matching durable memories", () => {
+    const store = new MemoryStore();
+    store.addDurableMemory("preference", "user prefers dark mode in editor", "test", 0.8);
+    store.addEpisode("s1", "user prefers dark mode in the editor", "ok", makeEmbedding(1));
+    store.addEpisode("s2", "user prefers dark mode in the editor.", "ok", makeEmbedding(2));
+
+    const report = store.consolidateEpisodes({ threshold: 0.6 });
+    expect(report.merged).toBe(1);
+    expect(report.created).toBe(0);
+    const fact = store.listDurableMemories()[0];
+    expect(fact.sourceEpisodeIds).toHaveLength(2);
+    expect(fact.confidence).toBeGreaterThanOrEqual(0.8);
+  });
+
+  it("challenges both sides when a cluster contradicts an existing durable fact", () => {
+    const store = new MemoryStore();
+    const existing = store.addDurableMemory("preference", "user prefers dark mode in the editor", "test", 0.9);
+    store.addEpisode("s1", "user does not prefer dark mode in the editor", "ok", makeEmbedding(1));
+    store.addEpisode("s2", "user does not prefer dark mode in the editor.", "ok", makeEmbedding(2));
+
+    const report = store.consolidateEpisodes({ threshold: 0.6 });
+    expect(report.challenged).toBe(2);
+
+    const after = store.listDurableMemories();
+    const oldFact = after.find((m) => m.id === existing.id);
+    const newFact = after.find((m) => m.id !== existing.id);
+    expect(oldFact?.contradictionCount).toBeGreaterThanOrEqual(1);
+    expect(newFact?.contradictionCount).toBeGreaterThanOrEqual(1);
+    expect(oldFact?.confidence).toBeLessThan(0.9);
+    expect(newFact?.confidence).toBeLessThan(0.5);
   });
 });

@@ -28,6 +28,31 @@ describe("NtoxCognitiveLayer", () => {
     expect(context.diagnostics.errors).toEqual([]);
   });
 
+  it("setStoreFlags toggles subsystem gating at runtime", async () => {
+    const layer = new NtoxCognitiveLayer(
+      { cognitionEnabled: false, theoryEnabled: false, memoryEnabled: false, strategyEnabled: false },
+      { memory, mistakes },
+    );
+    layer.setStoreFlags({ memoryEnabled: true, strategyEnabled: true });
+    memory.addDurableMemory("fact", "runtime flag fact alpha", "test", 0.95);
+    const withMemory = await layer.beforeStep({
+      sessionId: "flags",
+      turnId: "t1",
+      userMessage: "what is the runtime flag fact alpha?",
+      embedding: null,
+    });
+    expect(withMemory.diagnostics.memoryIncluded).toBe(true);
+
+    layer.setStoreFlags({ memoryEnabled: false });
+    const withoutMemory = await layer.beforeStep({
+      sessionId: "flags",
+      turnId: "t2",
+      userMessage: "what is the runtime flag fact alpha?",
+      embedding: null,
+    });
+    expect(withoutMemory.diagnostics.memoryIncluded).toBe(false);
+  });
+
   it("stores a turn and recalls it on a later step", async () => {
     const layer = new NtoxCognitiveLayer(
       { cognitionEnabled: false, theoryEnabled: false, mistakesEnabled: false },

@@ -9,6 +9,8 @@ import {
   countMessageTokens,
   providerRequiresKey,
   estimateCost,
+  modelSupportsTools,
+  warnIfToolsUnsupported,
   LOCAL_PROVIDERS,
   toOpenAIMessages,
 } from "./llm.js";
@@ -159,12 +161,14 @@ describe("OpenRouter model discovery", () => {
               name: "Zeta",
               context_length: 200000,
               pricing: { prompt: "0.2", completion: "0.4" },
+              supported_parameters: ["tools", "reasoning"],
             },
             {
               id: "alpha/model",
               name: "Alpha",
               context_length: 128000,
               pricing: { prompt: "0", completion: "0" },
+              supported_parameters: ["temperature"],
             },
           ],
         }),
@@ -185,7 +189,41 @@ describe("OpenRouter model discovery", () => {
       provider: "openrouter",
       pricing: { prompt: 0, completion: 0 },
       context_length: 128000,
+      supported_parameters: ["temperature"],
     });
+    expect(modelSupportsTools(models[0])).toBe(false);
+    expect(modelSupportsTools(models[1])).toBe(true);
+  });
+});
+
+describe("modelSupportsTools", () => {
+  it("returns null when capability metadata is missing", () => {
+    expect(modelSupportsTools(undefined)).toBeNull();
+    expect(modelSupportsTools(null)).toBeNull();
+    expect(modelSupportsTools({})).toBeNull();
+    expect(modelSupportsTools({ supported_parameters: [] })).toBeNull();
+  });
+
+  it("returns false only when tools are explicitly absent", () => {
+    expect(modelSupportsTools({ supported_parameters: ["temperature", "reasoning"] })).toBe(false);
+    expect(modelSupportsTools({ supported_parameters: ["tools"] })).toBe(true);
+  });
+});
+
+describe("warnIfToolsUnsupported", () => {
+  it("warns when the selected model explicitly lacks tools", () => {
+    const models = [
+      { id: "vendor/no-tools", supported_parameters: ["temperature"] } as ModelInfo,
+      { id: "vendor/with-tools", supported_parameters: ["tools"] } as ModelInfo,
+    ];
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(warnIfToolsUnsupported(models, "vendor/no-tools")).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0]).toContain("does not advertise tool support");
+    expect(warnIfToolsUnsupported(models, "vendor/with-tools")).toBe(false);
+    expect(warnIfToolsUnsupported(models, "vendor/with-tools", "[test]")).toBe(false);
+    expect(warnIfToolsUnsupported([], "unknown/model")).toBe(false);
+    spy.mockRestore();
   });
 });
 
@@ -313,6 +351,149 @@ describe("LLMClient.stream (Ollama)", () => {
   });
 });
 
+describe("LLMClient.stream (Anthropic)", () => {
+  function sseResponse(lines: string[]): Response {
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(lines.join("\n") + "\n"));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    );
+  }
+
+  const tools = [
+    {
+      type: "function" as const,
+      function: {
+        name: "read",
+        description: "Read a file",
+        parameters: { type: "object", properties: {}, required: [] as string[] },
+      },
+    },
+  ];
+
+  it("accumulates tool arguments from index-based input_json_delta events", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      sseResponse([
+        `data: ${JSON.stringify({
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "tool_use", id: "toolu_1", name: "read" },
+        })}`,
+        `data: ${JSON.stringify({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '{"path":' },
+        })}`,
+        `data: ${JSON.stringify({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '"test.txt"}' },
+        })}`,
+        `data: ${JSON.stringify({ type: "content_block_stop", index: 0 })}`,
+        `data: ${JSON.stringify({ type: "message_delta", delta: {}, usage: { output_tokens: 5 } })}`,
+      ]),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const client = new LLMClient(
+      "key",
+      "anthropic/claude-3",
+      "openai/text-embedding-3-small",
+      1024,
+      0.7,
+      "",
+      "anthropic",
+    );
+
+    const chunks: { delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }[] = [];
+    for await (const chunk of client.stream([{ role: "user", content: "read test" }], "sys", tools)) {
+      chunks.push(chunk as { delta: string; toolCalls?: { id: string; name: string; arguments: string }[] });
+    }
+
+    const toolCallChunk = chunks.find((c) => c.toolCalls && c.toolCalls.length > 0);
+    expect(toolCallChunk).toBeDefined();
+    expect(toolCallChunk?.toolCalls?.[0]).toEqual({
+      id: "toolu_1",
+      name: "read",
+      arguments: '{"path":"test.txt"}',
+    });
+  });
+
+  it("merges consecutive tool results into one user message and preserves assistant text with tool_use", async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    const fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body));
+      return Promise.resolve(
+        sseResponse([
+          `data: ${JSON.stringify({
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "text", text: "" },
+          })}`,
+          `data: ${JSON.stringify({
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "ok" },
+          })}`,
+          `data: ${JSON.stringify({ type: "message_stop" })}`,
+        ]),
+      );
+    });
+    vi.stubGlobal("fetch", fetch);
+    const client = new LLMClient(
+      "key",
+      "anthropic/claude-3",
+      "openai/text-embedding-3-small",
+      1024,
+      0.7,
+      "",
+      "anthropic",
+    );
+
+    const messages = [
+      { role: "user" as const, content: "do stuff" },
+      {
+        role: "assistant" as const,
+        content: "checking two files",
+        tool_calls: [
+          { id: "call_1", name: "read", arguments: '{"path":"a"}' },
+          { id: "call_2", name: "read", arguments: '{"path":"b"}' },
+        ],
+      },
+      { role: "tool" as const, tool_call_id: "call_1", content: "A" },
+      { role: "tool" as const, tool_call_id: "call_2", content: "B" },
+    ];
+
+    for await (const _chunk of client.stream(messages, undefined, tools)) {
+      void _chunk;
+    }
+
+    expect(requestBody).toBeDefined();
+    const outMessages = requestBody!.messages as {
+      role: string;
+      content: unknown;
+    }[];
+    expect(outMessages).toHaveLength(3);
+
+    const assistant = outMessages[1];
+    expect(assistant.role).toBe("assistant");
+    expect(Array.isArray(assistant.content)).toBe(true);
+    const assistantBlocks = assistant.content as { type: string; text?: string }[];
+    expect(assistantBlocks[0]).toEqual({ type: "text", text: "checking two files" });
+    expect(assistantBlocks.filter((b) => b.type === "tool_use")).toHaveLength(2);
+
+    const toolResults = outMessages[2];
+    expect(toolResults.role).toBe("user");
+    expect(Array.isArray(toolResults.content)).toBe(true);
+    const resultBlocks = toolResults.content as { type: string; tool_use_id: string }[];
+    expect(resultBlocks).toHaveLength(2);
+    expect(resultBlocks.map((b) => b.tool_use_id)).toEqual(["call_1", "call_2"]);
+  });
+});
+
 describe("LLMClient.embed", () => {
   it("returns embeddings from the endpoint", async () => {
     const fetch = vi
@@ -325,6 +506,30 @@ describe("LLMClient.embed", () => {
 
     expect(result).toEqual([0.1, 0.2, 0.3]);
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("embedWithMeta tags the producing model", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ data: [{ embedding: [0.4, 0.5] }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    const client = new LLMClient("key", "openrouter/model", "openrouter/text-embedding-3-small", 1024, 0.7);
+
+    const meta = await client.embedWithMeta("tagged query");
+    expect(meta?.vector).toEqual([0.4, 0.5]);
+    expect(meta?.model).toBe("remote:openrouter/openrouter/text-embedding-3-small");
+  });
+
+  it("embedWithMeta tags local fallback as local-hash", async () => {
+    vi.stubEnv("NTOX_EMBED_BUDGET_MS", "5000");
+    const fetch = vi.fn().mockResolvedValue(new Response("server error", { status: 500 }));
+    vi.stubGlobal("fetch", fetch);
+    const client = new LLMClient("key", "openrouter/model", "openrouter/text-embedding-3-small", 1024, 0.7);
+
+    const meta = await client.embedWithMeta("fallback query");
+    expect(meta?.model).toBe("local-hash");
+    expect(meta?.vector.length).toBeGreaterThan(0);
+    vi.unstubAllGlobals();
   });
 
   it("caches embeddings so repeat queries skip the network", async () => {
@@ -342,6 +547,7 @@ describe("LLMClient.embed", () => {
   });
 
   it("returns null instead of blocking when the endpoint exceeds the budget", async () => {
+    vi.stubEnv("NTOX_EMBED_BUDGET_MS", "300");
     const hang = (_url: string, init?: RequestInit) =>
       new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));

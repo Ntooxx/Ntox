@@ -4,198 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NTOX</title>
+<meta name="description" content="NTOX — cognitive chat gateway with memory, skills, and meta-cognition.">
+<meta name="theme-color" content="#f7f7f4" id="theme-color">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="/app.css">
 <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
-<style>
-*,*::before,*::after{box-sizing:border-box}
-:root{
-  color-scheme:light;
-  --bg:#f7f7f4;
-  --panel:#ffffff;
-  --panel-soft:#f0f0ec;
-  --text:#171717;
-  --muted:#6b6b63;
-  --faint:#9b9b93;
-  --line:#deded7;
-  --line-strong:#c9c9c0;
-  --accent:#0f766e;
-  --accent-strong:#115e59;
-  --user:#e7f4f1;
-  --assistant:#ffffff;
-  --danger:#b42318;
-  --ok:#16794c;
-  --shadow:0 20px 70px rgba(26,28,24,.12);
-  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-}
-[data-theme="dark"]{
-  color-scheme:dark;
-  --bg:#151613;
-  --panel:#1f201c;
-  --panel-soft:#292a25;
-  --text:#f1f1ea;
-  --muted:#aaa99f;
-  --faint:#77766d;
-  --line:#35362f;
-  --line-strong:#4b4c42;
-  --accent:#5eead4;
-  --accent-strong:#99f6e4;
-  --user:#173b36;
-  --assistant:#1f201c;
-  --danger:#f97066;
-  --ok:#6ce9a6;
-  --shadow:0 24px 80px rgba(0,0,0,.28);
-}
-html,body{height:100%;margin:0}
-body{background:var(--bg);color:var(--text);overflow:hidden}
-button,textarea{font:inherit}
-button{border:0;cursor:pointer}
-.app{height:100vh;display:grid;grid-template-columns:280px minmax(0,1fr)}
-.side{
-  border-right:1px solid var(--line);
-  background:var(--panel-soft);
-  padding:16px;
-  display:flex;
-  flex-direction:column;
-  gap:14px;
-  min-width:0;
-}
-.brand{display:flex;align-items:center;gap:10px;height:36px}
-.mark{
-  width:28px;height:28px;border-radius:8px;background:var(--text);color:var(--bg);
-  display:grid;place-items:center;font-weight:760;font-size:13px;letter-spacing:0;
-}
-.brand h1{font-size:15px;line-height:1;margin:0;font-weight:720;letter-spacing:0}
-.brand span{display:block;font-size:12px;color:var(--muted);font-weight:500;margin-top:3px}
-.new-chat{
-  height:38px;border:1px solid var(--line-strong);border-radius:8px;background:var(--panel);color:var(--text);
-  display:flex;align-items:center;justify-content:center;gap:8px;font-weight:650;
-}
-.new-chat:hover{border-color:var(--accent);color:var(--accent-strong)}
-.section-title{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin:8px 0 2px}
-.stat-list{display:grid;gap:8px}
-.stat{
-  border:1px solid var(--line);border-radius:8px;background:color-mix(in srgb,var(--panel) 70%,transparent);
-  padding:9px 10px;min-width:0;
-}
-.stat label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
-.stat strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.activity{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:7px;padding-right:2px}
-.event{
-  border:1px solid var(--line);border-radius:8px;padding:8px 9px;background:color-mix(in srgb,var(--panel) 78%,transparent);
-  font-size:12px;color:var(--muted);line-height:1.35;
-}
-.event strong{color:var(--text);font-weight:650}
-.event.fail strong{color:var(--danger)}
-.event.ok strong{color:var(--ok)}
-.side-actions{display:flex;gap:8px}
-.icon-btn{
-  width:36px;height:36px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--muted);
-  display:grid;place-items:center;
-}
-.icon-btn:hover{color:var(--text);border-color:var(--line-strong)}
-.main{height:100vh;display:grid;grid-template-rows:auto minmax(0,1fr) auto;background:var(--bg)}
-.top{
-  height:57px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;
-  padding:0 20px;background:color-mix(in srgb,var(--bg) 88%,var(--panel));
-}
-.top-title{display:flex;align-items:center;gap:10px;min-width:0}
-.status-dot{width:8px;height:8px;border-radius:999px;background:var(--faint)}
-.status-dot.connected{background:var(--ok)}
-.status-dot.connecting{background:#d97706}
-.status-dot.disconnected{background:var(--danger)}
-.top-title strong{font-size:14px}
-.top-title span{font-size:12px;color:var(--muted)}
-.top-actions{display:flex;align-items:center;gap:10px}
-.pill{
-  height:28px;border:1px solid var(--line);border-radius:999px;padding:0 10px;display:flex;align-items:center;
-  color:var(--muted);font-size:12px;background:var(--panel);
-}
-.thread{overflow:auto;padding:28px 20px 18px}
-.messages{max-width:850px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
-.empty{min-height:calc(100vh - 220px);display:grid;align-content:center;gap:22px}
-.empty h2{font-size:34px;line-height:1.08;letter-spacing:0;margin:0;font-weight:760;max-width:620px}
-.empty p{font-size:15px;color:var(--muted);line-height:1.55;margin:0;max-width:590px}
-.prompts{display:flex;flex-wrap:wrap;gap:8px;max-width:740px}
-.prompt{
-  border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:8px;padding:9px 11px;
-  font-size:13px;box-shadow:none;
-}
-.prompt:hover{border-color:var(--accent);color:var(--accent-strong)}
-.message{display:grid;grid-template-columns:34px minmax(0,1fr);gap:12px;align-items:start}
-.avatar{
-  width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-size:12px;font-weight:720;
-  background:var(--panel-soft);border:1px solid var(--line);color:var(--muted);
-}
-.message.user .avatar{background:var(--user);color:var(--accent-strong)}
-.bubble{min-width:0}
-.meta{height:20px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-bottom:3px}
-.meta strong{color:var(--text);font-weight:650}
-.content{
-  font-size:15px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;
-  padding:0;
-}
-.message.user .content{
-  display:inline-block;background:var(--user);border:1px solid color-mix(in srgb,var(--accent) 18%,var(--line));
-  padding:10px 12px;border-radius:8px;max-width:min(720px,100%);
-}
-.content code{
-  font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;font-size:.92em;background:var(--panel-soft);
-  border:1px solid var(--line);border-radius:6px;padding:1px 4px;
-}
-.content pre{
-  margin:12px 0;padding:13px;border:1px solid var(--line);border-radius:8px;background:var(--panel-soft);
-  overflow:auto;white-space:pre;font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;font-size:13px;line-height:1.45;
-}
-.cursor::after{content:"";display:inline-block;width:7px;height:16px;background:var(--accent);margin-left:3px;vertical-align:-2px;animation:blink 1s steps(2,end) infinite}
-@keyframes blink{50%{opacity:0}}
-.composer-wrap{border-top:1px solid var(--line);padding:14px 20px 18px;background:linear-gradient(to top,var(--bg) 88%,color-mix(in srgb,var(--bg) 70%,transparent))}
-.composer{max-width:850px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}
-.input-shell{
-  border:1px solid var(--line-strong);border-radius:8px;background:var(--panel);box-shadow:var(--shadow);
-  display:grid;grid-template-columns:minmax(0,1fr);align-items:end;
-}
-textarea{
-  width:100%;max-height:180px;min-height:48px;resize:none;border:0;outline:0;background:transparent;color:var(--text);
-  padding:14px 15px;font-size:15px;line-height:1.4;
-}
-textarea::placeholder{color:var(--faint)}
-.send{
-  width:48px;height:48px;border-radius:8px;background:var(--text);color:var(--bg);display:grid;place-items:center;
-}
-.send:disabled{opacity:.35;cursor:not-allowed}
-.send svg,.icon-btn svg{width:18px;height:18px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
-.hint{max-width:850px;margin:8px auto 0;color:var(--faint);font-size:12px;display:flex;justify-content:space-between;gap:12px}
-.mobile-menu{display:none}
-.token-overlay{
-  position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(4px);
-  display:grid;place-items:center;z-index:30;
-}
-.token-card{
-  background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);
-  padding:24px;width:min(380px,90vw);display:grid;gap:14px;
-}
-.token-card h2{margin:0;font-size:18px}
-.token-card p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
-.token-card input{
-  border:1px solid var(--line-strong);border-radius:8px;padding:11px 12px;font-size:14px;
-  background:var(--panel-soft);color:var(--text);outline:0;
-}
-.token-card .row{display:flex;gap:8px;justify-content:flex-end}
-.token-card button{
-  height:36px;padding:0 14px;border-radius:8px;background:var(--text);color:var(--bg);font-weight:650;
-}
-.token-card .err{color:var(--danger);font-size:12px;min-height:16px}
-@media(max-width:860px){
-  .app{grid-template-columns:1fr}
-  .side{position:fixed;z-index:10;inset:0 auto 0 0;width:min(310px,86vw);transform:translateX(-105%);transition:transform .2s ease;box-shadow:var(--shadow)}
-  .side.open{transform:translateX(0)}
-  .mobile-menu{display:grid}
-  .top{padding:0 12px}
-  .thread{padding:22px 14px}
-  .composer-wrap{padding:12px}
-  .empty h2{font-size:28px}
-  .pill.hide-mobile{display:none}
-}
-</style>
 </head>
 <body>
 <div class="app" data-theme="light">
@@ -205,15 +20,15 @@ textarea::placeholder{color:var(--faint)}
       <div><h1>NTOX</h1><span>cognitive chat</span></div>
     </div>
     <button class="new-chat" id="new-chat" type="button">
-      <span>New chat</span>
+      <span>+ New chat</span>
     </button>
-    <div>
-      <div class="section-title">Runtime</div>
-      <div class="stat-list">
-        <div class="stat"><label>Model</label><strong id="model">loading</strong></div>
-        <div class="stat"><label>Provider</label><strong id="provider">loading</strong></div>
-        <div class="stat"><label>Workspace</label><strong id="workspace">local</strong></div>
-      </div>
+    <div class="section-title">Chats</div>
+    <div class="chat-list" id="chat-list"></div>
+    <div class="section-title">Runtime</div>
+    <div class="stat-list">
+      <div class="stat"><label>Model</label><strong id="model">loading</strong></div>
+      <div class="stat"><label>Provider</label><strong id="provider">loading</strong></div>
+      <div class="stat"><label>Workspace</label><strong id="workspace">local</strong></div>
     </div>
     <div class="section-title">Activity</div>
     <div class="activity" id="activity"></div>
@@ -221,7 +36,7 @@ textarea::placeholder{color:var(--faint)}
       <button class="icon-btn" id="theme" type="button" title="Toggle theme" aria-label="Toggle theme">
         <svg viewBox="0 0 24 24"><path d="M12 3v2"/><path d="M12 19v2"/><path d="m5.6 5.6 1.4 1.4"/><path d="m17 17 1.4 1.4"/><path d="M3 12h2"/><path d="M19 12h2"/><path d="m5.6 18.4 1.4-1.4"/><path d="m17 7 1.4-1.4"/><circle cx="12" cy="12" r="4"/></svg>
       </button>
-      <button class="icon-btn" id="clear" type="button" title="Clear screen" aria-label="Clear screen">
+      <button class="icon-btn" id="clear" type="button" title="Clear this chat" aria-label="Clear chat">
         <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>
       </button>
     </div>
@@ -236,12 +51,14 @@ textarea::placeholder{color:var(--faint)}
         <div><strong id="status-title">Connecting</strong><br><span id="status-subtitle">local web gateway</span></div>
       </div>
       <div class="top-actions">
+        <button class="pill" id="inspect-btn" type="button" title="Inspect last turn (trace, why, files, memory)">Inspect</button>
+        <div class="pill hide-mobile" id="usage-pill" hidden></div>
         <div class="pill hide-mobile" id="memory-pill">memory</div>
         <div class="pill" id="phase-pill">idle</div>
       </div>
     </header>
     <section class="thread" id="thread">
-      <div class="messages" id="messages">
+      <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions text">
         <div class="empty" id="empty">
           <div>
             <h2>What should we work on?</h2>
@@ -256,17 +73,61 @@ textarea::placeholder{color:var(--faint)}
       </div>
     </section>
     <footer class="composer-wrap">
-      <form class="composer" id="form">
-        <div class="input-shell">
-          <textarea id="input" rows="1" placeholder="Message NTOX..." disabled></textarea>
-        </div>
-        <button class="send" id="send" type="submit" disabled title="Send" aria-label="Send">
-          <svg viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9 22 2Z"/></svg>
-        </button>
-      </form>
-      <div class="hint"><span></span><span id="session">local session</span></div>
+      <div class="composer-anchor">
+        <div class="suggest-pop" id="suggest-pop" hidden role="listbox" aria-label="Suggestions"></div>
+        <form class="composer" id="form">
+          <div class="input-shell">
+            <textarea id="input" rows="1" placeholder="Message NTOX...   (⌘K commands)" disabled aria-label="Message NTOX"></textarea>
+          </div>
+          <button class="mic" id="mic" type="button" disabled title="Voice input" aria-label="Voice input" aria-pressed="false">
+            <svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v4"/></svg>
+          </button>
+          <button class="send" id="send" type="submit" disabled title="Send (Enter)" aria-label="Send">
+            <svg id="send-icon" viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9 22 2Z"/></svg>
+          </button>
+        </form>
+      </div>
+      <div class="hint">
+        <span id="hint-left"></span>
+        <span id="session">local session</span>
+      </div>
     </footer>
   </main>
+</div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <strong>Inspect</strong>
+    <button class="icon-btn" id="drawer-close" type="button" title="Close" aria-label="Close inspector">
+      <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+    </button>
+  </div>
+  <nav class="drawer-tabs" id="drawer-tabs">
+    <button type="button" data-tab="why" class="active">Why</button>
+    <button type="button" data-tab="trace">Trace</button>
+    <button type="button" data-tab="files">Files</button>
+    <button type="button" data-tab="memory">Memory</button>
+    <button type="button" data-tab="beliefs">Beliefs</button>
+  </nav>
+  <div class="drawer-body" id="drawer-body"></div>
+</aside>
+<div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+<div class="palette-overlay" id="palette-overlay" hidden>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input id="palette-input" type="text" placeholder="Type a command, model, or chat…" autocomplete="off" spellcheck="false" aria-label="Command palette search">
+    <div class="palette-list" id="palette-list" role="listbox" aria-label="Commands"></div>
+    <div class="palette-hint"><span>↑↓ navigate · ↵ select · Esc close</span><span id="palette-mode-label"></span></div>
+  </div>
+</div>
+<div class="help-overlay" id="help-overlay" hidden>
+  <div class="help-sheet" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+    <div class="help-head">
+      <strong>Keyboard shortcuts</strong>
+      <button class="icon-btn" id="help-close" type="button" title="Close" aria-label="Close shortcuts">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="help-body" id="help-body"></div>
+  </div>
 </div>
 <div class="token-overlay" id="token-overlay" hidden>
   <div class="token-card">
@@ -277,242 +138,6 @@ textarea::placeholder{color:var(--faint)}
     <div class="row"><button id="token-submit" type="button">Connect</button></div>
   </div>
 </div>
-<script>
-(() => {
-  const app = document.querySelector(".app");
-  const params = new URLSearchParams(window.location.search);
-  const urlToken = params.get("token");
-  const storedToken = sessionStorage.getItem("ntox_token");
-  let authToken = urlToken || storedToken || "";
-  if (urlToken) sessionStorage.setItem("ntox_token", urlToken);
-  const socket = io({ transports: ["websocket", "polling"], auth: { token: authToken } });
-  const messages = document.getElementById("messages");
-  const empty = document.getElementById("empty");
-  const thread = document.getElementById("thread");
-  const input = document.getElementById("input");
-  const send = document.getElementById("send");
-  const form = document.getElementById("form");
-  const activity = document.getElementById("activity");
-  const phasePill = document.getElementById("phase-pill");
-  const memoryPill = document.getElementById("memory-pill");
-  const statusDot = document.getElementById("status-dot");
-  const statusTitle = document.getElementById("status-title");
-  const statusSubtitle = document.getElementById("status-subtitle");
-  const side = document.getElementById("side");
-  let current = null;
-  let currentText = "";
-  let pending = false;
-
-  function setStatus(kind, title, subtitle) {
-    statusDot.className = "status-dot " + kind;
-    statusTitle.textContent = title;
-    statusSubtitle.textContent = subtitle;
-  }
-
-  function escapeHtml(text) {
-    const node = document.createElement("div");
-    node.textContent = text;
-    return node.innerHTML;
-  }
-
-  function renderText(text) {
-    const escaped = escapeHtml(text);
-    const parts = escaped.split(/```/);
-    return parts.map((part, index) => {
-      if (index % 2 === 1) return "<pre>" + part.replace(/^[a-z0-9_-]+\n/i, "") + "</pre>";
-      return part.replace(/`([^`]+)`/g, "<code>$1</code>");
-    }).join("");
-  }
-
-  function scrollDown() {
-    thread.scrollTop = thread.scrollHeight;
-  }
-
-  function addMessage(role, text) {
-    empty?.remove();
-    const wrap = document.createElement("article");
-    wrap.className = "message " + role;
-    const who = role === "user" ? "You" : "NTOX";
-    const avatar = role === "user" ? "Y" : "N";
-    wrap.innerHTML = `<div class="avatar">${avatar}</div><div class="bubble"><div class="meta"><strong>${who}</strong><span>${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div><div class="content"></div></div>`;
-    wrap.querySelector(".content").innerHTML = renderText(text || "");
-    messages.appendChild(wrap);
-    scrollDown();
-    return wrap;
-  }
-
-  function setReady(ready) {
-    input.disabled = !ready;
-    send.disabled = !ready;
-    if (ready) input.focus();
-  }
-
-  function addActivity(event, tone) {
-    const row = document.createElement("div");
-    row.className = "event " + (tone || "");
-    row.innerHTML = event;
-    activity.prepend(row);
-    while (activity.children.length > 30) activity.lastElementChild.remove();
-  }
-
-  function eventLabel(event) {
-    if (event.type === "phase") return `<strong>${escapeHtml(event.phase || "phase")}</strong>`;
-    if (event.type === "tool_call") return `<strong>tool</strong> ${escapeHtml(event.name || "")}`;
-    if (event.type === "tool_result") return `<strong>${event.success ? "tool ok" : "tool failed"}</strong> ${escapeHtml(event.name || "")}`;
-    if (event.type === "memory") return `<strong>memory</strong> ${escapeHtml(event.action || "")} ${event.count || ""}`;
-    if (event.type === "strategy") return `<strong>strategy</strong> ${escapeHtml(event.strategy || "")}`;
-    if (event.type === "skill") return `<strong>skill</strong> ${escapeHtml(event.skillName || "")}`;
-    if (event.type === "correction") return `<strong>correction</strong> ${escapeHtml(event.topicKey || "")}`;
-    if (event.type === "alive") return `<strong>alive</strong> ${escapeHtml(event.action?.kind || "action")}`;
-    return `<strong>event</strong> ${escapeHtml(event.type || "")}`;
-  }
-
-  function submit(text) {
-    const value = (text || input.value).trim();
-    if (!value || pending || socket.disconnected) return;
-    input.value = "";
-    autosize();
-    pending = true;
-    setReady(false);
-    addMessage("user", value);
-    currentText = "";
-    current = addMessage("assistant", "");
-    current.querySelector(".content").classList.add("cursor");
-    phasePill.textContent = "queued";
-    socket.emit("message", value);
-  }
-
-  function autosize() {
-    input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, 180) + "px";
-  }
-
-  socket.on("connect", () => {
-    setStatus("connected", "Connected", "local web gateway");
-    setReady(!pending);
-    loadStatus();
-  });
-  socket.on("disconnect", () => {
-    setStatus("disconnected", "Disconnected", "waiting for gateway");
-    setReady(false);
-  });
-  socket.on("connect_error", (err) => {
-    setStatus("disconnected", "Connection failed", "start ntox gateway web");
-    setReady(false);
-    if (err && (err.message === "Unauthorized" || err.data?.message === "Unauthorized")) {
-      showTokenPrompt();
-    }
-  });
-
-  const tokenOverlay = document.getElementById("token-overlay");
-  const tokenInput = document.getElementById("token-input");
-  const tokenError = document.getElementById("token-error");
-
-  function showTokenPrompt() {
-    if (tokenOverlay) tokenOverlay.hidden = false;
-    if (tokenInput) tokenInput.focus();
-  }
-
-  function connectWithToken(token) {
-    authToken = token;
-    sessionStorage.setItem("ntox_token", token);
-    if (tokenOverlay) tokenOverlay.hidden = true;
-    if (tokenError) tokenError.textContent = "";
-    socket.auth = { token };
-    socket.disconnect();
-    socket.connect();
-  }
-
-  document.getElementById("token-submit")?.addEventListener("click", () => {
-    const value = tokenInput?.value.trim() || "";
-    if (!value) {
-      if (tokenError) tokenError.textContent = "Token required";
-      return;
-    }
-    connectWithToken(value);
-  });
-  tokenInput?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      const value = tokenInput.value.trim();
-      if (value) connectWithToken(value);
-    }
-  });
-  socket.on("event", (event) => {
-    if (event.type === "phase") phasePill.textContent = event.phase || "working";
-    if (event.type === "memory") memoryPill.textContent = `${event.action || "memory"} ${event.count || ""}`.trim();
-    addActivity(eventLabel(event), event.type === "tool_result" ? (event.success ? "ok" : "fail") : "");
-  });
-  socket.on("token", (data) => {
-    if (!current) current = addMessage("assistant", "");
-    const content = current.querySelector(".content");
-    if (data.done) {
-      currentText = data.full || currentText;
-      content.innerHTML = renderText(currentText);
-      content.classList.remove("cursor");
-      current = null;
-      pending = false;
-      phasePill.textContent = "idle";
-      setReady(true);
-      scrollDown();
-      return;
-    }
-    currentText += data.text || "";
-    content.innerHTML = renderText(currentText);
-    scrollDown();
-  });
-  socket.on("error", (data) => {
-    addActivity(`<strong>error</strong> ${escapeHtml(data.text || "unknown")}`, "fail");
-    if (current) current.querySelector(".content").classList.remove("cursor");
-    current = null;
-    pending = false;
-    phasePill.textContent = "idle";
-    setReady(true);
-  });
-
-  async function loadStatus() {
-    try {
-      const res = await fetch("/status.json", {
-        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-      });
-      if (!res.ok) {
-        if (res.status === 401) showTokenPrompt();
-        return;
-      }
-      const status = await res.json();
-      document.getElementById("model").textContent = status.model || "unknown";
-      document.getElementById("provider").textContent = status.provider || "unknown";
-      document.getElementById("workspace").textContent = status.profile?.name || "local";
-      document.getElementById("session").textContent = `${status.sessions?.sessions || 0} active session${status.sessions?.sessions === 1 ? "" : "s"}`;
-    } catch {}
-  }
-
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    submit();
-  });
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      submit();
-    }
-  });
-  input.addEventListener("input", autosize);
-  document.querySelectorAll(".prompt").forEach((button) => button.addEventListener("click", () => submit(button.textContent)));
-  document.getElementById("new-chat").addEventListener("click", () => {
-    submit("/new");
-    side.classList.remove("open");
-  });
-  document.getElementById("clear").addEventListener("click", () => {
-    [...messages.querySelectorAll(".message")].forEach((node) => node.remove());
-    messages.appendChild(empty);
-  });
-  document.getElementById("theme").addEventListener("click", () => {
-    app.dataset.theme = app.dataset.theme === "dark" ? "light" : "dark";
-  });
-  document.getElementById("menu").addEventListener("click", () => side.classList.toggle("open"));
-  thread.addEventListener("click", () => side.classList.remove("open"));
-  setStatus("connecting", "Connecting", "local web gateway");
-})();
-</script>
+<script src="/app.js"></script>
 </body>
 </html>

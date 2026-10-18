@@ -167,6 +167,16 @@ export class AliveEngine {
     return clone(loop);
   }
 
+  completeOpenLoop(loopId: string, evidence: string): AliveOpenLoop | null {
+    const loop = this.state.openLoops.find((item) => item.id === loopId);
+    if (!loop || loop.status === "completed") return null;
+    loop.status = "completed";
+    loop.lastEvidence = evidence.slice(0, 300);
+    loop.updatedAt = this.now();
+    this.persist();
+    return clone(loop);
+  }
+
   createPrediction(input: CreatePredictionInput): AlivePrediction {
     if (input.openLoopId && !this.state.openLoops.some((loop) => loop.id === input.openLoopId)) {
       throw new Error(`Open loop ${input.openLoopId} does not exist`);

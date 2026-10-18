@@ -64,9 +64,39 @@ export class MistakeJournal {
     wrongAnswer: string,
     correction: string,
     source: "user-correction" | "self-reflection",
+    seq?: number,
   ): MistakeEntry {
     this.load();
     const existing = this.mistakes.findIndex((m) => m.topicKey === topicKey);
+    if (existing >= 0) {
+      const prev = this.mistakes[existing];
+      const followUps = (prev.followUps ?? 0) + 1;
+      let recurrences = prev.recurrences ?? 0;
+      let distance = prev.lastRecurrenceDistance;
+      let nextSeq = prev.seq;
+      if (seq !== undefined) {
+        const delta = prev.seq !== undefined ? Math.max(0, seq - prev.seq) : undefined;
+        if (delta !== undefined && delta <= 20) {
+          recurrences += 1;
+          distance = delta;
+        }
+        nextSeq = seq;
+      }
+      const updated: MistakeEntry = {
+        ...prev,
+        query: query.slice(0, 300),
+        wrongAnswer: wrongAnswer.slice(0, 500),
+        correction: correction.slice(0, 500),
+        timestamp: Date.now(),
+        followUps,
+        recurrences,
+        ...(nextSeq !== undefined ? { seq: nextSeq } : {}),
+        ...(distance !== undefined ? { lastRecurrenceDistance: distance } : {}),
+      };
+      this.mistakes[existing] = updated;
+      this.save();
+      return updated;
+    }
     const entry: MistakeEntry = {
       id: `mist_${randomUUID().slice(0, 8)}`,
       topicKey,
@@ -76,17 +106,31 @@ export class MistakeJournal {
       source,
       timestamp: Date.now(),
       fixed: true,
+      recurrences: 0,
+      followUps: 0,
+      ...(seq !== undefined ? { seq } : {}),
     };
-    if (existing >= 0) {
-      this.mistakes[existing] = entry;
-    } else {
-      this.mistakes.push(entry);
-      if (this.mistakes.length > 500) {
-        this.mistakes = this.mistakes.slice(-500);
-      }
+    this.mistakes.push(entry);
+    if (this.mistakes.length > 500) {
+      this.mistakes = this.mistakes.slice(-500);
     }
     this.save();
     return entry;
+  }
+
+  noteInjection(topicKeys: string[]): void {
+    if (topicKeys.length === 0) return;
+    this.load();
+    if (this.mistakes.length === 0) return;
+    const wanted = new Set(topicKeys);
+    let changed = false;
+    for (const m of this.mistakes) {
+      if (wanted.has(m.topicKey)) {
+        m.injections = (m.injections ?? 0) + 1;
+        changed = true;
+      }
+    }
+    if (changed) this.save();
   }
 
   getRelevantMistakes(query: string, limit: number = 5): MistakeEntry[] {
@@ -120,7 +164,17 @@ export class MistakeJournal {
     }
 
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, limit).map((s) => s.mistake);
+    const top = scored.slice(0, limit);
+    const topIds = new Set(top.map((s) => s.mistake.id));
+    const pinned = scored
+      .filter(
+        (s) =>
+          !topIds.has(s.mistake.id) &&
+          s.mistake.topicKey.length >= 4 &&
+          lower.includes(s.mistake.topicKey.toLowerCase()),
+      )
+      .slice(0, 2);
+    return [...pinned, ...top].map((s) => s.mistake);
   }
 
   buildMistakesContext(query: string): string {
@@ -133,6 +187,7 @@ export class MistakeJournal {
     const lines = relevant.map(
       (m) => `- Correction [${new Date(m.timestamp).toISOString().slice(0, 10)}]: ${m.topicKey} — ${m.correction}`,
     );
+    this.noteInjection(relevant.map((m) => m.topicKey));
 
     return `## Previous Corrections: Authoritative\nUse these corrections over conflicting older memories.\n${lines.join("\n")}`;
   }
@@ -142,13 +197,33 @@ export class MistakeJournal {
     return [...this.mistakes];
   }
 
-  getStats(): { total: number; bySource: Record<string, number> } {
+  getStats(): {
+    total: number;
+    bySource: Record<string, number>;
+    recurrences: number;
+    followUps: number;
+    recurrenceRate: number;
+    injected: number;
+  } {
     this.load();
     const bySource: Record<string, number> = {};
+    let recurrences = 0;
+    let followUps = 0;
+    let injected = 0;
     for (const m of this.mistakes) {
       bySource[m.source] = (bySource[m.source] || 0) + 1;
+      recurrences += m.recurrences ?? 0;
+      followUps += m.followUps ?? 0;
+      injected += m.injections ?? 0;
     }
-    return { total: this.mistakes.length, bySource };
+    return {
+      total: this.mistakes.length,
+      bySource,
+      recurrences,
+      followUps,
+      recurrenceRate: followUps > 0 ? recurrences / followUps : 0,
+      injected,
+    };
   }
 
   clearAll(): void {

@@ -33,7 +33,7 @@ const EMOTIONAL_MOMENT_PATTERNS = [
 ];
 
 const TOOL_BUILD_PATTERNS = [
-  /(create|build|make|develop)\s+(a|an|the)\s+(tool|script|program|app)/i,
+  /(create|build|make|develop)\s+(a|an|the)\s+(\w+\s+){0,2}(tool|script|program|app|game|website|site|project|bot|api|service|page|component|dashboard|landing)/i,
   /(write|create|save)\s+.+\s+(file|to disk|in the repo|in this project)/i,
   /\bimplement\b.+\b(in|inside|for)\s+(this|the)\s+(repo|project|codebase|file)/i,
   /register\s+(as|a)\s+(skill|tool|command)/i,

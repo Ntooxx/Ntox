@@ -75,7 +75,7 @@
 
 ### Phase 2 — Cognitive & Memory Depth
 1. Wire `NtoxCognitiveLayer` (tested but bypassed) into the agent runtime, or delete it.
-2. Run the cognitive benchmark (ON vs OFF) and commit results; add to CI when stable.
+2. Run the cognitive benchmark (ON vs OFF) and commit results; the CI `benchmark` job runs it (round 1, per-domain deltas → step summary + artifact) whenever a `NTOX_API_KEY`/`OPENROUTER_API_KEY` secret is configured.
 
 ### Phase 3 — Gateways & Integrations
 1. Wire existing `stt.ts`/`voice.ts` tools into Telegram/Discord for incoming voice messages and optional spoken replies.

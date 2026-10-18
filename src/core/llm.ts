@@ -1,7 +1,6 @@
 import type { Message, ModelInfo, CostUsage, ToolCall } from "../types/index.js";
 import type { OpenAITool } from "../tools/registry.js";
 import { localEmbed } from "./local-embed.js";
-import { encode } from "gpt-tokenizer";
 import {
   ApiError,
   StreamError,
@@ -14,6 +13,19 @@ import {
 import { StreamLineParser } from "./stream-parser.js";
 
 export function countTokens(text: string): number {
+  if (!text) return 0;
+  const words = (text.match(/\S+/g) || []).length;
+  const byChars = text.length / 4;
+  const byWords = words * 1.33;
+  return Math.ceil((byChars + byWords) / 2);
+}
+
+let tokenizerModule: Promise<typeof import("gpt-tokenizer")> | null = null;
+
+export async function countTokensExact(text: string): Promise<number> {
+  if (!text) return 0;
+  if (!tokenizerModule) tokenizerModule = import("gpt-tokenizer");
+  const { encode } = await tokenizerModule;
   return encode(text).length;
 }
 
@@ -151,10 +163,15 @@ function getProviderConfig(provider: string): ProviderConfig | undefined {
 
 const FETCH_TIMEOUT = 120000;
 const EMBED_TIMEOUT = 10000;
-const EMBED_BUDGET_MS = 1200;
-const EMBED_BUDGET_LOCAL_MS = 3000;
+const DEFAULT_EMBED_BUDGET_MS = 5000;
 const MIN_FALLBACK_BUDGET_MS = 300;
 const STREAM_STALL_TIMEOUT_MS = 90000;
+
+function embedBudgetMs(): number {
+  const env = process.env.NTOX_EMBED_BUDGET_MS;
+  const parsed = env ? Number(env) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_EMBED_BUDGET_MS;
+}
 
 function resolveProvider(configuredProvider: string, modelId: string): string {
   // Model prefix overrides configured provider for local providers
@@ -167,6 +184,20 @@ function resolveProvider(configuredProvider: string, modelId: string): string {
     if (modelId.startsWith(p + "/")) return p;
   }
   return "openrouter";
+}
+
+export function modelSupportsTools(model: { supported_parameters?: string[] } | null | undefined): boolean | null {
+  if (!model || !Array.isArray(model.supported_parameters) || model.supported_parameters.length === 0) return null;
+  return model.supported_parameters.includes("tools");
+}
+
+export function warnIfToolsUnsupported(models: ModelInfo[], modelId: string, source = "[llm]"): boolean {
+  const match = models.find((m) => m.id === modelId || m.id.endsWith(`/${modelId}`) || modelId.endsWith(`/${m.id}`));
+  if (modelSupportsTools(match) !== false) return false;
+  console.error(
+    `${source} model "${modelId}" does not advertise tool support — tool calls will fail. Pick a tool-capable model with /model.`,
+  );
+  return true;
 }
 
 type OpenAIMessage = {
@@ -349,27 +380,51 @@ async function* streamAnthropic(
   client: LLMClient,
   signal?: AbortSignal,
 ): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
+  const anthropicMessages: unknown[] = [];
+  for (const m of messages) {
+    if (m.role === "tool") {
+      const block = { type: "tool_result", tool_use_id: m.tool_call_id || "", content: m.content };
+      const last = anthropicMessages[anthropicMessages.length - 1] as { role?: string; content?: unknown } | undefined;
+      if (
+        last &&
+        last.role === "user" &&
+        Array.isArray(last.content) &&
+        last.content.every((b: { type?: string }) => b && b.type === "tool_result")
+      ) {
+        (last.content as unknown[]).push(block);
+      } else {
+        anthropicMessages.push({ role: "user", content: [block] });
+      }
+      continue;
+    }
+    if (m.role === "assistant") {
+      const blocks: unknown[] = [];
+      if (m.content && m.content !== "(tool call)") blocks.push({ type: "text", text: m.content });
+      if (m.tool_calls) {
+        for (const tc of m.tool_calls) {
+          blocks.push({
+            type: "tool_use",
+            id: tc.id,
+            name: tc.name,
+            input: JSON.parse(tc.arguments || "{}"),
+          });
+        }
+      }
+      anthropicMessages.push({
+        role: "assistant",
+        content: blocks.length > 0 ? blocks : m.content,
+      });
+      continue;
+    }
+    anthropicMessages.push({ role: m.role, content: m.content });
+  }
+
   const anthropicBody: Record<string, unknown> = {
     model: body.model,
     max_tokens: body.max_tokens || 4096,
+    temperature: body.temperature,
     stream: true,
-    messages: messages.map((m) => {
-      const msg: Record<string, unknown> = { role: m.role === "assistant" ? "assistant" : "user" };
-      if (m.content) msg.content = m.content;
-      if (m.tool_calls && m.role === "assistant") {
-        msg.content = m.tool_calls.map((tc) => ({
-          type: "tool_use",
-          id: tc.id,
-          name: tc.name,
-          input: JSON.parse(tc.arguments || "{}"),
-        }));
-      }
-      if (m.role === "tool") {
-        msg.role = "user";
-        msg.content = [{ type: "tool_result", tool_use_id: m.tool_call_id, content: m.content }];
-      }
-      return msg;
-    }),
+    messages: anthropicMessages,
   };
   if (system) anthropicBody.system = system;
 
@@ -426,6 +481,7 @@ async function* streamAnthropic(
 
   let yieldedAnyContent = false;
   const toolUseAcc = new Map<string, { id: string; name: string; args: string }>();
+  const blockIndexToToolId = new Map<number, string>();
 
   for await (const line of StreamLineParser.readLines(reader, { idleTimeoutMs: STREAM_STALL_TIMEOUT_MS, signal })) {
     if (!line.startsWith("data: ")) continue;
@@ -433,6 +489,7 @@ async function* streamAnthropic(
     try {
       const parsed = JSON.parse(data) as {
         type?: string;
+        index?: number;
         delta?: { text?: string; type?: string; partial_json?: string };
         content_block?: { type?: string; id?: string; name?: string; text?: string };
         error?: { message?: string; type?: string };
@@ -450,13 +507,14 @@ async function* streamAnthropic(
         const id = parsed.content_block.id || "";
         const name = parsed.content_block.name || "";
         toolUseAcc.set(id, { id, name, args: "" });
+        if (typeof parsed.index === "number") blockIndexToToolId.set(parsed.index, id);
       }
 
       if (parsed.type === "content_block_delta" && parsed.delta?.type === "input_json_delta") {
-        const block = parsed.content_block;
         const delta = parsed.delta;
-        if (block && delta.partial_json) {
-          const acc = toolUseAcc.get(String(block.id || ""));
+        if (delta.partial_json) {
+          const toolId = typeof parsed.index === "number" ? blockIndexToToolId.get(parsed.index) : undefined;
+          const acc = toolId ? toolUseAcc.get(toolId) : undefined;
           if (acc) acc.args += delta.partial_json;
         }
       }
@@ -658,7 +716,7 @@ export class LLMClient {
   private temperature: number;
   private apiBaseUrl: string;
   private configuredProvider: string;
-  private embedCache = new Map<string, number[]>();
+  private embedCache = new Map<string, { vector: number[]; model: string }>();
 
   inputTokens = 0;
   outputTokens = 0;
@@ -706,21 +764,21 @@ export class LLMClient {
     return getProviderConfig(provider) || PROVIDERS.openrouter;
   }
 
-  async embed(text: string): Promise<number[] | null> {
+  async embedWithMeta(text: string): Promise<{ vector: number[]; model: string } | null> {
     const cached = this.embedCache.get(text);
     if (cached) return cached;
 
     const provider = this.getProvider();
     const info = this.getProviderInfo();
-    const isLocal = !!info.embedUrl?.includes("localhost") || provider === "ollama";
     const startedAt = Date.now();
-    const budget = isLocal ? EMBED_BUDGET_LOCAL_MS : EMBED_BUDGET_MS;
+    const budget = embedBudgetMs();
     const remaining = () => Math.max(0, budget - (Date.now() - startedAt));
 
     const primary = await this.tryEmbed(provider, info, text, this.embeddingModelId, remaining());
     if (primary) {
-      this.embedCache.set(text, primary);
-      return primary;
+      const meta = { vector: primary, model: `remote:${provider}/${this.embeddingModelId}` };
+      this.embedCache.set(text, meta);
+      return meta;
     }
 
     if (
@@ -731,8 +789,9 @@ export class LLMClient {
       console.error(`[embed] primary model failed, trying fallback: openai/text-embedding-ada-002`);
       const fallback = await this.tryEmbed(provider, info, text, "openai/text-embedding-ada-002", remaining());
       if (fallback) {
-        this.embedCache.set(text, fallback);
-        return fallback;
+        const meta = { vector: fallback, model: `remote:${provider}/openai/text-embedding-ada-002` };
+        this.embedCache.set(text, meta);
+        return meta;
       }
     }
 
@@ -744,12 +803,17 @@ export class LLMClient {
         const first = this.embedCache.keys().next().value;
         if (first) this.embedCache.delete(first);
       }
-      this.embedCache.set(text, local);
-      return local;
+      const meta = { vector: local, model: "local-hash" };
+      this.embedCache.set(text, meta);
+      return meta;
     }
 
     console.error(`[embed] embedding budget of ${budget}ms exceeded, skipping memory embedding for this query`);
     return null;
+  }
+
+  async embed(text: string): Promise<number[] | null> {
+    return (await this.embedWithMeta(text))?.vector ?? null;
   }
 
   private async tryEmbed(
@@ -875,6 +939,9 @@ export class LLMClient {
             prompt: Number(m.pricing?.prompt ?? 0),
             completion: Number(m.pricing?.completion ?? 0),
           },
+          ...(Array.isArray(m.supported_parameters) && m.supported_parameters.length > 0
+            ? { supported_parameters: m.supported_parameters }
+            : {}),
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
     } catch (e) {

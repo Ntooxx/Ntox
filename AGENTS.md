@@ -69,4 +69,4 @@ See `src/core/dispatcher.ts` and `src/core/message-handler.ts` for the shared st
 - Add WhatsApp typing indicator and media handling (currently placeholders only)
 - Make Docker sandbox the default shell path when available
 - Add real-provider integration tests for each LLM wire format
-- Add cognitive benchmark results to CI (ON vs OFF per-domain deltas)
+- Publish cognitive benchmark results in the README (run `npm run bench:cognitive` with credentials)

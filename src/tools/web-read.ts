@@ -51,6 +51,7 @@ function makeStep(method: WebReadMethod, result: ToolResult): WebReadStep {
 
 export const webReadTool: Tool = {
   name: "web_read",
+  parallelSafe: true,
   description:
     "Reliably read a URL. Tries direct fetch first, then falls back to a browser-rendered markdown snapshot when content looks empty, blocked, or JavaScript-dependent.",
   parameters: {

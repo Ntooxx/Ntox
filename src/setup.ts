@@ -126,6 +126,7 @@ export default async function setup(): Promise<void> {
   console.log("     - Go to https://developers.facebook.com/apps/");
   console.log("     - Create a Business app with WhatsApp integration");
   console.log("     - Copy the Phone Number ID, Token, and create a Verify Token");
+  console.log("     - Copy the App Secret from App Settings > Basic (required to verify webhook signatures)");
   console.log("     - Set up webhook URL: https://YOUR_DOMAIN/webhook (requires HTTPS)");
   console.log("");
 
@@ -140,6 +141,8 @@ export default async function setup(): Promise<void> {
       if (phoneNumberId) config.whatsappPhoneNumberId = phoneNumberId;
       const verifyToken = await ask("     Create a Verify Token");
       if (verifyToken) config.whatsappVerifyToken = verifyToken;
+      const appSecret = await ask("     Paste your App Secret (webhook signature verification)");
+      if (appSecret) config.whatsappAppSecret = appSecret;
       const port = await ask(`     Webhook port [${config.whatsappPort || 3001}]`);
       if (port) config.whatsappPort = parseInt(port, 10) || 3001;
     }
@@ -152,6 +155,8 @@ export default async function setup(): Promise<void> {
       if (phoneNumberId) config.whatsappPhoneNumberId = phoneNumberId;
       const verifyToken = await ask("     Create a Verify Token");
       if (verifyToken) config.whatsappVerifyToken = verifyToken;
+      const appSecret = await ask("     Paste your App Secret (webhook signature verification)");
+      if (appSecret) config.whatsappAppSecret = appSecret;
     }
   }
   console.log("");
@@ -167,6 +172,15 @@ export default async function setup(): Promise<void> {
   if (webHost) config.webHost = webHost;
   const webAuthToken = await ask(`     Web UI access token (leave empty for no auth)`);
   if (webAuthToken) config.webAuthToken = webAuthToken;
+  console.log("");
+
+  // Step 7: HTTP API
+  console.log("  7. HTTP API (optional)");
+  console.log("     Exposes POST /api/chat (SSE) for web apps. Localhost only.");
+  const apiPort = await ask(`     API port [${config.apiPort || 3100}]`);
+  if (apiPort) config.apiPort = parseInt(apiPort, 10) || 3100;
+  const apiAuthToken = await ask(`     API bearer token (leave empty for no auth)`);
+  if (apiAuthToken) config.apiAuthToken = apiAuthToken;
   console.log("");
 
   // Save
@@ -190,6 +204,7 @@ export default async function setup(): Promise<void> {
   console.log(
     `    npx ntox gateway web  — Web UI at http://${config.webHost || "127.0.0.1"}:${config.webPort || 3000}`,
   );
+  console.log(`    npx ntox api          — HTTP/SSE API at http://127.0.0.1:${config.apiPort || 3100}`);
   console.log("    npx ntox setup        — Run this wizard again");
   console.log("");
 

@@ -1,5 +1,28 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { createWhatsAppChannel } from "../whatsapp.js";
+import { createHmac } from "node:crypto";
+import { createWhatsAppChannel, verifyWhatsAppSignature } from "../whatsapp.js";
+
+describe("verifyWhatsAppSignature", () => {
+  const secret = "test-app-secret";
+  const body = JSON.stringify({ entry: [] });
+
+  it("accepts a valid sha256 signature", () => {
+    const mac = createHmac("sha256", secret).update(body).digest("hex");
+    expect(verifyWhatsAppSignature(body, `sha256=${mac}`, secret)).toBe(true);
+  });
+
+  it("rejects an invalid signature", () => {
+    expect(verifyWhatsAppSignature(body, "sha256=deadbeef", secret)).toBe(false);
+  });
+
+  it("rejects a missing signature when secret is configured", () => {
+    expect(verifyWhatsAppSignature(body, undefined, secret)).toBe(false);
+  });
+
+  it("skips verification when no app secret is configured", () => {
+    expect(verifyWhatsAppSignature(body, undefined, "")).toBe(true);
+  });
+});
 
 describe("createWhatsAppChannel", () => {
   let fetchMock: ReturnType<typeof vi.fn>;

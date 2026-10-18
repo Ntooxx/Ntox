@@ -24,6 +24,9 @@ describe("classifyMode", () => {
     expect(classifyMode("create a tool that reads files")).toBe("tool-build");
     expect(classifyMode("build a script for deployment")).toBe("tool-build");
     expect(classifyMode("write this to a file in the repo")).toBe("tool-build");
+    expect(classifyMode("create a 3d game with motion design")).toBe("tool-build");
+    expect(classifyMode("make a website for my portfolio")).toBe("tool-build");
+    expect(classifyMode("build an api for user accounts")).toBe("tool-build");
   });
 
   it("does not treat code-printing requests as build mode", () => {

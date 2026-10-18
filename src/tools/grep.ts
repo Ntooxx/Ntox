@@ -26,6 +26,7 @@ function safeRegex(pattern: string, flags: string): RegExp | { error: string } {
 
 export const grepTool: Tool = {
   name: "grep",
+  parallelSafe: true,
   description: "Search file contents using a regex pattern. Returns matching files and line numbers.",
   parameters: {
     type: "object",

@@ -1,4 +1,5 @@
 import type { Agent, AgentCallbacks } from "./agent.js";
+import { createStreamingSanitizer } from "./guard.js";
 
 const SYSTEM_REMINDER_OPEN = "<system-reminder>";
 const SYSTEM_REMINDER_CLOSE = "</system-reminder>";
@@ -82,12 +83,15 @@ export async function runAgentStream(
   }
 
   const tokenFilter = new TokenFilter();
+  const sanitizer = createStreamingSanitizer();
   const agentCallbacks: AgentCallbacks = {
     onToken: (token) => {
       const filtered = tokenFilter.filter(token);
-      if (filtered) {
+      if (!filtered) return;
+      const safe = sanitizer.push(filtered);
+      if (safe) {
         outputTokenCount++;
-        callbacks.onToken?.(filtered);
+        callbacks.onToken?.(safe);
       }
     },
     onToolCall: (name, args) => callbacks.onToolCall?.(name, args),
@@ -128,6 +132,12 @@ export async function runAgentStream(
   } finally {
     clearTimeout(watchdog);
     if (signal) signal.removeEventListener("abort", onOuterAbort);
+  }
+
+  const tail = sanitizer.flush();
+  if (tail) {
+    outputTokenCount++;
+    callbacks.onToken?.(tail);
   }
 
   return { outputTokenCount, totalInputTokens, totalOutputTokens, error: streamError, cancelled, timedOut };

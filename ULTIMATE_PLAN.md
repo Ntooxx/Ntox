@@ -17,7 +17,7 @@ Everything else is hygiene.
 ## Phase 0 — Prove the Moat (do this first, nothing else matters more)
 
 - [ ] Run the cognitive-kernel benchmark (ON vs OFF) on a real eval set.
-- [ ] Add the benchmark to CI so results are tracked over time.
+- [x] Add the benchmark to CI so results are tracked over time.
 - [ ] Publish results in the README: "cognition improves task success by X%."
 - [ ] Decide per subsystem: **keep (has evidence), fix (worth fixing), cut (no evidence).**
 - [ ] If nothing shows a win: be honest, cut the theater, and rebuild the moat around

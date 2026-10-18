@@ -111,7 +111,7 @@ function persist(): void {
     nextMetaId,
     nextPredictionId,
   };
-  writeFileSync(THEORY_PATH, JSON.stringify(data, null, 2));
+  writeFileSync(THEORY_PATH, JSON.stringify(data));
 }
 
 function deriveConfidence(t: Theory): number {
@@ -589,7 +589,7 @@ export function extractObservationFromEpisode(
   return { description: `User asked about "${topic}": ${responsePreview}`, domain };
 }
 
-function detectDomain(text: string): string {
+export function detectDomain(text: string): string {
   const lower = text.toLowerCase();
   if (/\b(code|program|function|api|app|software|script|bug|deploy|build|compile|test)\b/i.test(lower))
     return "programming";

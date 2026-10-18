@@ -9,6 +9,7 @@ export const sttTool: Tool = {
     type: "object",
     properties: {
       audio: { type: "string", description: "Base64-encoded audio data or path to an audio file" },
+      filename: { type: "string", description: "Filename hint with extension when audio is base64 (e.g. audio.webm)" },
     },
     required: ["audio"],
   },
@@ -31,6 +32,10 @@ export const sttTool: Tool = {
     } else {
       const base64Data = audioInput.includes(",") ? audioInput.split(",").pop()! : audioInput;
       audioBuffer = Buffer.from(base64Data, "base64");
+      const hinted = String(args.filename || "")
+        .replace(/[^\w.-]/g, "")
+        .replace(/\.+$/, "");
+      if (/^[\w-]+\.[a-z0-9]{2,5}$/i.test(hinted)) filename = hinted;
     }
 
     try {

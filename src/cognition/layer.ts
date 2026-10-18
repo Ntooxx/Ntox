@@ -15,6 +15,7 @@ export interface CognitiveStepInput {
   userMessage: string;
   turnId?: string;
   embedding?: number[] | null;
+  embeddingModel?: string;
   workspace?: string;
   metadata?: Record<string, string>;
 }
@@ -64,6 +65,7 @@ export interface CognitiveTurnResult {
   assistantResponse: string;
   turnId?: string;
   embedding?: number[] | null;
+  embeddingModel?: string;
   correction?: CognitiveCorrection;
 }
 
@@ -112,6 +114,7 @@ export interface CognitiveLayerServices {
 interface PendingStep {
   userMessage: string;
   embedding: number[] | null;
+  embeddingModel?: string;
 }
 
 const EMPTY_REVIEW = {
@@ -164,6 +167,22 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     this.kernel.setEnabled(this.options.cognitionEnabled);
   }
 
+  setStoreFlags(flags: {
+    cognitionEnabled?: boolean;
+    memoryEnabled?: boolean;
+    theoryEnabled?: boolean;
+    mistakesEnabled?: boolean;
+    strategyEnabled?: boolean;
+    storeEnabled?: boolean;
+    memoryRetrievalCount?: number;
+  }): void {
+    if (flags.memoryRetrievalCount !== undefined) {
+      flags = { ...flags, memoryRetrievalCount: Math.max(1, flags.memoryRetrievalCount) };
+    }
+    Object.assign(this.options, flags);
+    if (flags.cognitionEnabled !== undefined) this.kernel.setEnabled(flags.cognitionEnabled);
+  }
+
   async beforeStep(input: CognitiveStepInput): Promise<CognitiveStepContext> {
     const errors: string[] = [];
     const sections: CognitiveContextSection[] = [];
@@ -213,7 +232,12 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     let memoryIncluded = false;
     if (this.options.memoryEnabled && this.options.storeEnabled) {
       try {
-        const context = this.memory.buildMemoryContext(embedding, this.options.memoryRetrievalCount);
+        const context = this.memory.buildMemoryContext(
+          embedding,
+          this.options.memoryRetrievalCount,
+          input.embeddingModel,
+          input.userMessage,
+        );
         if (context.trim()) {
           memoryIncluded = true;
           sections.push({ name: "memory", content: context });
@@ -239,6 +263,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     this.pendingSteps.set(turnKey(input.sessionId, input.turnId), {
       userMessage: input.userMessage,
       embedding,
+      embeddingModel: input.embeddingModel,
     });
 
     return {
@@ -286,7 +311,14 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
 
     if (this.options.memoryEnabled && this.options.storeEnabled) {
       try {
-        episode = this.memory.addEpisode(turn.sessionId, userMessage, turn.assistantResponse, embedding ?? []);
+        const storedModel = turn.embeddingModel ?? pending?.embeddingModel;
+        episode = this.memory.addEpisode(
+          turn.sessionId,
+          userMessage,
+          turn.assistantResponse,
+          embedding ?? [],
+          storedModel,
+        );
         memoryId = episode.id;
       } catch (error) {
         errors.push(errorMessage("memory", error));
