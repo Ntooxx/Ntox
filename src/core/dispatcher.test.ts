@@ -82,6 +82,34 @@ describe("SessionManager", () => {
     expect(sm.isLocked("chat1")).toBe(false);
   });
 
+  it("expires stale locks and can reclaim them", () => {
+    vi.useFakeTimers();
+    try {
+      const sm = new SessionManager();
+      expect(sm.lock("chat1")).toBe(true);
+      vi.advanceTimersByTime(31 * 60 * 1000);
+      expect(sm.isLocked("chat1")).toBe(false);
+      expect(sm.lock("chat1")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps active locks fresh via refreshLock", () => {
+    vi.useFakeTimers();
+    try {
+      const sm = new SessionManager();
+      expect(sm.lock("chat1")).toBe(true);
+      for (let i = 0; i < 10; i++) {
+        vi.advanceTimersByTime(5 * 60 * 1000);
+        sm.refreshLock("chat1");
+      }
+      expect(sm.isLocked("chat1")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("purges expired sessions", () => {
     const sm = new SessionManager(-1);
     sm.getOrCreate("chat1", {} as AgentConfig);

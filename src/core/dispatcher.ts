@@ -239,10 +239,12 @@ export function createAgentConfig(
   };
 }
 
+const LOCK_STALE_MS = 30 * 60 * 1000;
+
 export class SessionManager implements SessionStore {
   private agents = new Map<string, Agent>();
   private lastActive = new Map<string, number>();
-  private locks = new Map<string, boolean>();
+  private locks = new Map<string, number>();
   private ttl: number;
 
   constructor(ttlMs: number = 30 * 60 * 1000) {
@@ -250,8 +252,8 @@ export class SessionManager implements SessionStore {
   }
 
   lock(id: string): boolean {
-    if (this.locks.has(id)) return false;
-    this.locks.set(id, true);
+    if (this.isLocked(id)) return false;
+    this.locks.set(id, Date.now());
     return true;
   }
 
@@ -260,7 +262,17 @@ export class SessionManager implements SessionStore {
   }
 
   isLocked(id: string): boolean {
-    return this.locks.has(id);
+    const lockedAt = this.locks.get(id);
+    if (lockedAt === undefined) return false;
+    if (Date.now() - lockedAt > LOCK_STALE_MS) {
+      this.locks.delete(id);
+      return false;
+    }
+    return true;
+  }
+
+  refreshLock(id: string): void {
+    if (this.locks.has(id)) this.locks.set(id, Date.now());
   }
 
   getOrCreate(id: string, cfg: AgentConfig): Agent {
@@ -316,7 +328,11 @@ export class SessionManager implements SessionStore {
   }
 
   status(): { sessions: number; locked: number; ids: string[] } {
-    return { sessions: this.agents.size, locked: this.locks.size, ids: this.getActiveChats() };
+    return {
+      sessions: this.agents.size,
+      locked: [...this.locks.keys()].filter((id) => this.isLocked(id)).length,
+      ids: this.getActiveChats(),
+    };
   }
 }
 

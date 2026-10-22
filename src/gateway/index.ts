@@ -128,101 +128,110 @@ export async function runGateway(channel?: string): Promise<void> {
         return "Processing your previous message. Please wait.";
       }
       sessions.lock(chatId);
-
-      const sessionInfra = getOrCreateSessionInfra(chatId, shared);
-      const agent = sessions.getOrCreate(
-        chatId,
-        createAgentConfig({ ...shared, ...sessionInfra }, config, `${ctx}_${chatId}`, { skipReflection: true }),
-      );
-      const direct = (response: string, record = true): string => {
-        if (record) {
-          recordDirectGatewayResponse(agent, text, response);
-          sessions.touch(chatId);
-        }
-        sessions.unlock(chatId);
-        return response;
-      };
-
-      if (text === "/new" || text === "/reset") {
-        agent.resetConversation();
-        if (ctx === "web") conversations.clearMessages(chatId);
-        return direct("Fresh start. Go ahead.", false);
-      }
-      if (text === "/help") {
-        sessions.unlock(chatId);
-        return `Ntox on ${ctx}.\n\nSend any message. I can read/write files, run commands, search the web, and code.\n\n/new — reset conversation\n/cron — scheduled automations\n/approve <once|session|always|deny> <command> — allow or block a risky command\n/help — this message`;
-      }
-
-      sessions.touch(chatId);
-      const activeChannel = channelsByName.get(ctx);
-      const notifyTyping = activeChannel ? () => activeChannel.notifyTyping(chatId) : undefined;
-      let promptText = text;
-      if (ctx === "web" && /@(?:https?:\/\/|~\/|\.{0,2}\/|[A-Za-z]:\\|HEAD|main|master|dev)/.test(text)) {
-        try {
-          promptText = await processAtReferences(text);
-        } catch {
-          promptText = text;
-        }
-      }
-
-      const pendingKey = `${ctx}:${chatId}`;
-      const bridgeEvent = (event: Record<string, unknown>) => {
-        if (event.type === "tool_result" && !event.success && isApprovalRequired(event.error as string)) {
-          const command = extractApprovalCommand(String(event.error || ""));
-          if (command) {
-            pendingApprovals.set(pendingKey, { command, prompt: promptText });
-            if (ctx !== "web") {
-              const sender = channelSenders.get(ctx);
-              if (sender) void sender(chatId, renderApprovalRequest(command)).catch(() => {});
-            }
-          }
-        }
-        onEvent?.(event);
-      };
-
-      const approveParse = parseApproveCommand(text);
-      if (approveParse.kind !== "not-approve") {
-        if (approveParse.kind === "invalid") return direct(approveParse.message);
-        const pending = pendingApprovals.get(pendingKey);
-        const resolved = resolveApproval(approveParse.scope, approveParse.command, pending);
-        if (!resolved.ok) return direct(resolved.message);
-        approvalStore.store("shell", `shell:${resolved.command}`, resolved.decision);
-        if (pending && pending.command === resolved.command) pendingApprovals.delete(pendingKey);
-        if (!resolved.retryPrompt) return direct(renderApprovalOutcome(resolved));
-        try {
-          agent.removeLastTurn();
-          const output = new GatewayOutput(notifyTyping, onToken, bridgeEvent);
-          const result = await runAgentMessage(agent, resolved.retryPrompt, output, signal);
-          if (result.error) {
-            if (signal?.aborted || result.error.includes("cancelled")) {
-              return sanitizeOutput(output.flush());
-            }
-            return `Error: ${result.error.slice(0, 400)}`;
-          }
-          const safe = sanitizeOutput(result.response);
-          if (ctx !== "web") {
-            return safe.length > 4000 ? safe.slice(0, 3997) + "..." : safe;
-          }
-          return safe;
-        } finally {
-          sessions.unlock(chatId);
-        }
-      }
-
-      if (isAliveQuery(text)) {
-        return direct(renderAliveStatus(shared.alive.inspect(12)));
-      }
-
-      const cronResponse = handleCronCommand(text, ctx, chatId);
-      if (cronResponse) {
-        return direct(cronResponse);
-      }
-
       try {
+        const sessionInfra = getOrCreateSessionInfra(chatId, shared);
+        const agent = sessions.getOrCreate(
+          chatId,
+          createAgentConfig({ ...shared, ...sessionInfra }, config, `${ctx}_${chatId}`, { skipReflection: true }),
+        );
+        const direct = (response: string, record = true): string => {
+          if (record) {
+            recordDirectGatewayResponse(agent, text, response);
+            sessions.touch(chatId);
+          }
+          return response;
+        };
+
+        if (text === "/new" || text === "/reset") {
+          agent.resetConversation();
+          if (ctx === "web") conversations.clearMessages(chatId);
+          return direct("Fresh start. Go ahead.", false);
+        }
+        if (text === "/help") {
+          return `Ntox on ${ctx}.\n\nSend any message. I can read/write files, run commands, search the web, and code.\n\n/new — reset conversation\n/cron — scheduled automations\n/approve <once|session|always|deny> <command> — allow or block a risky command\n/help — this message`;
+        }
+
+        sessions.touch(chatId);
+        const activeChannel = channelsByName.get(ctx);
+        const notifyTyping = activeChannel ? () => activeChannel.notifyTyping(chatId) : undefined;
+        const refresh = () => sessions.refreshLock(chatId);
+        let promptText = text;
+        if (ctx === "web" && /@(?:https?:\/\/|~\/|\.{0,2}\/|[A-Za-z]:\\|HEAD|main|master|dev)/.test(text)) {
+          try {
+            promptText = await processAtReferences(text);
+          } catch {
+            promptText = text;
+          }
+        }
+
+        const pendingKey = `${ctx}:${chatId}`;
+        const bridgeEvent = (event: Record<string, unknown>) => {
+          refresh();
+          if (event.type === "tool_result" && !event.success && isApprovalRequired(event.error as string)) {
+            const command = extractApprovalCommand(String(event.error || ""));
+            if (command) {
+              pendingApprovals.set(pendingKey, { command, prompt: promptText });
+              if (ctx !== "web") {
+                const sender = channelSenders.get(ctx);
+                if (sender) void sender(chatId, renderApprovalRequest(command)).catch(() => {});
+              }
+            }
+          }
+          onEvent?.(event);
+        };
+
+        const approveParse = parseApproveCommand(text);
+        if (approveParse.kind !== "not-approve") {
+          if (approveParse.kind === "invalid") return direct(approveParse.message);
+          const pending = pendingApprovals.get(pendingKey);
+          const resolved = resolveApproval(approveParse.scope, approveParse.command, pending);
+          if (!resolved.ok) return direct(resolved.message);
+          approvalStore.store("shell", `shell:${resolved.command}`, resolved.decision);
+          if (pending && pending.command === resolved.command) pendingApprovals.delete(pendingKey);
+          if (!resolved.retryPrompt) return direct(renderApprovalOutcome(resolved));
+          agent.removeLastTurn();
+          const retryOutput = new GatewayOutput(
+            notifyTyping,
+            (t) => {
+              refresh();
+              onToken?.(t);
+            },
+            bridgeEvent,
+          );
+          const retryResult = await runAgentMessage(agent, resolved.retryPrompt, retryOutput, signal);
+          if (retryResult.error) {
+            if (signal?.aborted || retryResult.error.includes("cancelled")) {
+              return sanitizeOutput(retryOutput.flush());
+            }
+            return `Error: ${retryResult.error.slice(0, 400)}`;
+          }
+          const retrySafe = sanitizeOutput(retryResult.response);
+          if (ctx !== "web") {
+            return retrySafe.length > 4000 ? retrySafe.slice(0, 3997) + "..." : retrySafe;
+          }
+          return retrySafe;
+        }
+
+        if (isAliveQuery(text)) {
+          return direct(renderAliveStatus(shared.alive.inspect(12)));
+        }
+
+        const cronResponse = handleCronCommand(text, ctx, chatId);
+        if (cronResponse) {
+          return direct(cronResponse);
+        }
+
         if (mode === "regenerate") {
           agent.removeLastTurn();
         }
-        const output = new GatewayOutput(notifyTyping, onToken, bridgeEvent);
+        const output = new GatewayOutput(
+          notifyTyping,
+          (t) => {
+            refresh();
+            onToken?.(t);
+          },
+          bridgeEvent,
+        );
         const result = await runAgentMessage(agent, promptText, output, signal);
         if (result.error) {
           if (signal?.aborted || result.error.includes("cancelled")) {
