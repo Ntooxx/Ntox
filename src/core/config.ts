@@ -115,7 +115,7 @@ const DEFAULT_CONFIG: NtoxConfig = {
   model: "openai/gpt-4o-mini",
   provider: "openrouter",
   apiBaseUrl: "",
-  maxTokens: 4096,
+  maxTokens: 32000,
   temperature: 0.7,
   // prettier-ignore
   systemPrompt: [
@@ -165,12 +165,10 @@ const DEFAULT_CONFIG: NtoxConfig = {
     "Run the build, linter, or tests after making changes to verify they work.",
 
     "## Writing Files",
-    "Use the write tool for small files only (under 2KB).",
-    "For files over 2KB (HTML, CSS, JS, etc.), use the shell tool with PowerShell here-strings.",
-    "PowerShell here-string syntax: @'<newline>content<newline>'@ | Set-Content -Path \"file.html\" -Encoding UTF8",
-    "This avoids JSON escaping bugs that break large content in tool call arguments.",
-    "The write tool's content parameter goes through JSON serialization which corrupts large HTML/JS/CSS with quotes and special chars.",
-    "Shell here-strings pass content verbatim with no escaping issues.",
+    "Use the write tool for any file size — HTML, CSS, JS, JSON, or code.",
+    "The write tool writes content byte-for-byte; quotes, backticks, template literals, and ${} pass through untouched.",
+    "Do not use shell here-strings ( @'...'@ ) to write files — they add no safety and are slower than write.",
+    "Write the whole file in one write call instead of splitting it into chunks or appending in pieces.",
 
     "## Memory and Profile",
     "You have access to the user's profile (name, expertise, preferences) and past conversation memories.",
@@ -201,7 +199,7 @@ const DEFAULT_CONFIG: NtoxConfig = {
   embeddingModel: "openai/text-embedding-3-small",
   memoryEnabled: true,
   memoryRetrievalCount: 20,
-  systemContextBudget: 6000,
+  systemContextBudget: 20000,
   contextCompilerEnabled: true,
   predictionLlmEnabled: true,
   modelCritiqueEnabled: true,
@@ -279,13 +277,17 @@ export function hasLegacyToolPrompt(systemPrompt: string): boolean {
   return LEGACY_XML_TOOL_PROMPT.test(systemPrompt);
 }
 
+function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
 function loadConfigRaw(): NtoxConfig {
   if (!existsSync(CONFIG_PATH)) {
     saveConfig(DEFAULT_CONFIG);
     return { ...DEFAULT_CONFIG };
   }
   try {
-    const raw = readFileSync(CONFIG_PATH, "utf-8");
+    const raw = stripBom(readFileSync(CONFIG_PATH, "utf-8"));
     const parsed = JSON.parse(raw) as Partial<NtoxConfig>;
     const merged = normalizeConfig({ ...DEFAULT_CONFIG, ...parsed });
     if (typeof parsed.systemPrompt === "string" && hasLegacyToolPrompt(parsed.systemPrompt)) {
@@ -302,7 +304,13 @@ function loadConfigRaw(): NtoxConfig {
       return { ...DEFAULT_CONFIG, ...merged } as NtoxConfig;
     }
     return merged;
-  } catch {
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    console.error(
+      `[config] Failed to parse ${CONFIG_PATH}: ${reason}\n` +
+        `[config] Falling back to defaults (model ${DEFAULT_CONFIG.model}, empty apiKey).\n` +
+        `[config] Your saved settings are NOT lost — fix the file and restart.`,
+    );
     return { ...DEFAULT_CONFIG };
   }
 }
@@ -338,6 +346,12 @@ export function saveConfig(config: NtoxConfig): void {
   try {
     chmodSync(CONFIG_PATH, 0o600);
   } catch {}
+}
+
+export function patchConfig(patch: Partial<NtoxConfig>): NtoxConfig {
+  const merged = { ...loadConfigRaw(), ...patch };
+  saveConfig(merged);
+  return merged;
 }
 
 export function loadCosts(): { totalInputTokens: number; totalOutputTokens: number; totalCost: number } {

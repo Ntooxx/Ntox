@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { NTOX_DIR, hasLegacyToolPrompt, loadConfig, normalizeConfig, saveConfig, validateConfig } from "./config.js";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { NTOX_DIR, hasLegacyToolPrompt, loadConfig, normalizeConfig, patchConfig, saveConfig, validateConfig } from "./config.js";
 import type { NtoxConfig } from "../types/index.js";
 
 describe("validateConfig", () => {
@@ -128,7 +128,7 @@ describe("config", () => {
     if (existsSync(cfgPath())) unlinkSync(cfgPath());
     const config = loadConfig();
     expect(config.model).toBe("openai/gpt-4o-mini");
-    expect(config.maxTokens).toBe(4096);
+    expect(config.maxTokens).toBe(32000);
     expect(config.temperature).toBe(0.7);
     expect(config.memoryEnabled).toBe(true);
     expect(config.uiMode).toBe("normal");
@@ -160,7 +160,7 @@ describe("config", () => {
     saveConfig({ model: "ollama/llama3" } as NtoxConfig);
     const loaded = loadConfig();
     expect(loaded.model).toBe("ollama/llama3");
-    expect(loaded.maxTokens).toBe(4096); // default preserved
+    expect(loaded.maxTokens).toBe(32000); // default preserved
     expect(loaded.memoryEnabled).toBe(true); // default preserved
   });
 
@@ -168,6 +168,19 @@ describe("config", () => {
     expect(hasLegacyToolPrompt("To call a tool, output EXACTLY this XML block (no surrounding text)")).toBe(true);
     expect(hasLegacyToolPrompt("wrap it in <tool_call> tags")).toBe(true);
     expect(hasLegacyToolPrompt("Tools are available via native function calling")).toBe(false);
+  });
+
+  it("loads a config written with a UTF-8 BOM", () => {
+    saveConfig({ model: "xiaomi/mimo-v2.6-flash", apiKey: "sk-bom-test" } as NtoxConfig);
+    const body = readFileSync(cfgPath(), "utf-8");
+    const withBom = String.fromCharCode(0xfeff) + body;
+    writeFileSync(cfgPath(), withBom, "utf-8");
+    expect(readFileSync(cfgPath(), "utf-8").charCodeAt(0)).toBe(0xfeff);
+
+    const loaded = loadConfig();
+    expect(loaded.model).toBe("xiaomi/mimo-v2.6-flash");
+    expect(loaded.apiKey).toBe("sk-bom-test");
+    expect(loaded.maxTokens).toBe(32000);
   });
 
   it("repairs a stale legacy XML tool-call systemPrompt on load", () => {
@@ -180,5 +193,35 @@ describe("config", () => {
     expect(loaded.systemPrompt).toContain("native function calling");
     const onDisk = JSON.parse(readFileSync(cfgPath(), "utf-8")) as NtoxConfig;
     expect(hasLegacyToolPrompt(onDisk.systemPrompt)).toBe(false);
+  });
+
+  it("patchConfig preserves fields changed on disk after boot", () => {
+    saveConfig({ model: "xiaomi/mimo-v2.6-flash", apiKey: "sk-boot-key", temperature: 0.7 } as NtoxConfig);
+
+    const staleInMemory = loadConfig();
+    expect(staleInMemory.apiKey).toBe("sk-boot-key");
+
+    writeFileSync(
+      cfgPath(),
+      JSON.stringify({ model: "xiaomi/mimo-v2.6-flash", apiKey: "sk-rotated-key", temperature: 0.7 }),
+      "utf-8",
+    );
+
+    staleInMemory.model = "openai/gpt-4o";
+    const result = patchConfig({ model: "openai/gpt-4o" });
+
+    const onDisk = JSON.parse(readFileSync(cfgPath(), "utf-8")) as NtoxConfig;
+    expect(onDisk.model).toBe("openai/gpt-4o");
+    expect(onDisk.apiKey).toBe("sk-rotated-key");
+    expect(result.apiKey).toBe("sk-rotated-key");
+  });
+
+  it("saveConfig writes no BOM so loadConfig can read it back", () => {
+    saveConfig({ model: "xiaomi/mimo-v2.6-flash", apiKey: "sk-roundtrip" } as NtoxConfig);
+    const bytes = readFileSync(cfgPath());
+    expect(bytes[0]).not.toBe(0xef);
+    expect(bytes[1]).not.toBe(0xbb);
+    expect(bytes[2]).not.toBe(0xbf);
+    expect(loadConfig().apiKey).toBe("sk-roundtrip");
   });
 });

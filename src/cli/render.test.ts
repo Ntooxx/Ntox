@@ -40,6 +40,25 @@ describe("tool result rendering", () => {
   it("summarizes failures without throwing", () => {
     expect(summarizeToolResult("read", { success: false, error: "bad path" })).toBe("bad path");
   });
+
+  it("summarizes checkpoint-wrapped write results without [object Object]", () => {
+    const rendered = summarizeToolResult("write", {
+      success: true,
+      data: { result: "Written 95 bytes to test.html", autoCheckpointId: "cp_1" },
+    });
+    expect(rendered).toContain("Written 95 bytes to test.html");
+    expect(rendered).toContain("cp_1");
+    expect(rendered).not.toContain("[object Object]");
+  });
+
+  it("summarizes checkpoint tool results by path", () => {
+    const rendered = summarizeToolResult("checkpoint", {
+      success: true,
+      data: { checkpointId: "cp_2", path: "C:/repo/a.ts", size: 12 },
+    });
+    expect(rendered).toContain("C:/repo/a.ts");
+    expect(rendered).toContain("cp_2");
+  });
 });
 
 describe("guide rendering", () => {

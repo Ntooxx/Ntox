@@ -3,7 +3,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { randomUUID } from "node:crypto";
 import chalk from "chalk";
 import { createAgentInfra, createAgentConfig } from "../core/dispatcher.js";
-import { runAgentStream } from "../core/message-handler.js";
+import { runAgentStream, computeTurnTimeoutMs } from "../core/message-handler.js";
 import { BriefingEngine } from "../meta/briefing.js";
 import {
   LLMClient,
@@ -13,6 +13,7 @@ import {
   getProviders,
   providerRequiresKey,
   modelSupportsTools,
+  formatTokenCount,
   LOCAL_PROVIDERS,
 } from "../core/llm.js";
 import { describeError } from "../core/errors.js";
@@ -48,17 +49,17 @@ import {
   formatTheoryEvidence,
   formatTheoryOverview,
 } from "./inspect.js";
-import { approvalStore } from "../tools/approval.js";
+import { approvalStore, setInteractiveApproval } from "../tools/approval.js";
 import { Spinner, animateExit } from "./animation.js";
 import { BlockBuffer } from "./block-buffer.js";
 import { ChatRenderer } from "./chat-renderer.js";
 import { playIntro } from "./intro.js";
-import { normalizeCommandName } from "./commands.js";
+import { normalizeCommandName, parseTokenLimit } from "./commands.js";
 import { runFirstTimeOnboarding } from "./first-time.js";
 import { processAtReferences } from "./at-refs.js";
 import { getFileChangesSince, renderFileChanges } from "../tools/change-tracker.js";
-import { loadConfig, saveConfig, loadCosts, saveCosts, loadCachedModels, saveCachedModels } from "../core/config.js";
-import type { ModelInfo, Reflection, QueryType, AgentTurnTrace } from "../types/index.js";
+import { loadConfig, patchConfig, loadCosts, saveCosts, loadCachedModels, saveCachedModels } from "../core/config.js";
+import type { ModelInfo, Reflection, QueryType, AgentTurnTrace, NtoxConfig } from "../types/index.js";
 import {
   renderHeaderBar,
   renderStatusBar,
@@ -83,7 +84,7 @@ import {
   termWidth,
 } from "./render.js";
 import { revealBlock, sweepDivider } from "./motion.js";
-import { gradient, palette } from "./theme.js";
+import { accents, gradient, palette } from "./theme.js";
 
 const MODEL_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -114,6 +115,8 @@ export class Repl {
   private lastSubmittedInput: string | null = null;
   private lastReflection: Reflection | null = null;
   private lastStrategy: QueryType | null = null;
+  private thinkingChars = 0;
+  private turnStartedAtMs = 0;
 
   private infra: ReturnType<typeof createAgentInfra>;
   private briefingEngine: BriefingEngine;
@@ -223,7 +226,35 @@ export class Repl {
     if (resumeMessage) console.log(chalk.cyan(resumeMessage), "\n");
     await this.showAutoBrief();
     this.rl = readline.createInterface({ input, output });
+    this.registerApprovalPrompt();
     this.loop();
+  }
+
+  private registerApprovalPrompt(): void {
+    setInteractiveApproval(async (toolName, command) => {
+      const preview = command.length > 160 ? `${command.slice(0, 160)}…` : command;
+      Spinner.pauseGlobally(true);
+      try {
+        console.log("");
+        console.log(`  ${accents.warn("▲")} ${chalk.bold("approval needed")} ${accents.soft(`· ${toolName}`)}`);
+        console.log(`    ${chalk.dim(preview.replace(/\s+/g, " "))}`);
+        const answer = await new Promise<string>((resolve) => {
+          this.rl.question(
+            `  ${accents.gold("?")} allow? ${accents.soft("[y] once · [s] session · [a] always · [N] no")} `,
+            resolve,
+          );
+        });
+        const a = answer.trim().toLowerCase();
+        if (a === "y" || a === "yes") return "allow-once";
+        if (a === "s" || a === "session") return "allow-session";
+        if (a === "a" || a === "always") return "allow-always";
+        return "deny";
+      } catch {
+        return "deny";
+      } finally {
+        Spinner.pauseGlobally(false);
+      }
+    });
   }
 
   private async promptApiKey(): Promise<void> {
@@ -231,7 +262,8 @@ export class Repl {
     const localProviders = LOCAL_PROVIDERS;
     const apiProviders = Object.entries(providerNames).filter(([k]) => !localProviders.includes(k));
 
-    console.log(chalk.bold("\n  Welcome to NTOX!\n"));
+    console.log("");
+    console.log(`  ${gradient("Welcome to NTOX", palette.accent, palette.violet)}`);
     console.log(chalk.dim("  I need an AI provider to work. Choose one:\n"));
 
     // Auto-detect local
@@ -248,18 +280,18 @@ export class Repl {
     let idx = 1;
     if (localOllama) {
       console.log(
-        `  ${chalk.cyan(`${idx}.`)} ${chalk.bold("Ollama")} ${chalk.green("(detected)")} ${chalk.dim("— no key needed, local models")}`,
+        `  ${accents.title(`${idx}.`)} ${chalk.bold("Ollama")} ${accents.good("(detected)")} ${chalk.dim("— no key needed, local models")}`,
       );
       idx++;
     }
     if (localLmstudio) {
       console.log(
-        `  ${chalk.cyan(`${idx}.`)} ${chalk.bold("LM Studio")} ${chalk.green("(detected)")} ${chalk.dim("— no key needed, local models")}`,
+        `  ${accents.title(`${idx}.`)} ${chalk.bold("LM Studio")} ${accents.good("(detected)")} ${chalk.dim("— no key needed, local models")}`,
       );
       idx++;
     }
     for (const [key, name] of apiProviders) {
-      console.log(`  ${chalk.cyan(`${idx}.`)} ${chalk.bold(name)} ${chalk.dim(`(${key})`)}`);
+      console.log(`  ${accents.title(`${idx}.`)} ${chalk.bold(name)} ${chalk.dim(`(${key})`)}`);
       idx++;
     }
 
@@ -275,7 +307,6 @@ export class Repl {
         const trimmed = answer.trim();
         if (!trimmed) {
           console.log(chalk.dim("  Skipping setup. Use /config to set up later.\n"));
-          saveConfig(this.config);
           done();
           resolve();
           return;
@@ -294,7 +325,7 @@ export class Repl {
           this.config.provider = selected.key;
 
           if (selected.key === "ollama" || selected.key === "lmstudio") {
-            saveConfig(this.config);
+            this.config = patchConfig({ provider: selected.key });
             console.log(chalk.green(`  Using ${selected.name}. No API key needed.\n`));
             done();
             resolve();
@@ -305,8 +336,11 @@ export class Repl {
             tempRl.question(chalk.cyan("  API base URL (e.g. http://localhost:8000/v1): "), (url) => {
               if (url.trim()) this.config.apiBaseUrl = url.trim();
               tempRl.question(chalk.cyan("  API key (optional, press Enter to skip): "), (key) => {
-                if (key.trim()) this.config.apiKey = key.trim();
-                saveConfig(this.config);
+                this.config = patchConfig({
+                  provider: selected.key,
+                  ...(this.config.apiBaseUrl ? { apiBaseUrl: this.config.apiBaseUrl } : {}),
+                  ...(key.trim() ? { apiKey: key.trim() } : {}),
+                });
                 console.log(chalk.green(`  Configured ${selected.name}.\n`));
                 done();
                 resolve();
@@ -314,8 +348,10 @@ export class Repl {
             });
           } else {
             tempRl.question(chalk.cyan(`  Enter your ${selected.name} API key: `), (key) => {
-              if (key.trim()) this.config.apiKey = key.trim();
-              saveConfig(this.config);
+              this.config = patchConfig({
+                provider: selected.key,
+                ...(key.trim() ? { apiKey: key.trim() } : {}),
+              });
               console.log(chalk.green(`  Configured ${selected.name}. Config saved to ~/.ntox/config.json\n`));
               done();
               resolve();
@@ -323,7 +359,6 @@ export class Repl {
           }
         } else {
           console.log(chalk.dim("  Skipping setup.\n"));
-          saveConfig(this.config);
           done();
           resolve();
         }
@@ -485,16 +520,31 @@ export class Repl {
             break;
           }
           const cfg = this.config as unknown as Record<string, unknown>;
-          if (val === "true") cfg[key] = true;
+          if (key === "maxTokens") {
+            const parsed = parseTokenLimit(val);
+            if (parsed === null) {
+              console.log(chalk.yellow("maxTokens must be a positive safe integer. Use /tokens <number>."));
+              break;
+            }
+            cfg[key] = parsed;
+          } else if (val === "true") cfg[key] = true;
           else if (val === "false") cfg[key] = false;
           else if (/^\d+$/.test(val)) cfg[key] = parseInt(val, 10);
           else if (/^\d+\.\d+$/.test(val)) cfg[key] = parseFloat(val);
           else cfg[key] = val;
-          saveConfig(this.config);
+          this.config = patchConfig({ [key]: cfg[key] } as Partial<NtoxConfig>);
+          if (key === "maxTokens" || key === "temperature") {
+            this.llm.updateParams(this.config.maxTokens, this.config.temperature);
+          }
           console.log(chalk.green(`Set ${key} = ${val}`));
 
           if (key === "model") {
             this.llm.updateModel(String(cfg[key]));
+          }
+
+          if (key === "apiKey") {
+            this.llm.updateKey(String(cfg[key]));
+            console.log(chalk.dim("  API key applied to the running session — no restart needed."));
           }
 
           if (key === "provider") {
@@ -517,6 +567,29 @@ export class Repl {
         } else {
           this.printConfig();
         }
+        break;
+      }
+      case "tokens": {
+        const requested = arg.trim();
+        if (!requested) {
+          console.log(
+            `Model output limit: ${this.config.maxTokens.toLocaleString()} tokens\n` +
+              `Set it for this account with /tokens <number> (example: /tokens 64000).\n` +
+              `This is the requested output cap. Your provider or model may enforce a lower maximum; larger values can increase latency and cost.`,
+          );
+          break;
+        }
+        const maxTokens = parseTokenLimit(requested);
+        if (maxTokens === null) {
+          console.log(chalk.yellow("Usage: /tokens <positive integer> (example: /tokens 64000)"));
+          break;
+        }
+        this.config = patchConfig({ maxTokens });
+        this.llm.updateParams(this.config.maxTokens, this.config.temperature);
+        console.log(
+          chalk.green(`Model output limit set to ${maxTokens.toLocaleString()} tokens.`) +
+            chalk.dim(" Provider/model limits still apply; higher limits may increase latency and cost."),
+        );
         break;
       }
       case "cost":
@@ -1085,8 +1158,7 @@ export class Repl {
 
     if (sub === "on" || sub === "enable") {
       this.cognitiveKernel.setEnabled(true);
-      this.config.cognitiveEnabled = true;
-      saveConfig(this.config);
+      this.config = patchConfig({ cognitiveEnabled: true });
       console.log(chalk.green("Cognitive Kernel activated."));
       console.log(chalk.dim("  Patterns: compression → pattern retrieval → sparse activation → critique"));
       return;
@@ -1094,8 +1166,7 @@ export class Repl {
 
     if (sub === "off" || sub === "disable") {
       this.cognitiveKernel.setEnabled(false);
-      this.config.cognitiveEnabled = false;
-      saveConfig(this.config);
+      this.config = patchConfig({ cognitiveEnabled: false });
       console.log(chalk.dim("Cognitive Kernel deactivated. Using standard strategy+skill routing."));
       return;
     }
@@ -2188,7 +2259,7 @@ export class Repl {
         } else {
           this.config.provider = "openrouter";
         }
-        saveConfig(this.config);
+        this.config = patchConfig({ model: selected.id, provider: this.config.provider });
         this.llm.updateModel(selected.id);
         this.llm.updateProvider(this.config.provider);
         const providerTag =
@@ -2215,7 +2286,7 @@ export class Repl {
         } else {
           this.config.provider = "openrouter";
         }
-        saveConfig(this.config);
+        this.config = patchConfig({ model: match.id, provider: this.config.provider });
         this.llm.updateModel(match.id);
         this.llm.updateProvider(this.config.provider);
         const providerTag =
@@ -2279,7 +2350,6 @@ export class Repl {
     if (matched === "openai-compatible" && !this.config.apiBaseUrl) {
       this.config.apiBaseUrl = "http://localhost:8000/v1";
     }
-
     // Validate model/provider compatibility
     const modelPrefix = this.config.model.split("/")[0];
     if (modelPrefix && getProviders().includes(modelPrefix) && modelPrefix !== matched && matched !== "openrouter") {
@@ -2291,7 +2361,10 @@ export class Repl {
       );
     }
 
-    saveConfig(this.config);
+    this.config = patchConfig({
+      provider: matched,
+      ...(this.config.apiBaseUrl ? { apiBaseUrl: this.config.apiBaseUrl } : {}),
+    });
     console.log(chalk.green(`Switched to provider: ${providerNames[matched]} (${matched})`));
     if (matched === "openai-compatible") {
       console.log(chalk.dim(`API Base URL: ${this.config.apiBaseUrl}`));
@@ -2327,7 +2400,11 @@ export class Repl {
       this.config.animationLevel = "full";
       this.config.verboseCallbacks = true;
     }
-    saveConfig(this.config);
+    this.config = patchConfig({
+      uiMode: mode as typeof this.config.uiMode,
+      animationLevel: this.config.animationLevel,
+      verboseCallbacks: this.config.verboseCallbacks,
+    });
     console.log(chalk.green(`UI mode set to ${mode}`));
   }
 
@@ -2447,9 +2524,20 @@ export class Repl {
       spinner.stop();
       process.stdout.write("\r");
       writer.startLine();
+      if (this.thinkingChars > 0) {
+        const secs = Math.max(1, Math.round((Date.now() - this.turnStartedAtMs) / 1000));
+        writer.writeTag(
+          renderInlineTag(`reasoned ${formatTokenCount(this.thinkingChars)} chars in ${secs}s`, chalk.dim),
+        );
+        this.thinkingChars = 0;
+      }
     };
 
     let outputTokenCount = 0;
+    let visibleChars = 0;
+    this.thinkingChars = 0;
+    this.turnStartedAtMs = Date.now();
+    const turnTimeoutMs = computeTurnTimeoutMs(this.config.maxTokens);
     const {
       error: streamError,
       cancelled,
@@ -2460,7 +2548,10 @@ export class Repl {
       {
         onToken: (token) => {
           startOutput();
-          if (token) blockBuffer.write(token);
+          if (token) {
+            blockBuffer.write(token);
+            visibleChars += token.length;
+          }
           outputTokenCount++;
           if (!hasStarted && outputTokenCount % 20 === 0) {
             spinner.setText(`generating (${outputTokenCount} tokens)`);
@@ -2492,7 +2583,9 @@ export class Repl {
           totalOutputTokens += usage.outputTokens;
         },
         onThinking: (thought) => {
-          if (hasStarted) writer.writeTag(renderInlineTag(thought, chalk.dim));
+          if (hasStarted) return;
+          this.thinkingChars += thought.length;
+          spinner.setText(`reasoning (${formatTokenCount(this.thinkingChars)} chars)`);
         },
         onPhase: (phase) => {
           if (this.config.animationLevel !== "off") {
@@ -2574,10 +2667,19 @@ export class Repl {
         },
       },
       turnAbort.signal,
+      { absoluteTimeoutMs: turnTimeoutMs },
     );
 
     spinner.stop();
     if (this.activeTurnAbort === turnAbort) this.activeTurnAbort = null;
+
+    if (!hasStarted && this.thinkingChars > 0) {
+      const secs = Math.max(1, Math.round((Date.now() - this.turnStartedAtMs) / 1000));
+      process.stdout.write(
+        renderInlineTag(`reasoned ${formatTokenCount(this.thinkingChars)} chars in ${secs}s`, chalk.dim) + "\n",
+      );
+      this.thinkingChars = 0;
+    }
 
     if (!hasStarted && totalInputTokens === 0) {
       const providerHint = providerRequiresKey(this.config.provider)
@@ -2588,6 +2690,14 @@ export class Repl {
 
     blockBuffer.forceFlush();
     writer.flush();
+
+    if (visibleChars === 0 && totalOutputTokens > 0 && !streamError && !cancelled && !timedOut) {
+      console.log(
+        chalk.yellow(
+          `\n  The model used ${totalOutputTokens} output tokens but returned no visible text — usually a provider or tool-calling glitch. Try /retry or switch model (/model).`,
+        ),
+      );
+    }
 
     try {
       const cost = estimateCost(this.config.model, totalInputTokens, totalOutputTokens, this.models);
@@ -2623,7 +2733,12 @@ export class Repl {
       }
 
       if (timedOut) {
-        console.log(chalk.yellow("\n  Turn timed out after 10 minutes — turn aborted so you're never stuck."));
+        console.log(
+          chalk.yellow(
+            `\n  Turn timed out after ${Math.round(turnTimeoutMs / 60000)} minutes — turn aborted so you're never stuck.\n` +
+              `  Tip: lower maxTokens (/config set maxTokens 8192) for faster responses.`,
+          ),
+        );
       } else if (cancelled) {
         console.log(chalk.yellow("\n  Turn cancelled."));
       } else if (streamError) {

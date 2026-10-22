@@ -233,8 +233,8 @@ export function createAgentConfig(
     strategyEnabled: config.metaStrategyEnabled,
     mistakesEnabled: config.metaMistakesEnabled,
     minConfidence: config.metaMinConfidence,
-    maxContextMessages: 40,
-    contextTokenBudget: 100_000,
+    maxContextMessages: 120,
+    contextTokenBudget: 300_000,
     ...overrides,
   };
 }

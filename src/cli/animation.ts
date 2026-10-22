@@ -8,12 +8,18 @@ const HUE_BASE = 190;
 const HUE_SWEEP = 70;
 
 export class Spinner {
+  private static globallyPaused = false;
   private interval: ReturnType<typeof setInterval> | null = null;
   private frame = 0;
   private text = "";
   private phase: ThinkPhase = "thinking";
   private startedAt = 0;
   private running = false;
+
+  static pauseGlobally(pause: boolean): void {
+    Spinner.globallyPaused = pause;
+    if (pause && process.stdout.isTTY) process.stdout.write("\r\x1b[K");
+  }
 
   start(text = "thinking"): void {
     if (this.running) return;
@@ -28,7 +34,7 @@ export class Spinner {
     }
 
     const tick = () => {
-      if (!this.running) return;
+      if (!this.running || Spinner.globallyPaused) return;
       const ind = getPhaseIndicator(this.phase);
       const char = ind.frames[this.frame % ind.frames.length];
       const elapsed = Date.now() - this.startedAt;

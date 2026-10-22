@@ -392,7 +392,7 @@ function oneLine(value: unknown, max = 120): string {
 }
 
 function checkpointSuffix(data: Record<string, unknown>): string {
-  const id = data.autoCheckpointId;
+  const id = data.autoCheckpointId ?? data.checkpointId;
   return typeof id === "string" && id ? ` ${chalk.dim(`checkpoint ${id}`)}` : "";
 }
 
@@ -414,7 +414,11 @@ export function summarizeToolResult(name: string, result: ToolResult): string {
       .join(" ");
   }
   if (name === "write" || name === "edit" || name === "checkpoint") {
-    return `${oneLine(result.data, 120)}${checkpointSuffix(data)}`;
+    const text =
+      typeof result.data === "string"
+        ? result.data
+        : oneLine(data.result ?? data.message ?? data.path ?? JSON.stringify(data), 120);
+    return `${text}${checkpointSuffix(data)}`;
   }
   if (Array.isArray(result.data)) return `${result.data.length} item${result.data.length === 1 ? "" : "s"}`;
   if (typeof result.data === "string") return oneLine(result.data, 120);

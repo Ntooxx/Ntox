@@ -55,9 +55,9 @@ export function hsl(h: number, s = 0.85, l = 0.62): RGB {
   const c = (1 - Math.abs(2 * lig - 1)) * sat;
   const hp = (((h % 360) + 360) % 360) / 60;
   const x = c * (1 - Math.abs((hp % 2) - 1));
-  let r = 0,
-    g = 0,
-    b = 0;
+  let r: number;
+  let g: number;
+  let b: number;
   if (hp < 1) [r, g, b] = [c, x, 0];
   else if (hp < 2) [r, g, b] = [x, c, 0];
   else if (hp < 3) [r, g, b] = [0, c, x];

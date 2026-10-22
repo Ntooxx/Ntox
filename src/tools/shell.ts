@@ -2,7 +2,7 @@ import { exec } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import type { Tool } from "../types/index.js";
 import { getBaseDir, loadConfig } from "../core/config.js";
-import { approvalStore, needsApproval } from "./approval.js";
+import { approvalStore, buildApprovalKey, needsApproval, requestInteractiveApproval } from "./approval.js";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -28,7 +28,7 @@ const BLOCKED_PATTERNS = [
   /\breg\s+delete\b/i,
   /\bdiskpart\b/i,
   /\bbcdedit\b/i,
-  /\bRemove-Item\b.*-(?:Recurse|Force)/i,
+  /\bRemove-Item\b.*-Recurse/i,
   /\bInvoke-WebRequest\b.*\|\s*Invoke-Expression/i,
   /\bInvoke-RestMethod\b.*\|\s*Invoke-Expression/i,
   /\bInvoke-Expression\b/i,
@@ -41,12 +41,17 @@ const BLOCKED_PATTERNS = [
 
 const CODE_FRAGMENT_PATTERNS = [
   /^\s*[<>{}]/,
-  /<\/?[a-z_][\w:-]*>/i,
-  /```/,
+  /^\s*```/,
   /<tool_call/i,
-  /\bfunction\s+\w+\s*\(/,
+  /^\s*function\s+\w+\s*\(/m,
   /^\s*(import|export)\s+/m,
 ];
+
+const HERE_STRING_PATTERN = /@(['"])\r?\n[\s\S]*?\r?\n[ \t]*\1@/g;
+
+export function maskHereStrings(command: string): string {
+  return command.replace(HERE_STRING_PATTERN, (match, quote: string) => `@${quote}\n<content elided>\n${quote}@`);
+}
 
 const WINDOWS_UNIX_COMMAND_PATTERNS = [
   /\|\s*head\b/i,
@@ -86,10 +91,11 @@ export function detectRmRecursiveForce(command: string): boolean {
 export function validateShellCommand(command: string): string | null {
   const trimmed = command.trim();
   if (!trimmed) return "Command is empty";
-  if (CODE_FRAGMENT_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+  const structural = maskHereStrings(trimmed);
+  if (CODE_FRAGMENT_PATTERNS.some((pattern) => pattern.test(structural))) {
     return "Rejected shell command because it looks like code or malformed tool XML, not a command";
   }
-  if (IS_WINDOWS && WINDOWS_UNIX_COMMAND_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+  if (IS_WINDOWS && WINDOWS_UNIX_COMMAND_PATTERNS.some((pattern) => pattern.test(structural))) {
     return "Rejected Unix-style command on Windows. Use PowerShell equivalents such as Get-ChildItem, Select-String, or Select-Object -First.";
   }
   return null;
@@ -99,9 +105,9 @@ export function checkShellCommandSafety(command: string): string | null {
   const invalidReason = validateShellCommand(command);
   if (invalidReason) return invalidReason;
   const hit = BLOCKED_PATTERNS.find((pattern) => pattern.test(command));
-  if (hit) return `Command blocked by safety policy: "${command}" (matched ${hit})`;
+  if (hit) return `Command blocked by safety policy (matched ${hit}): "${command}"`;
   if (detectRmRecursiveForce(command)) {
-    return `Command blocked by safety policy: "${command}" (recursive+force rm flags)`;
+    return `Command blocked by safety policy (matched recursive+force rm flags): "${command}"`;
   }
   return null;
 }
@@ -182,6 +188,9 @@ export const shellTool: Tool = {
     required: ["command"],
   },
   async execute(args) {
+    if (args.command === undefined || args.command === null || String(args.command).trim() === "") {
+      return { success: false, error: "Missing required argument: command" };
+    }
     const command = String(args.command);
     const workdir = args.workdir ? String(args.workdir) : process.cwd();
     const timeout = args.timeout ? Number(args.timeout) : 30000;
@@ -193,12 +202,17 @@ export const shellTool: Tool = {
     }
 
     if (needsApproval(command)) {
-      const decision = approvalStore.check("shell", args);
+      const stored = approvalStore.check("shell", args);
+      let decision = stored;
+      if (!decision) decision = await requestInteractiveApproval("shell", command);
       if (!decision || decision === "deny") {
         return {
           success: false,
           error: `APPROVAL_REQUIRED: Command "${command}" requires approval. Use approval system to allow or deny.`,
         };
+      }
+      if (decision !== "allow-once" && !stored) {
+        approvalStore.store("shell", buildApprovalKey("shell", command), decision);
       }
     }
 
@@ -225,8 +239,8 @@ export const shellTool: Tool = {
 
     try {
       if (IS_WINDOWS) {
-        const escaped = command.replace(/"/g, '`"');
-        const { stdout } = await execAsync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${escaped}"`, {
+        const encoded = Buffer.from(command, "utf16le").toString("base64");
+        const { stdout } = await execAsync(`powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded}`, {
           cwd: workdir,
           timeout,
           maxBuffer: 10 * 1024 * 1024,

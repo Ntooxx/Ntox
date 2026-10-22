@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getCommandGroups, getSlashCommandNames, normalizeCommandName } from "./commands.js";
+import { getCommandGroups, getSlashCommandNames, normalizeCommandName, parseTokenLimit } from "./commands.js";
 
 describe("command catalog", () => {
   it("normalizes aliases", () => {
@@ -18,6 +18,7 @@ describe("command catalog", () => {
     expect(groups.flatMap((group) => group.items).some(([cmd]) => cmd === "/retry")).toBe(true);
     expect(groups.flatMap((group) => group.items).some(([cmd]) => cmd === "/last")).toBe(true);
     expect(groups.flatMap((group) => group.items).some(([cmd]) => cmd === "/tips")).toBe(true);
+    expect(groups.flatMap((group) => group.items).some(([cmd]) => cmd === "/tokens")).toBe(true);
     expect(groups.flatMap((group) => group.items).some(([cmd]) => cmd === "/alive")).toBe(true);
     expect(groups.flatMap((group) => group.items).some(([cmd]) => cmd === "@https://url")).toBe(true);
   });
@@ -34,5 +35,14 @@ describe("command catalog", () => {
     expect(names).toContain("retry");
     expect(names).toContain("quit");
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("parses positive safe integer output token limits", () => {
+    expect(parseTokenLimit("64000")).toBe(64000);
+    expect(parseTokenLimit(" 128000 ")).toBe(128000);
+    expect(parseTokenLimit("0")).toBeNull();
+    expect(parseTokenLimit("-1")).toBeNull();
+    expect(parseTokenLimit("8192.5")).toBeNull();
+    expect(parseTokenLimit("9007199254740992")).toBeNull();
   });
 });

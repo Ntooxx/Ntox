@@ -25,6 +25,7 @@ export const COMMANDS: CommandDef[] = [
   { name: "model", description: "switch or refresh OpenRouter models", group: "daily" },
   { name: "provider", description: "switch provider", group: "daily" },
   { name: "cost", description: "token usage", group: "daily" },
+  { name: "tokens", description: "view / set the model output token limit", group: "daily" },
   { name: "clear", description: "clear conversation", group: "daily", aliases: ["new"] },
   { name: "exit", description: "quit", group: "daily", aliases: ["quit"] },
 
@@ -84,6 +85,13 @@ ALIASES.set("ask", "help");
 
 export function normalizeCommandName(name: string): string {
   return ALIASES.get(name) || name;
+}
+
+export function parseTokenLimit(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 export function getCommandGroups(): { title: string; items: [string, string][] }[] {

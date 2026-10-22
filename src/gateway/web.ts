@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GatewayChannel } from "./types.js";
@@ -35,6 +35,7 @@ export interface WebConfig {
   port?: number;
   host?: string;
   authToken?: string;
+  liveReload?: boolean;
   conversations?: ConversationStore;
   inspect?: WebInspectServices;
   settings?: WebSettingsService;
@@ -61,10 +62,32 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): boolean {
   if (!filePath.startsWith(WEB_ROOT)) return false;
   const ext = extname(filePath).toLowerCase();
   if (!MIME[ext] || !existsSync(filePath)) return false;
-  res.writeHead(200, { "Content-Type": MIME[ext] });
+  res.writeHead(200, {
+    "Content-Type": MIME[ext],
+    "Cache-Control": "no-store, must-revalidate",
+  });
   res.end(readFileSync(filePath));
   return true;
 }
+
+const LIVE_RELOAD_FILES = ["index.html", "app.js", "app.css", "sw.js"];
+
+function webVersion(): string {
+  const parts = LIVE_RELOAD_FILES.map((f) => {
+    try {
+      const s = statSync(join(WEB_ROOT, f));
+      return `${f}:${s.mtimeMs}:${s.size}`;
+    } catch {
+      return `${f}:0`;
+    }
+  });
+  let h = 0;
+  const s = parts.join("|");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+const LIVERELOAD_SNIPPET = `<script>(function(){var v=null;function c(){fetch('/__livereload').then(function(r){return r.json()}).then(function(d){if(v===null){v=d.v;return}if(d.v!==v)location.reload()}).catch(function(){})}setInterval(c,1200);c()})();</script>`;
 
 export function createWebChannel(config: WebConfig): GatewayChannel {
   const { onMessage, getStatus, conversations, inspect, settings, suggestPaths, voice } = config;
@@ -75,12 +98,13 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
   let io: import("socket.io").Server | null = null;
 
   const htmlPath = join(WEB_ROOT, "index.html");
-  let htmlContent = "";
-  try {
-    htmlContent = readFileSync(htmlPath, "utf-8");
-  } catch {
-    htmlContent = `<!DOCTYPE html><html><body>Web UI not found — create web/index.html</body></html>`;
-  }
+  const readHtml = (): string => {
+    try {
+      return readFileSync(htmlPath, "utf-8");
+    } catch {
+      return `<!DOCTYPE html><html><body>Web UI not found — create web/index.html</body></html>`;
+    }
+  };
 
   const WEB_USER = "web_user";
 
@@ -104,6 +128,8 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
     return supplied === authToken;
   };
 
+  const liveReload = config.liveReload ?? /^(127\.0\.0\.1|localhost)$/.test(host);
+
   return {
     name: "web",
 
@@ -114,6 +140,14 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
           unauthorized(res);
           return;
         }
+        if (req.url?.startsWith("/__livereload")) {
+          res.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+          });
+          res.end(JSON.stringify({ v: webVersion() }));
+          return;
+        }
         if (req.url?.startsWith("/status.json") && getStatus) {
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify(getStatus(), null, 2));
@@ -121,7 +155,8 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
         }
         if (serveStatic(req, res)) return;
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(htmlContent);
+        const html = readHtml();
+        res.end(liveReload && html.includes("</body>") ? html.replace("</body>", LIVERELOAD_SNIPPET + "</body>") : html);
       });
 
       const { Server } = await import("socket.io");

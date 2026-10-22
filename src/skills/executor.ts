@@ -19,37 +19,26 @@ export class SkillExecutor {
 
   findMatchingSkills(query: string): SkillTriggerMatch[] {
     if (!this.enabled) return [];
-    const registryMatches = this.registry.findByTrigger(query);
-    if (registryMatches.length > 0) return registryMatches;
+    if (/\b(use|apply|activate|invoke|run|follow)\b/i.test(query)) {
+      const normalizedQuery = this.normalizeSkillName(query);
+      const registrySkills = this.registry.list().map((skill) => ({ skill }));
+      const librarySkills = this.library.list().map((skill) => ({ skill: this.library.toSkillDefinition(skill) }));
+      const requested = [...registrySkills, ...librarySkills]
+        .filter(({ skill }) => {
+          const name = this.normalizeSkillName(skill.name);
+          return name.length >= 5 && normalizedQuery.includes(name);
+        })
+        .sort((a, b) => b.skill.name.length - a.skill.name.length)[0];
 
-    const libraryHits = this.library.search(query, 1);
-    if (libraryHits.length > 0) {
-      const top = libraryHits[0];
-      const context = this.library.getContextForQuery(top.name, query);
-      if (context) {
-        return [
-          {
-            skill: {
-              name: top.name,
-              description: top.description,
-              category: top.category,
-              prompt: context,
-              triggers: top.triggers,
-              tools: [],
-              examples: [],
-              created: Date.now(),
-              updated: Date.now(),
-              usageCount: 0,
-              domain: top.domain,
-              importance: top.importance,
-              isExternal: false,
-            },
-            confidence: 0.6,
-          },
-        ];
-      }
+      if (requested) return [{ skill: requested.skill, confidence: 1 }];
     }
-    return [];
+
+    const registryMatches = this.registry.findByTrigger(query);
+    return registryMatches;
+  }
+
+  private normalizeSkillName(name: string): string {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   }
 
   buildSkillsContext(matches: SkillTriggerMatch[]): string {

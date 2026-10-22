@@ -241,6 +241,16 @@ export function toOpenAIMessages(messages: Message[], system?: string): OpenAIMe
   return out;
 }
 
+interface StreamChunk {
+  delta: string;
+  usage?: CostUsage;
+  toolCalls?: ToolCall[];
+  thinking?: string;
+  toolCallLimitReached?: boolean;
+}
+
+const MAX_TOOL_CALLS_PER_RESPONSE = 8;
+
 async function* streamOpenAICompatible(
   baseUrl: string,
   messages: Message[],
@@ -249,7 +259,7 @@ async function* streamOpenAICompatible(
   headers: Record<string, string>,
   client: LLMClient,
   signal?: AbortSignal,
-): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
+): AsyncGenerator<StreamChunk> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
   const abort = () => controller.abort(signal?.reason);
@@ -297,6 +307,7 @@ async function* streamOpenAICompatible(
 
   let yieldedAnyContent = false;
   let yieldedUsage = false;
+  let toolCallLimitReached = false;
   const toolCallAccumulator = new Map<number, { id: string; name: string; args: string }>();
 
   for await (const line of StreamLineParser.readLines(reader, { idleTimeoutMs: STREAM_STALL_TIMEOUT_MS, signal })) {
@@ -317,6 +328,7 @@ async function* streamOpenAICompatible(
         choices?: {
           delta: {
             content?: string;
+            reasoning?: string;
             tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[];
           };
         }[];
@@ -331,14 +343,34 @@ async function* streamOpenAICompatible(
       const delta = parsed.choices?.[0]?.delta;
       const deltaCalls = delta?.tool_calls;
 
+      const reasoning = delta?.reasoning;
+      if (reasoning) {
+        yieldedAnyContent = true;
+        yield { delta: "", thinking: reasoning };
+      }
+
       if (deltaCalls) {
         for (const tc of deltaCalls) {
-          const acc = toolCallAccumulator.get(tc.index) || { id: "", name: "", args: "" };
+          const existing = toolCallAccumulator.get(tc.index);
+          if (!existing && toolCallAccumulator.size >= MAX_TOOL_CALLS_PER_RESPONSE) {
+            toolCallLimitReached = true;
+            continue;
+          }
+          const acc = existing || { id: "", name: "", args: "" };
           if (tc.id) acc.id = tc.id;
           if (tc.function?.name) acc.name = tc.function.name;
           if (tc.function?.arguments) acc.args += tc.function.arguments;
           toolCallAccumulator.set(tc.index, acc);
         }
+      }
+
+      if (toolCallLimitReached) {
+        await reader.cancel().catch(() => undefined);
+        for (const [, tc] of toolCallAccumulator) {
+          if (tc.name) yield { delta: "", toolCalls: [{ id: tc.id, name: tc.name, arguments: tc.args }] };
+        }
+        yield { delta: "", toolCallLimitReached: true };
+        return;
       }
 
       const content = delta?.content;
@@ -379,7 +411,7 @@ async function* streamAnthropic(
   headers: Record<string, string>,
   client: LLMClient,
   signal?: AbortSignal,
-): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
+): AsyncGenerator<StreamChunk> {
   const anthropicMessages: unknown[] = [];
   for (const m of messages) {
     if (m.role === "tool") {
@@ -480,6 +512,7 @@ async function* streamAnthropic(
   if (!reader) throw new ApiError("Anthropic returned no response body", 0, "anthropic");
 
   let yieldedAnyContent = false;
+  let toolCallLimitReached = false;
   const toolUseAcc = new Map<string, { id: string; name: string; args: string }>();
   const blockIndexToToolId = new Map<number, string>();
 
@@ -506,8 +539,12 @@ async function* streamAnthropic(
       if (parsed.type === "content_block_start" && parsed.content_block?.type === "tool_use") {
         const id = parsed.content_block.id || "";
         const name = parsed.content_block.name || "";
-        toolUseAcc.set(id, { id, name, args: "" });
-        if (typeof parsed.index === "number") blockIndexToToolId.set(parsed.index, id);
+        if (!toolUseAcc.has(id) && toolUseAcc.size >= MAX_TOOL_CALLS_PER_RESPONSE) {
+          toolCallLimitReached = true;
+        } else {
+          toolUseAcc.set(id, { id, name, args: "" });
+          if (typeof parsed.index === "number") blockIndexToToolId.set(parsed.index, id);
+        }
       }
 
       if (parsed.type === "content_block_delta" && parsed.delta?.type === "input_json_delta") {
@@ -530,6 +567,11 @@ async function* streamAnthropic(
         client.outputTokens += parsed.delta.text.length / 4;
         yield { delta: parsed.delta.text };
       }
+
+      if (toolCallLimitReached) {
+        await reader.cancel().catch(() => undefined);
+        break;
+      }
     } catch (e) {
       if (e instanceof StreamError) throw e;
     }
@@ -545,6 +587,8 @@ async function* streamAnthropic(
     }
   }
 
+  if (toolCallLimitReached) yield { delta: "", toolCallLimitReached: true };
+
   if (!yieldedAnyContent && toolUseAcc.size === 0) {
     throw new EmptyResponseError(
       `Anthropic returned no content — model "${body.model}" may not be available or the request was rejected silently.`,
@@ -558,7 +602,7 @@ async function* streamOllama(
   body: Record<string, unknown>,
   client: LLMClient,
   signal?: AbortSignal,
-): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
+): AsyncGenerator<StreamChunk> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
   const abort = () => controller.abort(signal?.reason);
@@ -602,6 +646,7 @@ async function* streamOllama(
   if (!reader) throw new ApiError("Ollama returned no response body", 0, "ollama");
 
   let yieldedAnyContent = false;
+  let toolCallLimitReached = false;
   const toolCallAccumulator = new Map<number, { id: string; name: string; args: string }>();
 
   for await (const line of StreamLineParser.readLines(reader, { idleTimeoutMs: STREAM_STALL_TIMEOUT_MS, signal })) {
@@ -619,7 +664,12 @@ async function* streamOllama(
       }
       if (parsed.message?.tool_calls) {
         for (const tc of parsed.message.tool_calls) {
-          const acc = toolCallAccumulator.get(tc.index) || {
+          const existing = toolCallAccumulator.get(tc.index);
+          if (!existing && toolCallAccumulator.size >= MAX_TOOL_CALLS_PER_RESPONSE) {
+            toolCallLimitReached = true;
+            continue;
+          }
+          const acc = existing || {
             id: tc.id || `call_${tc.index}`,
             name: "",
             args: "",
@@ -629,6 +679,10 @@ async function* streamOllama(
           if (tc.function?.arguments) acc.args += tc.function.arguments;
           toolCallAccumulator.set(tc.index, acc);
         }
+      }
+      if (toolCallLimitReached) {
+        await reader.cancel().catch(() => undefined);
+        break;
       }
       if (parsed.message?.content) {
         yieldedAnyContent = true;
@@ -649,6 +703,8 @@ async function* streamOllama(
       yield { delta: "", toolCalls };
     }
   }
+
+  if (toolCallLimitReached) yield { delta: "", toolCallLimitReached: true };
 
   if (!yieldedAnyContent && toolCallAccumulator.size === 0) {
     throw new EmptyResponseError(
@@ -746,6 +802,9 @@ export class LLMClient {
   }
   updateProvider(provider: string): void {
     this.configuredProvider = provider;
+  }
+  updateKey(apiKey: string): void {
+    this.apiKey = apiKey;
   }
   updateEmbeddingModel(modelId: string): void {
     this.embeddingModelId = modelId;
@@ -960,7 +1019,7 @@ export class LLMClient {
     system?: string,
     tools?: OpenAITool[],
     signal?: AbortSignal,
-  ): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
+  ): AsyncGenerator<StreamChunk> {
     const provider = this.getProvider();
     const info = this.getProviderInfo();
     const rawModel = stripPrefix(this.modelId, provider);
@@ -1035,7 +1094,7 @@ export class LLMClient {
     system: string | undefined,
     body: Record<string, unknown>,
     signal?: AbortSignal,
-  ): AsyncGenerator<{ delta: string; usage?: CostUsage; toolCalls?: ToolCall[] }> {
+  ): AsyncGenerator<StreamChunk> {
     if (provider === "ollama") {
       yield* streamOllama(messages, system, body, this, signal);
       return;

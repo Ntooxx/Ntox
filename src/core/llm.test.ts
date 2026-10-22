@@ -494,6 +494,127 @@ describe("LLMClient.stream (Anthropic)", () => {
   });
 });
 
+describe("LLMClient.stream (OpenAI-compatible reasoning)", () => {
+  function sse(lines: string[]): Response {
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(lines.join("\n") + "\n"));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    );
+  }
+
+  const line = (delta: Record<string, unknown>) => `data: ${JSON.stringify({ choices: [{ delta }] })}`;
+
+  it("yields reasoning deltas as thinking, not as visible content", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        sse([
+          line({ role: "assistant", reasoning: "planning the " }),
+          line({ reasoning: "approach first" }),
+          line({ content: "Here is the result." }),
+        ]),
+      ),
+    );
+    const client = new LLMClient("key", "openrouter/mimo", "openai/text-embedding-3-small", 4096, 0.7);
+
+    const chunks: { delta: string; thinking?: string }[] = [];
+    for await (const chunk of client.stream([{ role: "user", content: "go" }])) {
+      chunks.push(chunk);
+    }
+
+    const thinking = chunks.filter((c) => c.thinking).map((c) => c.thinking);
+    expect(thinking.join("")).toBe("planning the approach first");
+
+    const visible = chunks.filter((c) => c.delta).map((c) => c.delta).join("");
+    expect(visible).toBe("Here is the result.");
+    expect(visible).not.toContain("planning");
+  });
+
+  it("uses updated output token and temperature settings on the next request", async () => {
+    const fetch = vi.fn().mockResolvedValue(sse([line({ content: "done" })]));
+    vi.stubGlobal("fetch", fetch);
+    const client = new LLMClient("key", "openrouter/mimo", "openai/text-embedding-3-small", 4096, 0.7);
+    client.updateParams(64000, 0.3);
+
+    for await (const _chunk of client.stream([{ role: "user", content: "continue" }])) {
+      void _chunk;
+    }
+
+    const body = JSON.parse(String(fetch.mock.calls[0][1].body)) as Record<string, unknown>;
+    expect(body.max_tokens).toBe(64000);
+    expect(body.temperature).toBe(0.3);
+  });
+
+  it("stops reading a provider response after eight tool calls", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        sse([
+          line({
+            tool_calls: Array.from({ length: 40 }, (_, index) => ({
+              index,
+              id: `call_${index}`,
+              function: { name: "web_read", arguments: JSON.stringify({ url: `https://example.com/${index}` }) },
+            })),
+          }),
+          "data: [DONE]",
+        ]),
+      ),
+    );
+    const client = new LLMClient("key", "openrouter/mimo", "openai/text-embedding-3-small", 150000, 0.7);
+    const chunks: { delta: string; toolCalls?: { id: string; name: string; arguments: string }[]; toolCallLimitReached?: boolean }[] = [];
+
+    for await (const chunk of client.stream([{ role: "user", content: "read pages" }])) chunks.push(chunk);
+
+    expect(chunks.flatMap((chunk) => chunk.toolCalls ?? [])).toHaveLength(8);
+    expect(chunks.some((chunk) => chunk.toolCallLimitReached)).toBe(true);
+  });
+
+  it("does not throw EmptyResponseError for a reasoning-only turn", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        sse([line({ reasoning: "thinking hard about this" }), line({ reasoning: "still thinking" })]),
+      ),
+    );
+    const client = new LLMClient("key", "openrouter/mimo", "openai/text-embedding-3-small", 4096, 0.7);
+
+    const chunks: { delta: string; thinking?: string }[] = [];
+    for await (const chunk of client.stream([{ role: "user", content: "go" }])) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.filter((c) => c.thinking)).toHaveLength(2);
+    expect(chunks.filter((c) => c.delta)).toHaveLength(0);
+  });
+});
+
+describe("LLMClient.updateKey", () => {
+  it("sends the new key on subsequent requests without a restart", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ data: [{ embedding: [0.1] }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    const client = new LLMClient("old-key", "openrouter/model", "openrouter/text-embedding-3-small", 1024, 0.7);
+
+    await client.embed("first");
+    const firstAuth = (fetch.mock.calls[0][1].headers as Record<string, string>).Authorization;
+
+    client.updateKey("new-key");
+    await client.embed("second");
+    const secondAuth = (fetch.mock.calls[1][1].headers as Record<string, string>).Authorization;
+
+    expect(firstAuth).toBe("Bearer old-key");
+    expect(secondAuth).toBe("Bearer new-key");
+    expect(firstAuth).not.toBe(secondAuth);
+  });
+});
+
 describe("LLMClient.embed", () => {
   it("returns embeddings from the endpoint", async () => {
     const fetch = vi

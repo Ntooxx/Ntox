@@ -69,6 +69,7 @@ import type {
 } from "../types/index.js";
 import { checkForSurfaceReasoning } from "../research/false-success.js";
 import { searchTool } from "../tools/search.js";
+import { webFetchTool } from "../tools/web.js";
 import { renderPlanContext } from "../tools/plan.js";
 import { deleteSessionSnapshot, loadSessionSnapshot, saveSessionSnapshot } from "./session-store.js";
 import { resetPolicyRuntime, type PolicyRuntime } from "./policy.js";
@@ -78,6 +79,7 @@ import {
   assembleSelectedSystemPrompt,
   type AssembledPrompt,
 } from "./context-ledger.js";
+
 import { Mind } from "../mind/mind.js";
 import { isRephrase, isThanked } from "../mind/predictor.js";
 import { hashText } from "../mind/util.js";
@@ -88,9 +90,20 @@ import { modelCritique } from "../cognition/model-critique.js";
 import { extractOpenLoops, normalizeLoopGoal } from "../alive/open-loops.js";
 import type { ContextKind, MindTurnHandle, TurnSignals } from "../mind/types.js";
 
+const RESEARCH_QUESTION_PATTERN = /\b(novel(?:ty)?|original(?:ity)?|saturat(?:ed|ion)|prior work|related work|literature|state of the art|research gap|already (?:been )?done|has anyone|anyone (?:working|studying)|contribute to (?:ai|artificial intelligence) research|recent papers?)\b/i;
+const RECOMMENDATION_QUESTION_PATTERN = /\b(what should i|what do you recommend|what would you recommend|should i|advise me|personal advice|what to build next|what would you build next|what should we build|next feature|which option|best next step)\b/i;
 const DEFAULT_SYSTEM_CONTEXT_TOKEN_BUDGET = 6000;
 const TOOL_CONCURRENCY = 4;
+const MAX_TOOL_CALLS_PER_RESPONSE = 8;
+const MAX_TOOL_CALLS_PER_TURN = 24;
+const MAX_WEB_TOOL_CALLS_PER_TURN = 8;
+const WEB_TOOL_NAMES = new Set(["search", "web_fetch", "web_read", "browse"]);
 const MAX_ACTION_NUDGES = 2;
+
+interface ToolCallBudget {
+  total: number;
+  web: number;
+}
 
 const LEGACY_TOOL_CALL_BLOCK = /<?\s*\/?\s*tool_call\s*>?\s*(\{[\s\S]*?\})\s*<?\s*\/?\s*tool_call\s*>?/gi;
 
@@ -729,6 +742,62 @@ export class Agent {
   }
 
   private async resolveSearchContext(userInput: string): Promise<string> {
+    const researchQuestion = RESEARCH_QUESTION_PATTERN.test(userInput);
+    if (researchQuestion) {
+      const queries = [
+        userInput,
+        `site:arxiv.org ${userInput}`,
+        `site:aclanthology.org ${userInput}`,
+      ];
+      const results = await Promise.all(
+        queries.map(async (query) => {
+          try {
+            const result = await searchTool.execute({ query });
+            return result.success && typeof result.data === "string" ? result.data : "";
+          } catch {
+            return "";
+          }
+        }),
+      );
+      const searchResults = results.filter(Boolean);
+      if (searchResults.length === 0) {
+        return "\n\n## Research Search Status\nA web search for related work was attempted but returned no usable results. Do not make claims that an idea is novel, unexplored, or unsaturated. State that novelty could not be verified and ask for or suggest a literature search.";
+      }
+      const blocks = searchResults.join("\n---\n").split(/\n---\n/);
+      const seenUrls = new Set<string>();
+      const candidates = blocks.flatMap((block) => {
+        const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const url = lines.find((line) => /^https?:\/\//i.test(line));
+        if (!url || seenUrls.has(url)) return [];
+        seenUrls.add(url);
+        let host = "";
+        try {
+          host = new URL(url).hostname.toLowerCase();
+        } catch {
+          return [];
+        }
+        const scholarlyHost = /(^|\.)(arxiv\.org|aclanthology\.org|openreview\.net|acm\.org|ieeexplore\.ieee\.org|doi\.org|proceedings\.neurips\.cc|aaai\.org)$/i.test(host);
+        return [{ url, title: lines[0] ?? url, snippet: lines.filter((line) => line !== url).slice(1).join(" "), scholarlyHost }];
+      });
+      const toRead = candidates.filter((candidate) => candidate.scholarlyHost).slice(0, 3);
+      const opened = await Promise.all(toRead.map(async (candidate) => {
+        try {
+          const result = await webFetchTool.execute({ url: candidate.url, format: "markdown" });
+          const data = result.data && typeof result.data === "object" ? result.data as Record<string, unknown> : {};
+          const content = typeof data.content === "string" ? data.content : "";
+          if (!result.success || content.length < 200) return "";
+          return `Title: ${String(data.title || candidate.title)}\nURL: ${String(data.url || candidate.url)}\nFetched source text (excerpt):\n${content.slice(0, 4500)}`;
+        } catch {
+          return "";
+        }
+      }));
+      const leads = candidates.slice(0, 10).map((candidate) =>
+        `Title: ${candidate.title}\nURL: ${candidate.url}\nSearch snippet (unverified; use as a lead only): ${candidate.snippet}`,
+      );
+      const openedSources = opened.filter(Boolean);
+      return `\n\n## Research Evidence\nNTOX searched these queries: ${queries.join(" | ")}\nOpened source excerpts below are direct fetched text; search snippets are unverified leads. Do not cite a snippet as if the paper itself was checked. Search coverage is limited and cannot establish that nobody has done something. For each important claim, identify the evidence that supports it; distinguish source-backed facts from inference and recommendation. For novelty, state the narrow scope searched and leave novelty unverified unless the evidence warrants a stronger conclusion.\n\n### Opened sources\n${openedSources.length ? openedSources.join("\n\n---\n\n") : "No scholarly source page could be opened. Treat all search results as leads and say source verification was unavailable."}\n\n### Search leads\n${leads.join("\n\n---\n\n")}`;
+    }
+
     const searchPatterns = [
       /^(what|who|tell me about|what about|what does|what is|who is)\s+(.+)/i,
       /^(can you|could you|could u|would you|tell me)\s+.*(what|who)\s+(is|are|was)\s+(.+)/i,
@@ -1347,40 +1416,40 @@ export class Agent {
     // 8. Unified skill matching — registry + library triggers
     let skillMatches: SkillTriggerMatch[] = [];
     let skillContext = "";
-    let libraryFrameworkContext = "";
+    const libraryFrameworkContext = "";
 
-    if (!cfg.cognitiveKernel.isEnabled()) {
-      const regMatches = cfg.skillExecutor.findMatchingSkills(userInput);
-      skillMatches.push(...regMatches);
+    const regMatches = cfg.skillExecutor.findMatchingSkills(userInput);
+    skillMatches.push(...regMatches);
 
-      if (cfg.skillLibrary) {
-        const libTriggers = cfg.skillLibrary.findByTrigger(userInput);
-        for (const m of libTriggers) {
-          const def = cfg.skillLibrary.toSkillDefinition(m.skill);
-          skillMatches.push({ skill: def, confidence: m.confidence });
-        }
+    if (cfg.skillLibrary) {
+      const libTriggers = cfg.skillLibrary.findByTrigger(userInput);
+      for (const m of libTriggers) {
+        const def = cfg.skillLibrary.toSkillDefinition(m.skill);
+        def.prompt = cfg.skillLibrary.getContextForQuery(m.skill.name, userInput) ?? def.description;
+        skillMatches.push({ skill: def, confidence: m.confidence });
       }
+    }
 
-      const seen = new Set<string>();
-      skillMatches = skillMatches
-        .filter((m) => {
-          const isNew = !seen.has(m.skill.name);
-          seen.add(m.skill.name);
-          return isNew;
-        })
-        .sort((a, b) => b.confidence - a.confidence);
+    const seenSkills = new Set<string>();
+    skillMatches = skillMatches
+      .filter((m) => {
+        const isNew = !seenSkills.has(m.skill.name);
+        seenSkills.add(m.skill.name);
+        return isNew;
+      })
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 1);
 
-      if (skillMatches.length > 0) {
-        const top = skillMatches[0];
-        skillContext = `\n\n## Active Skill: ${top.skill.name}\n${top.skill.prompt}`;
-        if (!top.skill.isExternal) {
-          cfg.skillExecutor.incrementUsage(top.skill.name);
-        }
-        cfg.analytics.trackSkillTrigger(top.skill.name);
-        if (this.currentTrace) this.currentTrace.skill = { name: top.skill.name, confidence: top.confidence };
-        if (callbacks.onSkillTriggered) {
-          callbacks.onSkillTriggered(top.skill.name, top.confidence);
-        }
+    if (skillMatches.length > 0) {
+      const top = skillMatches[0];
+      skillContext = `\n\n## Active Skill: ${top.skill.name}\n${top.skill.prompt}`;
+      if (!top.skill.isExternal) {
+        cfg.skillExecutor.incrementUsage(top.skill.name);
+      }
+      cfg.analytics.trackSkillTrigger(top.skill.name);
+      if (this.currentTrace) this.currentTrace.skill = { name: top.skill.name, confidence: top.confidence };
+      if (callbacks.onSkillTriggered) {
+        callbacks.onSkillTriggered(top.skill.name, top.confidence);
       }
     }
 
@@ -1398,45 +1467,6 @@ export class Agent {
           text: skillContext,
           relevance: topSkillMatch.confidence,
         });
-      }
-    }
-    if (cfg.skillLibrary && userInput.trim().split(/\s+/).length >= 3) {
-      try {
-        const remainingMatches = skillMatches.slice(1);
-        if (remainingMatches.length > 0) {
-          const libLines: string[] = ["\n\n## Relevant Skill Frameworks"];
-          for (let i = 0; i < Math.min(remainingMatches.length, 3); i++) {
-            const m = remainingMatches[i];
-            const context = cfg.skillLibrary.getContextForQuery(m.skill.name, userInput);
-            if (context) {
-              const limit = i === 0 ? 500 : 80;
-              libLines.push(`\n### ${m.skill.name}\n${context.split("\n").slice(0, limit).join("\n")}`);
-            }
-          }
-          if (libLines.length > 1) libraryFrameworkContext = libLines.join("\n");
-        } else {
-          let searchResults = cfg.skillLibrary.search(userInput, 3);
-          if (queryEmbedding && queryEmbedding.length > 0) {
-            const semanticResults = cfg.skillLibrary.embedSearch(queryEmbedding, 3);
-            if (semanticResults.length > 0) {
-              searchResults = semanticResults.map((r) => r.skill);
-            }
-          }
-          if (searchResults.length > 0) {
-            const libLines: string[] = ["\n\n## Relevant Skill Frameworks"];
-            for (let i = 0; i < searchResults.length; i++) {
-              const sr = searchResults[i];
-              const context = cfg.skillLibrary.getContextForQuery(sr.name, userInput);
-              if (context) {
-                const limit = i === 0 ? 500 : 80;
-                libLines.push(`\n### ${sr.name}\n${context.split("\n").slice(0, limit).join("\n")}`);
-              }
-            }
-            if (libLines.length > 1) libraryFrameworkContext = libLines.join("\n");
-          }
-        }
-      } catch {
-        /* library not available */
       }
     }
     // 9. Build system prompt — static sections first (prompt-cache friendly),
@@ -1472,13 +1502,30 @@ export class Agent {
       id?: string;
     }[] = [
       { name: "mode", text: modePrompt ? `\n\n${modePrompt}` : "", priority: 100, pinned: true },
+      {
+        name: "researchGuidance",
+        text: RESEARCH_QUESTION_PATTERN.test(userInput)
+          ? "\n\n## Research Accuracy\nNTOX has searched and, when possible, opened scholarly source pages. Answer in one response; do not repeat the same search or emit tool-call syntax. Keep the answer focused (about 800 words maximum). Treat fetched source excerpts as directly checked evidence, and search snippets only as leads. For each important claim, distinguish source-supported facts from inference and recommendation, and cite the source URL that supports it. Check whether a source actually supports the claim before citing it. Search coverage is limited: never infer nobody has done something from missing results. For novelty, identify the narrow scope checked and say it remains unverified when evidence is insufficient. Do not call an idea a paper seed or claim it is yours to take without evidence."
+          : "",
+        priority: 99,
+        pinned: true,
+      },
+      {
+        name: "recommendationGuidance",
+        text:
+          !RESEARCH_QUESTION_PATTERN.test(userInput) && RECOMMENDATION_QUESTION_PATTERN.test(userInput)
+            ? "\n\n## Recommendation Integrity\nGive a recommendation that follows from the user's stated goal and relevant known constraints. Separate facts you know from assumptions and your judgment. If a key constraint is missing, state the assumption you used and give a low-risk next step that can produce evidence. For personal advice, avoid presenting a preference-sensitive judgment as an objective fact. For project or build advice, ground claims in the files or behavior you inspected; say what you could not verify. Give the main trade-off and a concrete way to judge whether the recommendation worked."
+            : "",
+        priority: 98,
+        pinned: true,
+      },
       { name: "user", text: userContext, priority: 90, pinned: true },
       { name: "plan", text: planContext, priority: 88, pinned: true },
       {
         name: "skills",
         text: skillContext,
         priority: 85,
-        pinned: false,
+        pinned: true,
         kind: "skill",
         id: pendingContextRecords.find((r) => r.section === "skills")?.id,
       },
@@ -1509,7 +1556,12 @@ export class Agent {
         kind: "recovery",
         id: `recovery:${hashText(recoveryContext)}`,
       },
-      { name: "search", text: searchContext, priority: 55, pinned: false },
+      {
+        name: "search",
+        text: searchContext,
+        priority: 98,
+        pinned: searchContext.includes("## Research"),
+      },
       { name: "skillFrameworks", text: libraryFrameworkContext, priority: 50, pinned: false },
       { name: "alive", text: aliveContext ? `\n\n${aliveContext}` : "", priority: 45, pinned: false },
       {
@@ -1617,7 +1669,9 @@ export class Agent {
       });
     }
 
-    const openaiTools = cfg.tools.toOpenAITools();
+    const openaiTools = cfg.tools
+      .toOpenAITools()
+      .filter((tool) => !(RESEARCH_QUESTION_PATTERN.test(userInput) && tool.function.name === "search"));
     const toolContext = {
       sessionId: cfg.sessionId,
       turnId: this.runTurnId,
@@ -1671,6 +1725,7 @@ export class Agent {
     let fullResponse = "";
     let attempts = 0;
     let actionNudges = 0;
+    const toolCallBudget: ToolCallBudget = { total: 0, web: 0 };
     const failedToolCalls = new Map<string, string>();
 
     while (!done && attempts < 10) {
@@ -1678,18 +1733,32 @@ export class Agent {
       if (this.currentTrace) this.currentTrace.retries = Math.max(0, attempts - 1);
       let responseBuffer = "";
 
-      const streamIter = cfg.llm.stream(this.messages, fullSystemPrompt, openaiTools, options.signal);
+      const availableTools =
+        toolCallBudget.total >= MAX_TOOL_CALLS_PER_TURN
+          ? []
+          : openaiTools.filter(
+              (tool) => !(toolCallBudget.web >= MAX_WEB_TOOL_CALLS_PER_TURN && WEB_TOOL_NAMES.has(tool.function.name)),
+            );
+      const streamIter = cfg.llm.stream(this.messages, fullSystemPrompt, availableTools, options.signal);
       const pendingToolCalls: ToolCall[] = [];
+      let discardedToolCalls = 0;
+      let providerToolCallLimitReached = false;
       try {
         for await (const chunk of streamIter) {
+          if (chunk.toolCallLimitReached) providerToolCallLimitReached = true;
           if (chunk.usage) {
             callbacks.onUsage(chunk.usage);
             turnCostUsd += chunk.usage.cost;
             turnTokens += chunk.usage.inputTokens + chunk.usage.outputTokens;
           }
           if (chunk.toolCalls && chunk.toolCalls.length > 0) {
-            pendingToolCalls.push(...chunk.toolCalls);
+            const remaining = MAX_TOOL_CALLS_PER_RESPONSE - pendingToolCalls.length;
+            pendingToolCalls.push(...chunk.toolCalls.slice(0, Math.max(0, remaining)));
+            discardedToolCalls += Math.max(0, chunk.toolCalls.length - Math.max(0, remaining));
             continue;
+          }
+          if (chunk.thinking) {
+            callbacks.onThinking?.(chunk.thinking);
           }
           if (chunk.delta) {
             responseBuffer += chunk.delta;
@@ -1717,7 +1786,24 @@ export class Agent {
 
       if (pendingToolCalls.length > 0) {
         this.pushMessage({ role: "assistant", content: responseBuffer || "(tool call)", tool_calls: pendingToolCalls });
-        await this.executeToolBatch(pendingToolCalls, toolContext, failedToolCalls, callbacks);
+        await this.executeToolBatch(pendingToolCalls, toolContext, failedToolCalls, callbacks, toolCallBudget);
+        if (discardedToolCalls > 0 || providerToolCallLimitReached) {
+          this.pushMessage({
+            role: "user",
+            content:
+              `[TOOL LIMIT] This response exceeded the ${MAX_TOOL_CALLS_PER_RESPONSE}-call batch limit. ` +
+              `${discardedToolCalls > 0 ? `${discardedToolCalls} extra calls were ignored. ` : "Extra calls were ignored. "}` +
+              `Use the results already returned; do not generate URL variations or another bulk batch. Answer the user's request now.`,
+          });
+        }
+        if (toolCallBudget.web >= MAX_WEB_TOOL_CALLS_PER_TURN || toolCallBudget.total >= MAX_TOOL_CALLS_PER_TURN) {
+          this.pushMessage({
+            role: "user",
+            content:
+              `[TOOL LIMIT] This turn has reached its limit of ${toolCallBudget.web >= MAX_WEB_TOOL_CALLS_PER_TURN ? MAX_WEB_TOOL_CALLS_PER_TURN + " web calls" : MAX_TOOL_CALLS_PER_TURN + " total tool calls"}. ` +
+              `Synthesize the evidence and work completed so far, state any gaps, and answer now without requesting more tools.`,
+          });
+        }
         fullResponse += responseBuffer;
         continue;
       }
@@ -2131,6 +2217,7 @@ export class Agent {
     toolContext: ToolContext,
     failedToolCalls: Map<string, string>,
     callbacks: AgentCallbacks,
+    budget: ToolCallBudget,
   ): Promise<void> {
     const prepared: PreparedToolCall[] = toolCalls.map((tc) => {
       let args: Record<string, unknown> = {};
@@ -2151,6 +2238,17 @@ export class Agent {
     for (const item of prepared) {
       const priorFailure = failedToolCalls.get(item.key);
       if (priorFailure) item.skipReason = priorFailure;
+      if (item.skipReason) continue;
+      if (budget.total >= MAX_TOOL_CALLS_PER_TURN) {
+        item.skipReason = `turn limit of ${MAX_TOOL_CALLS_PER_TURN} tool calls reached`;
+        continue;
+      }
+      if (WEB_TOOL_NAMES.has(item.tc.name) && budget.web >= MAX_WEB_TOOL_CALLS_PER_TURN) {
+        item.skipReason = `turn limit of ${MAX_WEB_TOOL_CALLS_PER_TURN} web calls reached`;
+        continue;
+      }
+      budget.total++;
+      if (WEB_TOOL_NAMES.has(item.tc.name)) budget.web++;
     }
 
     for (const item of prepared) {
@@ -2206,12 +2304,16 @@ export class Agent {
           const error =
             skipReason === "duplicate in batch"
               ? "Duplicate tool call in the same batch skipped."
-              : `Repeated failed tool call skipped: ${skipReason}`;
+              : skipReason.includes("limit")
+                ? `Tool call skipped: ${skipReason}`
+                : `Repeated failed tool call skipped: ${skipReason}`;
           results[index] = {
             success: false,
             error,
             data: {
-              guidance: "Change the arguments, choose another tool, or answer without retrying the same failed call.",
+              guidance: skipReason.includes("limit")
+                ? "Stop requesting tools and answer using the evidence already available. State remaining uncertainty."
+                : "Change the arguments, choose another tool, or answer without retrying the same failed call.",
             },
           };
           continue;

@@ -155,4 +155,21 @@ export function buildApprovalKey(toolName: string, command: string): string {
   return `${toolName}:${command}`;
 }
 
+export type InteractiveApprovalHandler = (toolName: string, command: string) => Promise<ApprovalDecision | null>;
+
+let interactiveHandler: InteractiveApprovalHandler | null = null;
+
+export function setInteractiveApproval(handler: InteractiveApprovalHandler | null): void {
+  interactiveHandler = handler;
+}
+
+export async function requestInteractiveApproval(toolName: string, command: string): Promise<ApprovalDecision | null> {
+  if (!interactiveHandler) return null;
+  try {
+    return await interactiveHandler(toolName, command);
+  } catch {
+    return null;
+  }
+}
+
 export const approvalStore = new ApprovalStore();

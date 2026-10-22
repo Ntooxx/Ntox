@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { Tool } from "../types/index.js";
-import { approvalStore, needsApproval } from "./approval.js";
+import { approvalStore, buildApprovalKey, needsApproval, requestInteractiveApproval } from "./approval.js";
 import { auditShellCommand, checkShellCommandSafety } from "./shell.js";
 
 export type BackgroundStatus = "running" | "exited" | "failed" | "killed";
@@ -253,12 +253,17 @@ export const processTool: Tool = {
         return { success: false, error: safetyError };
       }
       if (needsApproval(command)) {
-        const decision = approvalStore.check("shell", args);
+        const stored = approvalStore.check("shell", args);
+        let decision = stored;
+        if (!decision) decision = await requestInteractiveApproval("shell", command);
         if (!decision || decision === "deny") {
           return {
             success: false,
             error: `APPROVAL_REQUIRED: Command "${command}" requires approval. Use approval system to allow or deny.`,
           };
+        }
+        if (decision !== "allow-once" && !stored) {
+          approvalStore.store("shell", buildApprovalKey("shell", command), decision);
         }
       }
       if (activeCount() >= MAX_ACTIVE) {

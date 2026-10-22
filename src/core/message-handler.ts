@@ -57,12 +57,22 @@ export interface StreamResult {
 }
 
 const TURN_TIMEOUT_MS = 10 * 60 * 1000;
+const TURN_HARD_CAP_MS = 45 * 60 * 1000;
+const TOKENS_PER_SECOND_ASSUMED = 40;
+const GENERATION_HEADROOM = 2;
+
+export function computeTurnTimeoutMs(maxTokens: number): number {
+  const generationSeconds = (maxTokens / TOKENS_PER_SECOND_ASSUMED) * GENERATION_HEADROOM;
+  const scaled = generationSeconds * 1000;
+  return Math.min(Math.max(scaled, TURN_TIMEOUT_MS), TURN_HARD_CAP_MS);
+}
 
 export async function runAgentStream(
   agent: Agent,
   input: string,
   callbacks: Partial<AgentCallbacks>,
   signal?: AbortSignal,
+  options: { timeoutMs?: number; absoluteTimeoutMs?: number } = {},
 ): Promise<StreamResult> {
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -72,10 +82,21 @@ export async function runAgentStream(
   let timedOut = false;
 
   const controller = new AbortController();
-  const watchdog = setTimeout(() => {
+  const idleMs = options.timeoutMs ?? TURN_TIMEOUT_MS;
+  const absoluteMs = options.absoluteTimeoutMs ?? TURN_HARD_CAP_MS;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const expire = () => {
+    if (timedOut || cancelled) return;
     timedOut = true;
     controller.abort(new Error("turn timeout"));
-  }, TURN_TIMEOUT_MS);
+  };
+  const armIdleWatchdog = () => {
+    if (timedOut) return;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(expire, idleMs);
+  };
+  armIdleWatchdog();
+  const absoluteTimer = setTimeout(expire, absoluteMs);
   const onOuterAbort = () => controller.abort();
   if (signal) {
     if (signal.aborted) controller.abort();
@@ -86,6 +107,7 @@ export async function runAgentStream(
   const sanitizer = createStreamingSanitizer();
   const agentCallbacks: AgentCallbacks = {
     onToken: (token) => {
+      armIdleWatchdog();
       const filtered = tokenFilter.filter(token);
       if (!filtered) return;
       const safe = sanitizer.push(filtered);
@@ -94,14 +116,24 @@ export async function runAgentStream(
         callbacks.onToken?.(safe);
       }
     },
-    onToolCall: (name, args) => callbacks.onToolCall?.(name, args),
-    onToolResult: (name, result, args) => callbacks.onToolResult?.(name, result, args),
+    onToolCall: (name, args) => {
+      armIdleWatchdog();
+      callbacks.onToolCall?.(name, args);
+    },
+    onToolResult: (name, result, args) => {
+      armIdleWatchdog();
+      callbacks.onToolResult?.(name, result, args);
+    },
     onUsage: (usage) => {
+      armIdleWatchdog();
       totalInputTokens += usage.inputTokens;
       totalOutputTokens += usage.outputTokens;
       callbacks.onUsage?.(usage);
     },
-    onThinking: (thought) => callbacks.onThinking?.(thought),
+    onThinking: (thought) => {
+      armIdleWatchdog();
+      callbacks.onThinking?.(thought);
+    },
     onPhase: (phase) => callbacks.onPhase?.(phase),
     onMemoryRecall: (count) => callbacks.onMemoryRecall?.(count),
     onMemoryStore: () => callbacks.onMemoryStore?.(),
@@ -130,7 +162,8 @@ export async function runAgentStream(
       timedOut = true;
     }
   } finally {
-    clearTimeout(watchdog);
+    clearTimeout(idleTimer);
+    clearTimeout(absoluteTimer);
     if (signal) signal.removeEventListener("abort", onOuterAbort);
   }
 

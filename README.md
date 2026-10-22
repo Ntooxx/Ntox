@@ -4,17 +4,32 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](package.json)
 [![CI](https://github.com/Ntooxx/Ntox/actions/workflows/ci.yml/badge.svg)](https://github.com/Ntooxx/Ntox/actions)
 [![npm](https://img.shields.io/badge/npm-0.1.0-red)](package.json)
-[![tests](https://img.shields.io/badge/tests-907%20passing-44cc11)](https://github.com/Ntooxx/Ntox/actions)
+[![tests](https://img.shields.io/badge/tests-957%20passing-44cc11)](https://github.com/Ntooxx/Ntox/actions)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
 
-A self-improving CLI agent with persistent memory, a cognitive kernel, pattern compilation, theory distillation, and 83+ reasoning skills. Includes a runtime-neutral cognition API and DeepSeek Harness adapter. Multi-channel gateway (Telegram, Discord, WhatsApp, Web UI). Docker sandboxing. Runs locally.
+A self-improving CLI agent that predicts, remembers, and corrects itself. Closed learning loop, cognitive kernel, pattern compilation, theory distillation, and 80+ reasoning skills. Includes a runtime-neutral cognition API and DeepSeek Harness adapter. Multi-channel gateway (Telegram, Discord, WhatsApp, Web UI). Docker sandboxing. Runs locally.
 
 ## Why NTOX?
 
-NTOX is the only agent with a **cognitive kernel**: it doesn't just call tools, it compresses what it learns into reusable patterns and builds meta-theories from cross-domain observations. It's an experiment in agent meta-cognition that goes beyond "LLM + tool loop."
+NTOX is built around a **cognitive kernel**: it doesn't just call tools, it compresses what it learns into reusable patterns, builds meta-theories from cross-domain observations, and records which context actually helped. It is an experiment in agent meta-cognition that goes beyond "LLM + tool loop".
+
+## Highlights
+
+- **A closed learning loop.** Every turn can predict an outcome, observe what happened, attribute the result, and change the next turn through the Mind subsystem.
+- **Memory with authority.** Corrections outrank conflicting facts, theories carry falsification criteria, and retrieval is ranked by measured reliability.
+- **Identity you can measure.** Milestone M5 passes: a trained instance is behaviorally distinguishable from a fresh one.
+- **Alive by design.** Predictions, open loops, prediction error, and wake decisions form an event-driven core exposed as `ntox/alive`.
+- **Evidence, not adjectives.** 6/6 necessity checks, a significant longitudinal result, ALIVE-1, NCB, and a 12/12 verification gate.
+- **Breadth without lock-in.** 9 named providers plus custom endpoints, 5 chat surfaces, 80+ skills, Docker, and public cognition and Alive packages.
+
+The full evidence-backed tour is in [HIGHLIGHTS.md](HIGHLIGHTS.md).
+
+There is also a motion-design showcase of the whole system in [`site/`](site/) — open `site/index.html` in a browser.
 
 ## Features
 
+- **Mind Loop**: Outcome ledger, prediction and calibration, reliability-ranked memory, Thompson-sampling strategy selection, capability model, and idle cognition
+- **Measured Identity**: Evidence-backed positions, cognitive fingerprint, divergence scoring, and M5 proof
 - **Cognitive Kernel**: Compresses queries to primitives, matches patterns in an 8D cognitive vector space, auto-compiles frequent patterns into reusable abstractions
 - **Theory Store**: Distills conversations into learned knowledge: observations -> patterns -> theories -> meta-theories
 - **Workspace Policy**: Profiles constrain reads, writes, shell cwd, network/browser tools, and auto-checkpoint edits before changes
@@ -23,7 +38,7 @@ NTOX is the only agent with a **cognitive kernel**: it doesn't just call tools, 
 - **False-Success Self-Correction**: Detects shallow reasoning and retries with deeper analysis
 - **Persistent Memory**: Every exchange is embedded and searchable via cosine similarity (local fallback, no API key needed)
 - **Multi-Channel Gateway**: Telegram, Discord (WebSocket with intents), and a minimal local Web UI all share the same agent runtime
-- **Skill Library**: 83+ markdown skill documents, auto-triggered by semantic search
+- **Skill Library**: 80+ markdown skill documents, auto-triggered by semantic search
 - **Meta-Cognition**: Strategy classification, self-reflection, mistake journal, session intent, style optimization
 - **Runtime-Neutral Cognition API**: Mount NTOX cognitive context and turn learning into another agent runtime without replacing its model, tools, or session engine
 - **DeepSeek Harness Adapter**: Connects Harness lifecycle events to NTOX before-step context, tool outcomes, and post-turn learning
@@ -161,23 +176,28 @@ NTOX now persists this state at `~/.ntox/alive.json`, records every tool result 
 
 ```
 ntox/
-â”œâ”€â”€ src/
-â”‚   â”œâ”€â”€ cli/           REPL, terminal rendering, animations
-â”‚   â”œâ”€â”€ core/          Agent loop, config, LLM client (9 providers)
-â”‚   â”œâ”€â”€ cognition/     Cognitive kernel, pattern store, vector space
-â”‚   â”œâ”€â”€ memory/        Episodic + theory memory, user model, relationship
-â”‚   â”œâ”€â”€ meta/          Strategy, reflection, mistakes, proactive, self-awareness
-â”‚   â”œâ”€â”€ skills/        Skill registry, library scanner, executor, learner
-â”‚   â”œâ”€â”€ tools/         Filesystem, shell, grep, web tools
-â”‚   â”œâ”€â”€ research/      False-success detection, theory store
-â”‚   â”œâ”€â”€ benchmark/     NCB cognitive benchmark
-â”‚   â”œâ”€â”€ types/         TypeScript interfaces
-â”‚   â””â”€â”€ index.ts       Entry point
-â”œâ”€â”€ skills/            83+ bundled reasoning skill documents
-â”œâ”€â”€ .github/workflows/ CI/CD
-â”œâ”€â”€ AGENTS.md          Guide for AI-assisted contributors
-â”œâ”€â”€ CONTRIBUTING.md    Guide for human contributors
-â””â”€â”€ package.json
+|-- src/
+|   |-- cli/           REPL, terminal rendering, animations
+|   |-- core/          Agent loop, config, LLM client (10 providers), policy
+|   |-- cognition/     Cognitive kernel, pattern store, vector space
+|   |-- mind/          Outcome ledger, predictors, bandit, identity, idle jobs
+|   |-- memory/        Episodic + theory memory, user model, relationship
+|   |-- meta/          Strategy, reflection, mistakes, proactive, self-awareness
+|   |-- alive/         Predictions, open loops, wake decisions, host adapters
+|   |-- kernel/        Goals, subtasks, verifier
+|   |-- skills/        Skill registry, library scanner, executor, learner
+|   |-- tools/         Filesystem, shell, grep, web, browser, voice, subagents
+|   |-- gateway/       Telegram, Discord, WhatsApp, Web UI
+|   |-- api/           HTTP/SSE server
+|   |-- evaluation/    Necessity checks, ablations, longitudinal runner
+|   |-- benchmark/     NCB and ALIVE-1 benchmarks
+|   |-- types/         TypeScript interfaces
+|   `-- index.ts       Entry point
+|-- skills/            80+ bundled reasoning skill documents
+|-- .github/workflows/ CI/CD
+|-- AGENTS.md          Guide for AI-assisted contributors
+|-- CONTRIBUTING.md    Guide for human contributors
+`-- package.json
 ```
 
 ## Requirements
@@ -197,7 +217,7 @@ NTOX ships with defense-in-depth tool protections:
 | **Grep**             | Rejects ReDoS patterns (nested quantifiers), pattern length limit, benchmarked regex execution                           |
 | **Shell**            | Regex blocklist for destructive commands + optional Docker sandboxing (`dockerEnabled: true`)                            |
 | **Browser**          | Reuses web URL validation, blocking localhost and private network targets                                                |
-| **Prompt**           | Injects detection (14 patterns: DAN, jailbreak, override, etc.)                                                          |
+| **Prompt**           | Injection detection (14 patterns: DAN, jailbreak, override, etc.)                                                        |
 | **Output**           | Sanitizes secrets (API keys, tokens, private keys) from responses                                                        |
 | **Telegram/Discord** | Optional user allowlists (`telegramAllowedUsers`, `discordAllowedUsers`)                                                 |
 | **WhatsApp**        | Webhook `X-Hub-Signature-256` verification via `whatsappAppSecret` (set in `ntox setup`)                                 |
@@ -216,7 +236,7 @@ cd integrations/deepseek-harness && npm test  # Run adapter tests
 
 `verify:all` checks linting, type safety, tests, builds, package contents, the built CLI, the built cognition export, and every adapter package gate. It records results in `experiments/verification/report.json`.
 
-The current functional verification result is 12 of 12 passing checks: linting, formatting, 907 root tests, builds, CLI startup, the cognition and Alive smoke scenarios, and all adapter checks pass. Results are recorded in `experiments/verification/report.json`.
+The last full verification run passed 12 of 12 checks: linting, formatting, 907 root tests, builds, CLI startup, the cognition and Alive smoke scenarios, and all adapter checks. The root suite has since grown to 957 passing tests. Results are recorded in `experiments/verification/report.json`.
 
 ## HTTP/SSE API (for web apps)
 

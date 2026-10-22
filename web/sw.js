@@ -1,4 +1,4 @@
-const CACHE_NAME = "ntox-static-v1";
+const CACHE_NAME = "ntox-static-v3";
 const PRECACHE = [
   "/app.css",
   "/app.js",
@@ -74,16 +74,20 @@ self.addEventListener("fetch", (event) => {
   if (STATIC_EXT.test(url.pathname)) {
     event.respondWith(
       (async () => {
-        const cached = await caches.match(request);
-        const network = fetch(request)
-          .then((res) => {
-            if (res.ok) {
-              caches.open(CACHE_NAME).then((cache) => cache.put(request, res.clone())).catch(() => {});
-            }
-            return res;
-          })
-          .catch(() => cached);
-        return cached || network;
+        try {
+          const fresh = await fetch(request);
+          if (fresh.ok) {
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, fresh.clone())).catch(() => {});
+          }
+          return fresh;
+        } catch {
+          const cached = await caches.match(request);
+          if (cached) return cached;
+          return new Response("NTOX is offline.", {
+            status: 503,
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
+        }
       })(),
     );
   }

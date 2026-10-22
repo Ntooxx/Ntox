@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import type { ThinkPhase } from "../types/index.js";
+import { accents, paint, palette } from "./theme.js";
 
 export interface PhaseIndicator {
   char: string;
@@ -10,34 +11,34 @@ export interface PhaseIndicator {
 
 const INDICATORS: Record<ThinkPhase, PhaseIndicator> = {
   thinking: {
-    char: "\u280B",
+    char: "⠿",
     label: "thinking",
     color: chalk.cyan,
-    frames: ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"],
+    frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
   },
   analyzing: {
-    char: "\u25C7",
+    char: "◈",
     label: "analyzing",
-    color: chalk.yellow,
-    frames: ["\u25C7", "\u25C6", "\u25C7"],
+    color: (s: string) => accents.warn(s),
+    frames: ["◇", "◈", "◆", "◈"],
   },
   reasoning: {
-    char: "\u25B3",
+    char: "▸",
     label: "reasoning",
-    color: chalk.magenta,
-    frames: ["\u25B3", "\u25B2", "\u25B3"],
+    color: (s: string) => accents.violet(s),
+    frames: ["▵", "▸", "▿", "◂"],
   },
   recalling: {
-    char: "\u25CE",
+    char: "◉",
     label: "recalling",
-    color: chalk.green,
-    frames: ["\u25CE", "\u25CF", "\u25CE"],
+    color: (s: string) => accents.good(s),
+    frames: ["◌", "◎", "◉", "◎"],
   },
   responding: {
-    char: "\u25B8",
+    char: "▹",
     label: "responding",
-    color: chalk.cyan,
-    frames: ["\u25B8", "\u25B9", "\u25B8"],
+    color: (s: string) => accents.title(s),
+    frames: ["▸", "▹", "▸", "▹", "▸", "▹"],
   },
 };
 
@@ -48,7 +49,7 @@ export function getPhaseIndicator(phase: ThinkPhase): PhaseIndicator {
 export function renderPhaseFrame(phase: ThinkPhase, frameIndex: number): string {
   const ind = INDICATORS[phase];
   const char = ind.frames[frameIndex % ind.frames.length];
-  return ind.color(char);
+  return paint(palette.accent, char);
 }
 
 export function renderPhaseLabel(phase: ThinkPhase): string {

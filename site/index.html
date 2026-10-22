@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NTOX — An agent with a loop, not a longer prompt</title>
+<meta name="description" content="NTOX is a cognitive agent runtime. It predicts before it acts, observes what happened, attributes the result, and updates the next turn. Memory with authority. Identity you can measure. Evidence over adjectives.">
+<meta name="theme-color" content="#0c0a09">
+<meta property="og:title" content="NTOX — Cognitive Agent Runtime">
+<meta property="og:description" content="Predict. Act. Observe. Attribute. Update. Reuse. An agent that learns from being used.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23e2704a' d='M12 2Q13.2 10.8 22 12Q13.2 13.2 12 22Q10.8 13.2 2 12Q10.8 10.8 12 2Z'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="grain" aria-hidden="true"></div>
+<div class="progress" aria-hidden="true"><span class="progress__bar"></span></div>
+
+<header class="nav" id="nav">
+  <div class="nav__inner">
+    <a class="brand" href="#top" aria-label="NTOX home">
+      <svg class="brand__mark" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 2Q13.2 10.8 22 12Q13.2 13.2 12 22Q10.8 13.2 2 12Q10.8 10.8 12 2Z"/>
+      </svg>
+      <span class="brand__word">ntox</span>
+      <span class="brand__tag">cognitive runtime</span>
+    </a>
+
+    <nav class="nav__links" aria-label="Primary">
+      <a href="#loop">The loop</a>
+      <a href="#proof">Proof</a>
+      <a href="#capability">Capability</a>
+      <a href="#alive">Alive</a>
+      <a href="#surfaces">Surfaces</a>
+    </nav>
+
+    <div class="nav__actions">
+      <a class="btn btn--ghost" href="https://github.com/Ntooxx/Ntox" target="_blank" rel="noopener">GitHub</a>
+      <a class="btn btn--solid" href="#install">Install</a>
+      <button class="nav__toggle" id="navToggle" aria-label="Open menu" aria-expanded="false">
+        <span></span><span></span>
+      </button>
+    </div>
+  </div>
+
+  <div class="nav__panel" id="navPanel">
+    <a href="#loop">The loop</a>
+    <a href="#proof">Proof</a>
+    <a href="#capability">Capability</a>
+    <a href="#alive">Alive</a>
+    <a href="#surfaces">Surfaces</a>
+    <a href="#trust">Trust</a>
+    <a href="#install">Install</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="hero__aura" aria-hidden="true">
+      <span class="hero__orb hero__orb--a"></span>
+      <span class="hero__orb hero__orb--b"></span>
+      <span class="hero__orb hero__orb--c"></span>
+    </div>
+    <canvas class="hero__field" id="field" aria-hidden="true"></canvas>
+
+    <div class="shell hero__inner">
+      <p class="eyebrow reveal">
+        <span class="eyebrow__dot"></span>
+        ntox <i>/</i> cognitive agent runtime
+      </p>
+
+      <h1 class="hero__title">
+        <span class="line"><span class="word">An</span> <span class="word">agent</span> <span class="word">with</span> <span class="word">a</span></span>
+        <span class="line"><span class="word word--serif word--glow">loop</span><span class="word">,</span> <span class="word">not</span> <span class="word">a</span></span>
+        <span class="line"><span class="word">longer</span> <span class="word word--serif">prompt.</span></span>
+      </h1>
+
+      <p class="hero__lead reveal">
+        NTOX predicts before it acts, observes what happened, attributes the result,
+        and updates the next turn. Memory with authority. Identity you can measure.
+        <em>Evidence over adjectives.</em>
+      </p>
+
+      <div class="hero__cta reveal">
+        <button class="btn btn--solid btn--lg magnetic" data-copy="npm install -g ntox">
+          <span class="btn__label">npm install -g ntox</span>
+          <span class="btn__hint">copy</span>
+        </button>
+        <a class="btn btn--line btn--lg magnetic" href="#proof">
+          See the evidence
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+      </div>
+
+      <dl class="hero__stats reveal">
+        <div class="stat"><dt>957</dt><dd>tests passing</dd></div>
+        <div class="stat"><dt>6 / 6</dt><dd>necessity checks</dd></div>
+        <div class="stat"><dt>12 / 12</dt><dd>verification gate</dd></div>
+        <div class="stat"><dt>MIT</dt><dd>local first</dd></div>
+      </dl>
+    </div>
+
+    <a class="hero__scroll" href="#loop" aria-label="Scroll to the loop">
+      <span class="hero__scroll-line"></span>
+      <span class="hero__scroll-text">scroll</span>
+    </a>
+  </section>
+
+  <div class="ticker" aria-hidden="true">
+    <div class="ticker__track">
+      <span class="ticker__set">
+        <b>predict</b><i>·</i><b>act</b><i>·</i><b>observe</b><i>·</i><b>attribute</b><i>·</i><b>update</b><i>·</i><b>reuse</b><i>·</i>
+      </span>
+      <span class="ticker__set">
+        <b>predict</b><i>·</i><b>act</b><i>·</i><b>observe</b><i>·</i><b>attribute</b><i>·</i><b>update</b><i>·</i><b>reuse</b><i>·</i>
+      </span>
+    </div>
+  </div>
+
+  <section class="section" id="loop">
+    <div class="shell">
+      <header class="section__head">
+        <p class="label reveal"><span>01</span> the loop</p>
+        <h2 class="section__title reveal">
+          One law runs the<br><em>entire</em> system.
+        </h2>
+        <p class="section__lead reveal">
+          Every cognitive feature must predict, observe, attribute and update.
+          A feature that cannot name its prediction and its update is decoration.
+          NTOX enforces that contract on every single turn.
+        </p>
+      </header>
+
+      <div class="loop">
+        <div class="loop__stage">
+          <div class="ring" id="ring">
+            <div class="ring__halo"></div>
+            <div class="ring__track"></div>
+            <div class="ring__orbit"></div>
+            <div class="ring__core">
+              <span class="ring__core-index" id="ringIndex">01</span>
+              <p class="ring__core-name" id="ringName">predict</p>
+              <p class="ring__core-copy" id="ringCopy">State the expected outcome and confidence before acting.</p>
+            </div>
+            <button class="ring__node is-active" style="--a:0deg; --lx:0px; --ly:-40px" data-stage="0"><span>predict</span></button>
+            <button class="ring__node" style="--a:60deg; --lx:34px; --ly:-20px" data-stage="1"><span>act</span></button>
+            <button class="ring__node" style="--a:120deg; --lx:34px; --ly:20px" data-stage="2"><span>observe</span></button>
+            <button class="ring__node" style="--a:180deg; --lx:0px; --ly:40px" data-stage="3"><span>attribute</span></button>
+            <button class="ring__node" style="--a:240deg; --lx:-34px; --ly:20px" data-stage="4"><span>update</span></button>
+            <button class="ring__node" style="--a:300deg; --lx:-34px; --ly:-20px" data-stage="5"><span>reuse</span></button>
+          </div>
+        </div>
+
+        <ol class="loop__list">
+          <li class="loop__item" data-stage="0">
+            <span class="loop__num">01</span>
+            <div>
+              <h3>Predict</h3>
+              <p>A free heuristic predictor, or an optional model-backed one, states the expected outcome and its confidence before a single tool runs.</p>
+            </div>
+          </li>
+          <li class="loop__item" data-stage="1">
+            <span class="loop__num">02</span>
+            <div>
+              <h3>Act</h3>
+              <p>The turn executes: model, tools, policy, memory and skills, all routed through one composition root.</p>
+            </div>
+          </li>
+          <li class="loop__item" data-stage="2">
+            <span class="loop__num">03</span>
+            <div>
+              <h3>Observe</h3>
+              <p>Corrections, rephrases, thanks, tool failures, test results and objective signals are captured into the outcome ledger.</p>
+            </div>
+          </li>
+          <li class="loop__item" data-stage="3">
+            <span class="loop__num">04</span>
+            <div>
+              <h3>Attribute</h3>
+              <p>Credit is assigned to the specific memories, theories, skills and context items that were actually present.</p>
+            </div>
+          </li>
+          <li class="loop__item" data-stage="4">
+            <span class="loop__num">05</span>
+            <div>
+              <h3>Update</h3>
+              <p>A Thompson-sampling bandit adjusts strategy, a calibration tracker adjusts confidence, a capability model adjusts domain strength.</p>
+            </div>
+          </li>
+          <li class="loop__item" data-stage="5">
+            <span class="loop__num">06</span>
+            <div>
+              <h3>Reuse</h3>
+              <p>Memory is re-ranked by reliability, context is recompiled under a token budget, and the winning strategy is selected again.</p>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--proof" id="proof">
+    <div class="shell">
+      <header class="section__head section__head--split">
+        <div>
+          <p class="label reveal"><span>02</span> proof</p>
+          <h2 class="section__title reveal">Claims,<br><em>with receipts.</em></h2>
+        </div>
+        <p class="section__lead reveal">
+          Most agents ship features. NTOX ships the instrumentation that decides
+          whether those features work, then commits the results.
+          Necessity checks, ablations, longitudinal learning curves, and a
+          milestone that proves a trained instance is behaviourally different from a fresh one.
+        </p>
+      </header>
+
+      <div class="counters">
+        <div class="counter reveal">
+          <p class="counter__value"><span data-count="957">0</span></p>
+          <p class="counter__label">tests passing</p>
+          <p class="counter__note">95 files, about 8 seconds</p>
+        </div>
+        <div class="counter reveal">
+          <p class="counter__value"><span data-count="6">0</span><span class="counter__sep">/</span><span data-count="6">0</span></p>
+          <p class="counter__label">necessity checks</p>
+          <p class="counter__note">each subsystem proven causally used</p>
+        </div>
+        <div class="counter reveal">
+          <p class="counter__value"><span data-count="12">0</span><span class="counter__sep">/</span><span data-count="12">0</span></p>
+          <p class="counter__label">verification gate</p>
+          <p class="counter__note">lint, types, tests, build, package, adapter</p>
+        </div>
+        <div class="counter reveal">
+          <p class="counter__value"><span data-count="0.4125" data-decimals="4">0</span></p>
+          <p class="counter__label">identity divergence</p>
+          <p class="counter__note">target &gt; 0.4 — milestone M5 passed</p>
+        </div>
+      </div>
+
+      <div class="evidence">
+        <article class="evidence__card reveal">
+          <p class="evidence__kicker">longitudinal</p>
+          <p class="evidence__big"><span data-count="0.2" data-decimals="3" data-prefix="+">0</span></p>
+          <p class="evidence__body">
+            Mean score moved from 0.500 to 0.700 across a 30-task curriculum.
+            95% CI [0.067, 0.350], d = 0.519, n = 30, required n = 30, significant.
+            The mechanism was cross-session episodic recall.
+          </p>
+        </article>
+        <article class="evidence__card reveal">
+          <p class="evidence__kicker">harness proof</p>
+          <p class="evidence__big evidence__big--serif">crossed sessions</p>
+          <p class="evidence__body">
+            Seeded a deployment codename, reset the conversation, asked for it back.
+            The baseline failed. NTOX returned <code>orion-lighthouse</code> exactly,
+            through the DeepSeek Harness adapter.
+          </p>
+        </article>
+        <article class="evidence__card reveal">
+          <p class="evidence__kicker">cognitive benchmark</p>
+          <p class="evidence__big"><span data-count="45.65" data-decimals="2">0</span></p>
+          <p class="evidence__body">
+            NCB overall across 20 categories: 70% abstraction, 62% architecture,
+            59% emergence. The weak categories are published too — a diagnostic,
+            not a victory lap.
+          </p>
+        </article>
+      </div>
+
+      <p class="proof__foot reveal">
+        Every number above is reproducible. Reports live in
+        <code>experiments/</code>, and <code>npm run eval:necessity</code>
+        runs the deterministic checks with no API key at all.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="capability">
+    <div class="shell">
+      <header class="section__head">
+        <p class="label reveal"><span>03</span> capability</p>
+        <h2 class="section__title reveal">Depth where it<br>actually <em>matters.</em></h2>
+        <p class="section__lead reveal">
+          Not a wrapper around an API call. A runtime with memory, self-models,
+          a symbolic control layer, and the tooling to keep it honest.
+        </p>
+      </header>
+
+      <div class="bento">
+        <article class="tile tile--wide reveal">
+          <div class="tile__glow"></div>
+          <p class="tile__tag">memory</p>
+          <h3>Memory with authority</h3>
+          <p>
+            Corrections outrank older conflicting facts. Durable facts carry provenance,
+            confidence, contradiction counts and a full edit history. Retrieval is ranked
+            by measured usefulness, not just similarity or recency.
+          </p>
+          <ul class="chips">
+            <li>correction precedence</li>
+            <li>provenance</li>
+            <li>reliability ranking</li>
+            <li>user model</li>
+          </ul>
+        </article>
+
+        <article class="tile reveal">
+          <div class="tile__glow"></div>
+          <p class="tile__tag">theories</p>
+          <h3>Falsifiable by design</h3>
+          <p>Observations become patterns, patterns become theories, theories become meta-theories. Each carries predictions, falsification criteria and evidence-driven confidence.</p>
+        </article>
+
+        <article class="tile reveal">
+          <div class="tile__glow"></div>
+          <p class="tile__tag">skills</p>
+          <h3>81 reasoning frameworks</h3>
+          <p>Markdown skills across 17 category folders, matched semantically at prompt time, with a learner that extracts new ones from experience.</p>
+        </article>
+
+        <article class="tile reveal">
+          <div class="tile__glow"></div>
+          <p class="tile__tag">strategy</p>
+          <h3>Thompson sampling</h3>
+          <p>A contextual bandit chooses between standard, direct, verify and clarify stances per query type, and learns which one earns the better outcome.</p>
+        </article>
+
+        <article class="tile reveal">
+          <div class="tile__glow"></div>
+          <p class="tile__tag">control</p>
+          <h3>Symbolic decision layer</h3>
+          <p>Goals, subtasks with dependencies, explicit success predicates and a verifier that records outcomes independently of the language model.</p>
+        </article>
+
+        <article class="tile tile--full reveal">
+          <div class="tile__glow"></div>
+          <p class="tile__tag">observability</p>
+          <h3>Everything is inspectable</h3>
+          <p>
+            <code>/trace</code> shows mode, strategy, memory and theory use, token ledger,
+            policy decisions, tool calls and checkpoints. <code>/mind</code> shows identity,
+            divergence, transfer and the learning curve. Autonomy has a budget, and the
+            budget is visible.
+          </p>
+          <ul class="chips">
+            <li>token ledger</li>
+            <li>pre-edit checkpoints</li>
+            <li>outcome ledger</li>
+            <li>calibration</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--alive" id="alive">
+    <div class="shell">
+      <header class="section__head section__head--split">
+        <div>
+          <p class="label reveal"><span>04</span> alive</p>
+          <h2 class="section__title reveal">Alive is a control<br>loop, <em>not a feature.</em></h2>
+        </div>
+        <p class="section__lead reveal">
+          <code>ntox/alive</code> models the agent as an event-driven system with
+          explicit expectations. It does not call a model on its own and it does not
+          watch your machine. A host supplies consented events; the engine decides
+          cheaply what deserves cognition.
+        </p>
+      </header>
+
+      <div class="flow reveal">
+        <div class="flow__node flow__node--in">
+          <span class="flow__pulse"></span>
+          <p class="flow__title">prediction</p>
+          <p class="flow__meta">statement · confidence · expected event</p>
+        </div>
+
+        <div class="flow__wire" aria-hidden="true"><span class="flow__spark"></span></div>
+
+        <div class="flow__node">
+          <span class="flow__pulse"></span>
+          <p class="flow__title">event</p>
+          <p class="flow__meta">consented · typed · sourced</p>
+        </div>
+
+        <div class="flow__wire" aria-hidden="true"><span class="flow__spark"></span></div>
+
+        <div class="flow__branch">
+          <div class="flow__action"><b>learn</b><span>prediction resolved</span></div>
+          <div class="flow__action flow__action--hot"><b>wake</b><span>surprise above threshold</span></div>
+          <div class="flow__action"><b>notify</b><span>needs a human</span></div>
+          <div class="flow__action"><b>ignore</b><span>not worth cognition</span></div>
+        </div>
+      </div>
+
+      <div class="alive__grid">
+        <article class="alive__card reveal">
+          <h3>Open loops</h3>
+          <p>Goals and hypotheses awaiting evidence, with deadlines. The engine blocks the ones that stall and surfaces them.</p>
+        </article>
+        <article class="alive__card reveal">
+          <h3>Prediction error</h3>
+          <p>Confidence is compared against reality. The gap, not the story, decides whether the agent should wake up.</p>
+        </article>
+        <article class="alive__card reveal">
+          <h3>Privacy bounded</h3>
+          <p>Host adapters watch only the active workspace and Git state. Never typing, never other applications, never remote services.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="surfaces">
+    <div class="shell">
+      <header class="section__head">
+        <p class="label reveal"><span>05</span> surfaces</p>
+        <h2 class="section__title reveal">One mind.<br><em>Every surface.</em></h2>
+        <p class="section__lead reveal">
+          The CLI, the web chat and every gateway share one dispatcher, one policy
+          runtime and one memory. Nothing is forked, nothing is a special case.
+        </p>
+      </header>
+
+      <div class="surfaces">
+        <div class="surface reveal">
+          <p class="surface__index">01</p>
+          <h3>CLI</h3>
+          <p>Streaming REPL, phases, animations, sessions and resume, trace inspection, slash commands.</p>
+        </div>
+        <div class="surface reveal">
+          <p class="surface__index">02</p>
+          <h3>Web UI</h3>
+          <p>Local chat with streamed responses, command palette, activity drawer, approvals and voice capture.</p>
+        </div>
+        <div class="surface reveal">
+          <p class="surface__index">03</p>
+          <h3>Telegram</h3>
+          <p>Bot gateway with per-user allowlists and durable session handling.</p>
+        </div>
+        <div class="surface reveal">
+          <p class="surface__index">04</p>
+          <h3>Discord</h3>
+          <p>WebSocket gateway with intents, sharing the exact same agent runtime.</p>
+        </div>
+        <div class="surface reveal">
+          <p class="surface__index">05</p>
+          <h3>WhatsApp</h3>
+          <p>Webhook gateway with <code>X-Hub-Signature-256</code> verification and message splitting.</p>
+        </div>
+        <div class="surface reveal">
+          <p class="surface__index">06</p>
+          <h3>HTTP / SSE</h3>
+          <p><code>/api/chat</code>, <code>/api/session/reset</code> and <code>/api/health</code> for your own apps.</p>
+        </div>
+        <div class="surface reveal">
+          <p class="surface__index">07</p>
+          <h3>Harness</h3>
+          <p>A DeepSeek Harness adapter that supplies cognitive context and learns from tool and turn outcomes.</p>
+        </div>
+        <div class="surface surface--accent reveal">
+          <p class="surface__index">08</p>
+          <h3>Packages</h3>
+          <p><code>ntox/cognition</code>, <code>ntox/alive</code>, <code>ntox/alive/host</code> — mount the learning in any runtime.</p>
+        </div>
+      </div>
+
+      <div class="providers reveal">
+        <p class="providers__label">nine named providers, plus any openai-compatible endpoint</p>
+        <div class="providers__row">
+          <span>OpenAI</span><span>Anthropic</span><span>OpenRouter</span><span>DeepSeek</span>
+          <span>Groq</span><span>Together</span><span>Mistral</span><span>Ollama</span><span>LM Studio</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--trust" id="trust">
+    <div class="shell">
+      <header class="section__head section__head--split">
+        <div>
+          <p class="label reveal"><span>06</span> trust</p>
+          <h2 class="section__title reveal">Defence in depth,<br>by <em>default.</em></h2>
+        </div>
+        <p class="section__lead reveal">
+          NTOX assumes the model can be wrong, the web can be hostile and the shell
+          can be dangerous. Protections are layered, and every tool from every entry
+          point passes through one policy choke point.
+        </p>
+      </header>
+
+      <div class="shield">
+        <div class="shield__layer reveal" style="--i:0"><span class="shield__key">workspace policy</span><span class="shield__val">paths, network, browser and shell confined by profile</span></div>
+        <div class="shield__layer reveal" style="--i:1"><span class="shield__key">approval flow</span><span class="shield__val">risky commands require an explicit human yes</span></div>
+        <div class="shield__layer reveal" style="--i:2"><span class="shield__key">secrets &amp; fs</span><span class="shield__val"><code>.ssh</code> <code>.aws</code> <code>.env</code> <code>.gnupg</code> denied, edits checkpointed</span></div>
+        <div class="shield__layer reveal" style="--i:3"><span class="shield__key">network</span><span class="shield__val">private ranges, localhost and <code>file://</code> rejected</span></div>
+        <div class="shield__layer reveal" style="--i:4"><span class="shield__key">shell &amp; regex</span><span class="shield__val">destructive command blocklist, optional docker sandbox, reDOS rejection</span></div>
+        <div class="shield__layer reveal" style="--i:5"><span class="shield__key">prompt &amp; output</span><span class="shield__val">injection guard on input, secret sanitisation on output</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta" id="install">
+    <div class="cta__aura" aria-hidden="true"></div>
+    <div class="shell cta__inner">
+      <p class="label reveal"><span>07</span> start</p>
+      <h2 class="cta__title reveal">
+        Install it.<br><em>Watch it learn.</em>
+      </h2>
+      <p class="cta__lead reveal">
+        Runs locally, works with whatever model you already pay for,
+        and tells you exactly what it did with your data.
+      </p>
+
+      <div class="commands reveal">
+        <button class="command magnetic" data-copy="npm install -g ntox">
+          <span class="command__prompt">$</span>
+          <span class="command__text">npm install -g ntox</span>
+          <span class="command__copy">copy</span>
+        </button>
+        <button class="command magnetic" data-copy="ntox setup">
+          <span class="command__prompt">$</span>
+          <span class="command__text">ntox setup</span>
+          <span class="command__copy">copy</span>
+        </button>
+        <button class="command magnetic" data-copy="ntox">
+          <span class="command__prompt">$</span>
+          <span class="command__text">ntox</span>
+          <span class="command__copy">copy</span>
+        </button>
+      </div>
+
+      <div class="cta__links reveal">
+        <a class="btn btn--solid btn--lg magnetic" href="https://github.com/Ntooxx/Ntox" target="_blank" rel="noopener">Star on GitHub</a>
+        <a class="btn btn--line btn--lg magnetic" href="https://github.com/Ntooxx/Ntox#readme" target="_blank" rel="noopener">Read the docs</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="shell footer__inner">
+    <div class="footer__brand">
+      <svg class="brand__mark" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 2Q13.2 10.8 22 12Q13.2 13.2 12 22Q10.8 13.2 2 12Q10.8 10.8 12 2Z"/>
+      </svg>
+      <p>ntox — cognitive agent runtime</p>
+    </div>
+    <p class="footer__note">
+      Built as an experiment in whether the machinery of a mind —
+      compression, memory, prediction, correction, identity — can be made
+      to measurably change behaviour over time.
+    </p>
+    <div class="footer__meta">
+      <span>MIT licensed</span>
+      <span>Node 18+</span>
+      <span>local first</span>
+    </div>
+  </div>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite">copied to clipboard</div>
+
+<script src="motion.js" defer></script>
+</body>
+</html>

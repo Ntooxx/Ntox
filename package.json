@@ -35,6 +35,7 @@
     "web/",
     "LICENSE",
     "README.md",
+    "HIGHLIGHTS.md",
     "install.sh",
     "install.ps1"
   ],
@@ -44,6 +45,7 @@
     "dev": "tsx src/index.ts",
     "setup": "tsx src/index.ts setup",
     "gateway": "tsx src/index.ts gateway",
+    "gateway:watch": "tsx watch src/index.ts gateway",
     "gateway:build": "node dist/index.js gateway",
     "gateway:discord": "tsx src/index.ts gateway discord",
     "api": "tsx src/index.ts api",

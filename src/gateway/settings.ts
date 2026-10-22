@@ -1,6 +1,6 @@
 import type { LLMClient } from "../core/llm.js";
 import { getProviders, getProviderNames } from "../core/llm.js";
-import { loadCachedModels, saveConfig, saveCachedModels } from "../core/config.js";
+import { loadCachedModels, patchConfig, saveCachedModels } from "../core/config.js";
 import type { ModelInfo, NtoxConfig } from "../types/index.js";
 
 export interface SettingsView {
@@ -53,7 +53,7 @@ export function createSettingsService(deps: { config: NtoxConfig; llm: LLMClient
       if (!next) return { ok: false, settings: view() };
       config.model = next;
       llm.updateModel(next);
-      saveConfig(config);
+      Object.assign(config, patchConfig({ model: next }));
       return { ok: true, settings: view() };
     },
 
@@ -62,7 +62,7 @@ export function createSettingsService(deps: { config: NtoxConfig; llm: LLMClient
       if (!getProviders().includes(next)) return { ok: false, settings: view() };
       config.provider = next;
       llm.updateProvider(next);
-      saveConfig(config);
+      Object.assign(config, patchConfig({ provider: next }));
       return { ok: true, settings: view() };
     },
   };

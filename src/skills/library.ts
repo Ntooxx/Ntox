@@ -224,6 +224,11 @@ export class SkillLibrary {
     }
   }
 
+  list(): SkillIndex[] {
+    this.ensureLoaded();
+    return Array.from(this.index.values());
+  }
+
   search(query: string, maxResults: number = 5): SkillIndex[] {
     this.ensureLoaded();
     const lower = query.toLowerCase();

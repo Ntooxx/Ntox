@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent, commitsToImmediateAction, extractLegacyXmlToolCalls } from "./agent.js";
 import type { AgentConfig, AgentCallbacks } from "./agent.js";
+import type { ToolCall } from "../types/index.js";
 import { Mind } from "../mind/mind.js";
 import { LLMClient } from "./llm.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -19,6 +20,8 @@ import { ProactiveEngine } from "../meta/proactive.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
 import { AliveEngine } from "../alive/engine.js";
 import { NtoxAliveBridge } from "../alive/ntox.js";
+import { searchTool } from "../tools/search.js";
+import { webFetchTool } from "../tools/web.js";
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   const llm = {
@@ -350,6 +353,138 @@ describe("Agent — run() integration", () => {
     expect(systemPrompt).toContain("Significant test_finished event");
   });
 
+  it("searches related work and injects research accuracy guidance", async () => {
+    const fetchSource = vi.spyOn(webFetchTool, "execute").mockResolvedValue({
+      success: true,
+      data: {
+        title: "Verified source title",
+        url: "https://arxiv.org/abs/1234.5678",
+        content: "A directly fetched abstract describing the method and evaluation. ".repeat(8),
+      },
+    });
+    const search = vi.spyOn(searchTool, "execute").mockImplementation(async ({ query }) => ({
+      success: true,
+      data: `Paper about ${String(query)}\nhttps://arxiv.org/abs/1234.5678\nA related method.`,
+    }));
+    const cfg = makeConfig();
+    cfg.tools.register(searchTool);
+    let systemPrompt = "";
+    let availableTools: string[] = [];
+    (
+      cfg.llm as unknown as {
+        stream: (
+          messages: unknown[],
+          system: string,
+          tools: { function: { name: string } }[],
+        ) => AsyncGenerator<{ delta: string }>;
+      }
+    ).stream = async function* (_messages, system, tools) {
+        systemPrompt = system;
+        availableTools = tools.map((tool) => tool.function.name);
+        yield { delta: "I found related work." };
+      };
+
+    await drainRun(new Agent(cfg), "Is my idea novel, or has anyone done it?");
+
+    expect(search).toHaveBeenCalledTimes(3);
+    expect(systemPrompt).toContain("Research Accuracy");
+    expect(systemPrompt).toContain("never infer nobody has done something");
+    expect(systemPrompt).toContain("https://arxiv.org/abs/1234.5678");
+    expect(systemPrompt).toContain("directly fetched abstract");
+    expect(fetchSource).toHaveBeenCalledWith({ url: "https://arxiv.org/abs/1234.5678", format: "markdown" });
+    expect(availableTools).not.toContain("search");
+    search.mockRestore();
+    fetchSource.mockRestore();
+  });
+
+  it("does not label a search snippet as a verified source when fetching fails", async () => {
+    vi.spyOn(searchTool, "execute").mockResolvedValue({
+      success: true,
+      data: "Paper title\nhttps://arxiv.org/abs/9876.5432\nA search snippet only.",
+    });
+    vi.spyOn(webFetchTool, "execute").mockResolvedValue({ success: false, error: "offline" });
+    const cfg = makeConfig();
+    let systemPrompt = "";
+    (cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }).stream =
+      async function* (_messages, system) {
+        systemPrompt = system;
+        yield { delta: "The source could not be verified." };
+      };
+
+    await drainRun(new Agent(cfg), "Has anyone studied this? Is it novel?");
+
+    expect(systemPrompt).toContain("No scholarly source page could be opened");
+    expect(systemPrompt).toContain("Search snippet (unverified; use as a lead only)");
+    expect(systemPrompt).not.toContain("Fetched source text (excerpt)");
+    vi.restoreAllMocks();
+  });
+
+  it("adds recommendation guidance only to advice and next-build questions", async () => {
+    const cfg = makeConfig();
+    let systemPrompt = "";
+    (cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }).stream =
+      async function* (_messages, system) {
+        systemPrompt = system;
+        yield { delta: "Start with a small measurable change." };
+      };
+
+    await drainRun(new Agent(cfg), "What should I build next?");
+
+    expect(systemPrompt).toContain("Recommendation Integrity");
+    expect(systemPrompt).toContain("Give a recommendation that follows from the user's stated goal");
+  });
+
+  it("instructs the model to withhold novelty claims when research search fails", async () => {
+    vi.spyOn(searchTool, "execute").mockResolvedValue({ success: false, error: "offline" });
+    const cfg = makeConfig();
+    let systemPrompt = "";
+    (cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }).stream =
+      async function* (_messages, system) {
+        systemPrompt = system;
+        yield { delta: "I cannot verify novelty." };
+      };
+
+    await drainRun(new Agent(cfg), "Is this research idea original?");
+
+    expect(systemPrompt).toContain("returned no usable results");
+    expect(systemPrompt).toContain("Do not make claims that an idea is novel");
+    vi.restoreAllMocks();
+  });
+
+  it("keeps user skills available in cognitive mode without adding one to ordinary questions", async () => {
+    const registry = new SkillRegistry();
+    registry.add({
+      name: "research-memory",
+      description: "Test research skill",
+      category: "test",
+      prompt: "Follow the research memory workflow.",
+      triggers: ["research memory workflow"],
+      tools: [],
+      examples: [],
+      created: Date.now(),
+      updated: Date.now(),
+      usageCount: 0,
+    });
+    const cfg = makeConfig({
+      skillExecutor: new SkillExecutor(registry, { list: () => [] } as never),
+    });
+    cfg.cognitiveKernel.setEnabled(true);
+    const prompts: string[] = [];
+    (cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }).stream =
+      async function* (_messages, system) {
+        prompts.push(system);
+        yield { delta: "ok" };
+      };
+
+    const agent = new Agent(cfg);
+    await drainRun(agent, "What is 2 plus 2?");
+    await drainRun(agent, "Please use the research-memory skill for this.");
+
+    expect(prompts[0]).not.toContain("Active Skill");
+    expect(prompts[1]).toContain("Active Skill: research-memory");
+    expect(prompts[1]).toContain("Follow the research memory workflow.");
+  });
+
   it("handles empty stream gracefully", async () => {
     const cfg = makeConfig();
     (cfg.llm as unknown as { stream: () => AsyncGenerator<{ delta: string }> }).stream = async function* () {
@@ -567,6 +702,45 @@ describe("Agent — run() integration", () => {
 
     await drainRun(new Agent(cfg), "read both");
     expect(maxActive).toBe(2);
+  });
+
+  it("caps an oversized page-reading batch and asks the model to synthesize", async () => {
+    const tools = new ToolRegistry();
+    let executed = 0;
+    tools.register({
+      name: "web_read",
+      description: "read a page",
+      parallelSafe: true,
+      parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+      execute: async () => {
+        executed++;
+        return { success: true, data: "page contents" };
+      },
+    });
+    const cfg = makeConfig({ tools });
+    let streams = 0;
+    (cfg.llm as unknown as { stream: () => AsyncGenerator<{ delta: string; toolCalls?: ToolCall[] }> }).stream =
+      async function* () {
+        streams++;
+        if (streams === 1) {
+          yield {
+            delta: "",
+            toolCalls: Array.from({ length: 40 }, (_, index) => ({
+              id: `read_${index}`,
+              name: "web_read",
+              arguments: JSON.stringify({ url: `https://example.com/${index}` }),
+            })),
+          };
+          return;
+        }
+        yield { delta: "I read a small set of relevant pages and can now summarize." };
+      };
+
+    const result = await drainRun(new Agent(cfg), "Read these pages and summarize the relevant information.");
+
+    expect(executed).toBe(8);
+    expect(result.response).toContain("summarize");
+    expect(streams).toBe(2);
   });
 
   it("keeps unsafe tools as ordering barriers around parallel reads", async () => {
