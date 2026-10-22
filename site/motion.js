@@ -142,7 +142,7 @@ function initLoop() {
 
   const stages = nodes.map((node, i) => ({
     name: node.textContent.trim(),
-    copy: items[i]?.querySelector("p")?.textContent.trim() ?? "",
+    copy: items[i]?.dataset.short || (items[i]?.querySelector("p")?.textContent.trim() ?? ""),
   }));
 
   let current = 0;

@@ -217,7 +217,10 @@ export async function runLongitudinal(options: LongitudinalOptions): Promise<Lon
   const baseline = arms[0];
   const comparisons = baseline && arms.length > 1 ? arms.slice(1).map((arm) => compare(baseline, arm, confidence)) : [];
 
-  const primary = options.primary ?? (arms.length > 1 ? { baseline: arms[0].arm, treatment: arms[1].arm } : null);
+  const rawContextFull = comparisons.find((comparison) => comparison.baseline === "raw-context" && comparison.treatment === "full");
+  const primary = options.primary ?? (rawContextFull
+    ? { baseline: rawContextFull.baseline, treatment: rawContextFull.treatment }
+    : arms.length > 1 ? { baseline: arms[0].arm, treatment: arms[1].arm } : null);
 
   return {
     curriculum: options.curriculum.id,

@@ -147,7 +147,7 @@ async function runWorker(args) {
 
 async function runLongitudinal(args) {
   const evaluation = await loadEvaluation();
-  const arms = String(args.arms ?? "off,all")
+  const arms = String(args.arms ?? "off,raw-context,full")
     .split(",")
     .map((arm) => arm.trim())
     .filter(Boolean);
@@ -219,7 +219,11 @@ async function runLongitudinal(args) {
     repetitions: reps,
     arms: armResults,
     comparisons,
-    primary: comparisons.length > 0 ? { baseline: baseline.arm, treatment: comparisons[0].treatment } : null,
+    primary: comparisons.some((comparison) => comparison.baseline === "raw-context" && comparison.treatment === "full")
+      ? { baseline: "raw-context", treatment: "full" }
+      : comparisons.length > 0
+        ? { baseline: baseline.arm, treatment: comparisons[0].treatment }
+        : null,
     generatedAt: Date.now(),
   };
 
@@ -237,12 +241,12 @@ Usage:
   node scripts/bench-meta.mjs --necessity
       Run deterministic necessity checks (no LLM, no API key).
 
-  node scripts/bench-meta.mjs --longitudinal [--arms=off,all] [--reps=1] [--variants=6] [--model=id]
+  node scripts/bench-meta.mjs --longitudinal [--arms=off,raw-context,full] [--reps=1] [--variants=6] [--model=id]
       Run the ordered curriculum for each arm in an isolated NTOX_DIR using your
       configured provider, then compute paired bootstrap confidence intervals.
       --variants sets tasks per family (6 = 30 tasks, 18 = 90 tasks).
       --model overrides the agent model for the run.
-      'all' = every subsystem on, no reflection (practical). 'full' = + reflection (slow).
+  Default primary contrast: raw-context vs full. 'all' = every subsystem on, no reflection. 'full' = + reflection (slow).
 
   node scripts/bench-meta.mjs --worker --arm=<id> --out=<file> [--reps=1]
       Internal worker used by --longitudinal.

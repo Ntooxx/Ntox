@@ -11,16 +11,16 @@ A self-improving CLI agent that predicts, remembers, and corrects itself. Closed
 
 ## Why NTOX?
 
-NTOX is built around a **cognitive kernel**: it doesn't just call tools, it compresses what it learns into reusable patterns, builds meta-theories from cross-domain observations, and records which context actually helped. It is an experiment in agent meta-cognition that goes beyond "LLM + tool loop".
+NTOX is built around a **cognitive kernel**: it doesn't just call tools, it compresses what it learns into reusable patterns, records what happened after each turn, and keeps an explicit record of what it expected. It is an experiment in agent meta-cognition that goes beyond "LLM + tool loop", with the instrumentation to see which mechanisms actually earn their place.
 
 ## Highlights
 
-- **A closed learning loop.** Every turn can predict an outcome, observe what happened, attribute the result, and change the next turn through the Mind subsystem.
-- **Memory with authority.** Corrections outrank conflicting facts, theories carry falsification criteria, and retrieval is ranked by measured reliability.
-- **Identity you can measure.** Milestone M5 passes: a trained instance is behaviorally distinguishable from a fresh one.
-- **Alive by design.** Predictions, open loops, prediction error, and wake decisions form an event-driven core exposed as `ntox/alive`.
-- **Evidence, not adjectives.** 6/6 necessity checks, a significant longitudinal result, ALIVE-1, NCB, and a 12/12 verification gate.
-- **Breadth without lock-in.** 9 named providers plus custom endpoints, 5 chat surfaces, 80+ skills, Docker, and public cognition and Alive packages.
+- **A closed learning loop.** Every turn predicts an outcome, observes what happened, credits the context used, and updates the next turn.
+- **Memory with authority.** Corrections outrank conflicting facts, and retrieval is re-ranked by recorded reliability rather than recency alone.
+- **Predictions are scored.** Brier and expected calibration error, computed on every turn and tracked per stance.
+- **Everything is inspectable.** `/trace` and `/mind` expose stance, tokens, cost, policy decisions, checkpoints, calibration and the learning curve.
+- **Engineered properly.** 957 tests, a 12-check verification gate, one policy runtime, pre-edit checkpoints.
+- **Local and portable.** 9 named providers plus any OpenAI-compatible endpoint, with the learning loop available as a separate package.
 
 The full evidence-backed tour is in [HIGHLIGHTS.md](HIGHLIGHTS.md).
 
