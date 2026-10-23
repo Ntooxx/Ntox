@@ -1,8 +1,20 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve, join } from "node:path";
+import { dirname, resolve, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { NtoxConfig, ModelInfo } from "../types/index.js";
+
+export const BUNDLED_MARKETPLACE_INDEX = join(
+  resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."),
+  "marketplace",
+  "index.json",
+);
+export const REMOTE_MARKETPLACE_INDEX = "https://raw.githubusercontent.com/Ntooxx/Ntox/main/marketplace/index.json";
+
+export function defaultMarketplaceIndex(): string {
+  return existsSync(BUNDLED_MARKETPLACE_INDEX) ? BUNDLED_MARKETPLACE_INDEX : REMOTE_MARKETPLACE_INDEX;
+}
 
 const ConfigSchema = z.object({
   apiKey: z.string(),
@@ -220,7 +232,7 @@ const DEFAULT_CONFIG: NtoxConfig = {
   metaMistakesEnabled: true,
   metaMinConfidence: 0.5,
   skillAutoLearnEnabled: true,
-  skillMarketplaceIndex: "https://raw.githubusercontent.com/Ntooxx/Ntox/main/marketplace/index.json",
+  skillMarketplaceIndex: defaultMarketplaceIndex(),
   cognitiveEnabled: true,
   theoryEnabled: true,
   animationLevel: "minimal" as const,

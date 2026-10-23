@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import {
+  BUNDLED_MARKETPLACE_INDEX,
   NTOX_DIR,
+  defaultMarketplaceIndex,
   hasLegacyToolPrompt,
   loadConfig,
   normalizeConfig,
@@ -150,6 +152,15 @@ describe("config", () => {
     if (existsSync(cfgPath())) unlinkSync(cfgPath());
     const config = loadConfig();
     expect(config.cognitiveEnabled).toBe(true);
+  });
+
+  it("defaults the marketplace index to the bundled marketplace/index.json", () => {
+    expect(existsSync(BUNDLED_MARKETPLACE_INDEX)).toBe(true);
+    expect(defaultMarketplaceIndex()).toBe(BUNDLED_MARKETPLACE_INDEX);
+    if (existsSync(cfgPath())) unlinkSync(cfgPath());
+    const config = loadConfig();
+    expect(config.skillMarketplaceIndex).toBe(BUNDLED_MARKETPLACE_INDEX);
+    expect(existsSync(config.skillMarketplaceIndex)).toBe(true);
   });
 
   it("saves and loads config correctly", () => {
