@@ -305,6 +305,19 @@ describe("runRoutine", () => {
     expect(result.steps.some((step) => step.error?.includes("nesting deeper"))).toBe(true);
   });
 
+  it("seeds outputs so a host can pass inputs into a routine", async () => {
+    const { runtime, completions } = fakeRuntime();
+    const skill = makeRoutine({
+      steps: [{ kind: "llm", name: "greet", prompt: "Greet {{who}} in {{city}}" }],
+    });
+
+    const result = await runRoutine(skill, runtime, { who: "Ada", city: "Berlin" });
+
+    expect(completions).toEqual(["Greet Ada in Berlin"]);
+    expect(result.outputs.who).toBe("Ada");
+    expect(result.outputs.greet).toBe("llm:1");
+  });
+
   it("returns a failed empty result for skills without steps", async () => {
     const { runtime } = fakeRuntime();
     const result = await runRoutine(makeRoutine(), runtime);

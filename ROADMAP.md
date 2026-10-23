@@ -103,9 +103,14 @@ no lifecycle (nothing learns from successful sessions); registry has 3 built-ins
   Health, Gaming, Hardware) with the existing `## Triggers / ## Voices`
   structure.
 
-### 2.7 External tools as skills (MCP bridge) · P2 · L
+### 2.7 External tools as skills (MCP bridge) · P2 · L · ✅ shipped
 - Expose MCP servers to NTOX as skill-like tool providers, and NTOX skills
   as MCP tools for other hosts.
+- `mcpServers` config (stdio command/args/env + remote url/headers) feeds a
+  bridge that registers every remote tool as `mcp_<server>_<tool>` on REPL
+  and gateway startup; `/mcp` reports state, tools, and errors on every
+  channel. Outbound: `ntox mcp` serves `skill_list`, `skill_run`, and one
+  tool per skill over stdio (`scripts/mcp-smoke.mjs` verifies a build).
 
 **Phase 2 acceptance:** *finish a novel task once; NTOX offers to save it as
 a skill; next time you type `/skill install <url>` or just mention the

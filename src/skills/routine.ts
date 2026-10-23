@@ -281,9 +281,13 @@ async function runSteps(
   return true;
 }
 
-export async function runRoutine(skill: SkillDefinition, runtime: RoutineRuntime): Promise<RoutineRunResult> {
+export async function runRoutine(
+  skill: SkillDefinition,
+  runtime: RoutineRuntime,
+  initialOutputs?: Record<string, string>,
+): Promise<RoutineRunResult> {
   const steps = skill.steps ?? [];
-  const state: RunState = { outputs: {}, results: [], totalChars: 0 };
+  const state: RunState = { outputs: { ...initialOutputs }, results: [], totalChars: 0 };
   if (steps.length === 0) {
     return { ok: false, steps: [], outputs: {}, finalOutput: "" };
   }

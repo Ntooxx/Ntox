@@ -39,6 +39,7 @@ There is also a motion-design showcase of the whole system in [`site/`](site/) â
 - **Persistent Memory**: Every exchange is embedded and searchable via cosine similarity (local fallback, no API key needed)
 - **Multi-Channel Gateway**: Telegram, Discord (WebSocket with intents), and a minimal local Web UI all share the same agent runtime
 - **Skill Library**: 80+ markdown skill documents, auto-triggered by semantic search
+- **MCP Bridge**: Use any external MCP server's tools inside NTOX (`mcp_<server>_<tool>`), and serve NTOX skills to any MCP host with `ntox mcp`
 - **Meta-Cognition**: Strategy classification, self-reflection, mistake journal, session intent, style optimization
 - **Runtime-Neutral Cognition API**: Mount NTOX cognitive context and turn learning into another agent runtime without replacing its model, tools, or session engine
 - **DeepSeek Harness Adapter**: Connects Harness lifecycle events to NTOX before-step context, tool outcomes, and post-turn learning
@@ -279,6 +280,50 @@ while (true) {
   // parse SSE blocks: "event: token\ndata: {...}\n\n"
 }
 ```
+
+## MCP (Model Context Protocol)
+
+NTOX speaks MCP in both directions: external MCP servers become normal NTOX tools, and NTOX skills become MCP tools for other hosts.
+
+### Use external MCP servers
+
+Add servers under `mcpServers` in `~/.ntox/config.json`:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "env": { "TOKEN": "..." }
+    },
+    "remote": {
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer ..." }
+    }
+  }
+}
+```
+
+- `command`/`args`/`env` runs a stdio server; `url`/`headers` talks to a remote server (tried as streamable HTTP first, then SSE)
+- every remote tool is registered as `mcp_<server>_<tool>` in the normal tool list; the REPL and the gateway both connect at startup (each server has a 10s handshake timeout, failures are reported once at boot)
+- `/mcp` (REPL and every channel) shows connection state, exposed tools, and errors
+- `"enabled": false` skips a server without deleting its config
+- MCP tools skip the workspace tool policy: the server you configure is the trust boundary
+
+### Serve NTOX skills to MCP hosts
+
+```bash
+ntox mcp
+```
+
+Exposes `skill_list`, `skill_run <name>`, and one tool per skill in `~/.ntox/skills` over stdio:
+
+```json
+{ "mcpServers": { "ntox": { "command": "ntox", "args": ["mcp"] } } }
+```
+
+Routine skills run their steps (tools chained through `{{template}}` substitution); plain skills are sent to the model with the skill prompt. Verify a build end to end with `npm run build && node scripts/mcp-smoke.mjs`.
 
 ## Meta-Cognition Evaluation
 

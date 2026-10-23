@@ -12,6 +12,7 @@ Usage:
   ntox gateway      Start multi-channel gateway (Telegram, Discord, WhatsApp, Web)
   ntox gateway web  Start the local web chat only
   ntox api          Start local HTTP/SSE API for web apps (port from config, default 3100)
+  ntox mcp          Serve NTOX skills to MCP hosts over stdio (Claude Desktop, Cursor, ...)
   ntox setup        Interactive setup wizard
   ntox doctor       Check config, provider, browser, sandbox, and workspace health
   ntox --help       Show this help
@@ -35,6 +36,7 @@ Examples:
   ntox gateway --channel telegram  # Run Telegram bot only
   ntox gateway web              # Run the browser chat only
   ntox api                      # Expose NTOX to your webapp over HTTP/SSE
+  ntox mcp                      # Expose NTOX skills as MCP tools for other hosts
 `;
 
 async function main(): Promise<void> {
@@ -68,6 +70,9 @@ async function main(): Promise<void> {
   } else if (arg === "api") {
     const { runApi } = await import("./api/server.js");
     await runApi();
+  } else if (arg === "mcp") {
+    const { runSkillMcpServer } = await import("./mcp/server.js");
+    await runSkillMcpServer();
   } else if (arg === "setup") {
     const { default: runSetup } = await import("./setup.js");
     await runSetup();
