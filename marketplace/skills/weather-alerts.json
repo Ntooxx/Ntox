@@ -1,0 +1,9 @@
+{
+  "name": "weather-alerts",
+  "description": "Fetch a location's forecast and flag severe-weather alerts",
+  "category": "utility",
+  "prompt": "When asked about weather or alerts for a location:\n1. Use web_search or web_read to fetch the current forecast for the requested location (prefer wttr.in or the National Weather Service for US locations).\n2. Summarize: current conditions, today's high/low, and the next 24 hours.\n3. Explicitly list any active alerts (severe thunderstorm, flood, heat, freeze, wind) with the affected area and expiry time. Say clearly when there are none.\n4. End with a one-line recommendation: outdoor plans safe / adjust / cancel.\n5. If the fetch fails, say what failed and offer to retry — never invent forecast data.",
+  "triggers": ["weather alert", "check the weather", "forecast for", "any severe weather"],
+  "tools": ["web_search", "web_read"],
+  "examples": ["any weather alerts for Berlin this weekend?", "check the weather in Tokyo tomorrow"]
+}

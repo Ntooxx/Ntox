@@ -1,0 +1,9 @@
+{
+  "name": "pr-review-checklist",
+  "description": "Structured PR review: correctness, security, tests, verdict",
+  "category": "coding",
+  "prompt": "When asked to review a PR or branch:\n1. Run git diff <base>...HEAD --stat to scope the change (base defaults to main).\n2. Read every changed file fully — never guess context from the diff alone.\n3. Check in order: correctness (logic, edge cases, error paths), security (injection, secrets, authz), tests (new behavior covered?), performance (N+1, hot loops), readability and consistency with surrounding code.\n4. Report findings grouped by severity — critical / major / minor / nit — each with file:line and a concrete suggested fix.\n5. End with a verdict: approve, approve-with-nits, or request-changes. Never pad the review with praise to fill space.",
+  "triggers": ["review this pr", "pr checklist", "review the branch", "code review diff"],
+  "tools": ["shell", "read", "grep"],
+  "examples": ["review the branch against main", "run the pr checklist on this diff"]
+}

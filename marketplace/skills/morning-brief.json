@@ -1,0 +1,30 @@
+{
+  "name": "morning-brief",
+  "description": "Fetch weather and headlines, then deliver a short spoken-ready morning brief",
+  "category": "planning",
+  "prompt": "When asked for the morning brief, gather current weather and top headlines first, then deliver a single spoken-style briefing of at most 120 words: conditions and one recommendation for the day, then at most five headline one-liners. Plain text only, no markdown.",
+  "triggers": ["morning brief", "daily brief", "start my day", "brief me"],
+  "tools": ["web_read", "tts"],
+  "examples": ["give me the morning brief", "/skill run morning-brief"],
+  "steps": [
+    {
+      "kind": "tool",
+      "name": "weather",
+      "tool": "web_read",
+      "args": { "url": "https://wttr.in/?format=%l:+%c+%t+(feels+%f),+wind+%w,+humidity+%h" },
+      "saveAs": "weather"
+    },
+    {
+      "kind": "tool",
+      "name": "headlines",
+      "tool": "web_read",
+      "args": { "url": "https://news.ycombinator.com" },
+      "saveAs": "headlines"
+    },
+    {
+      "kind": "llm",
+      "name": "brief",
+      "prompt": "Write a spoken morning brief, max 120 words, plain text, no markdown.\n\nWeather now: {{weather}}\n\nHeadlines page (raw): {{headlines}} — pick at most 5 of the most interesting stories and render each as one short sentence."
+    }
+  ]
+}

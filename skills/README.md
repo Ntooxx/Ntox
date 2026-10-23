@@ -143,3 +143,14 @@ Load the Economics modules along with Decision Theory and Game Theory.
 
 This is a cognitive architecture for AI reasoning. Use it, modify it, improve it.
 The goal is to advance human knowledge and capability.
+
+## Domain Packs
+
+Applied packs in the `## Triggers` format, four modules each:
+
+- DevOps/ — deployment pipeline, incident response, observability, infrastructure as code
+- Legal/ — contract review, license selection, privacy compliance, IP basics
+- Finance/ — budget analysis, cash flow forecast, pricing strategy, expense audit
+- Health/ — exercise programming, sleep optimization, nutrition planning, stress recovery
+- Gaming/ — game balance, level design, economy design, playtest analysis
+- Hardware/ — component selection, board bring-up, sensor integration, firmware structure

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "updated": "2026-10-23",
+  "skills": [
+    {
+      "name": "weather-alerts",
+      "source": "skills/weather-alerts.json",
+      "description": "Fetch a location's forecast and flag severe-weather alerts"
+    },
+    {
+      "name": "changelog-recap",
+      "source": "skills/changelog-recap.json",
+      "description": "Turn commits since a ref into grouped release notes"
+    },
+    {
+      "name": "pr-review-checklist",
+      "source": "skills/pr-review-checklist.json",
+      "description": "Structured PR review: correctness, security, tests, verdict"
+    },
+    {
+      "name": "morning-brief",
+      "source": "skills/morning-brief.json",
+      "description": "Routine: weather + headlines -> spoken morning brief (cron-friendly)"
+    }
+  ]
+}

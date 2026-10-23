@@ -1,0 +1,9 @@
+{
+  "name": "changelog-recap",
+  "description": "Turn commits since a ref into grouped release notes",
+  "category": "coding",
+  "prompt": "When asked what changed since a tag, commit, or date:\n1. Run git log <ref>..HEAD --oneline to list commits (substitute the given ref; default to the last tag via git describe --tags --abbrev=0).\n2. Run git diff <ref>..HEAD --stat to see the blast radius per file.\n3. Group the changes: Added, Changed, Fixed, Removed, then chore/internal last.\n4. Write each entry as one plain-language line, keeping issue or PR numbers from commit messages.\n5. End with a suggested version bump (major/minor/patch) and a ready-to-paste version heading with today's date.",
+  "triggers": ["changelog recap", "what changed since", "draft release notes", "summarize commits since"],
+  "tools": ["shell", "read"],
+  "examples": ["what changed since v1.2.0?", "draft release notes for the last 2 weeks"]
+}
