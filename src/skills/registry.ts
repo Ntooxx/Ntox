@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { SKILLS_DIR } from "../core/config.js";
+import { isSkillAutoDisabled } from "./lifecycle.js";
 import type { SkillDefinition } from "../types/index.js";
 
 const BUILT_IN_SKILLS: SkillDefinition[] = [
@@ -112,6 +113,18 @@ export class SkillRegistry {
     }
   }
 
+  private contentKey(skill: SkillDefinition): string {
+    return JSON.stringify({
+      description: skill.description,
+      category: skill.category,
+      prompt: skill.prompt,
+      triggers: skill.triggers,
+      tools: skill.tools,
+      examples: skill.examples,
+      steps: skill.steps ?? null,
+    });
+  }
+
   list(): SkillDefinition[] {
     this.load();
     return Array.from(this.skills.values()).sort((a, b) => a.name.localeCompare(b.name));
@@ -124,8 +137,22 @@ export class SkillRegistry {
 
   add(skill: SkillDefinition): void {
     this.load();
-    this.skills.set(skill.name, skill);
-    this.persist(skill);
+    const existing = this.skills.get(skill.name);
+    const now = Date.now();
+    const next: SkillDefinition = { ...skill };
+    if (existing) {
+      const changed = this.contentKey(existing) !== this.contentKey(skill);
+      next.created = existing.created || skill.created || now;
+      next.usageCount = existing.usageCount || 0;
+      next.lastUsedAt = existing.lastUsedAt;
+      next.version = (existing.version ?? 1) + (changed ? 1 : 0);
+    } else {
+      next.created = skill.created || now;
+      next.version = skill.version ?? 1;
+    }
+    next.updated = now;
+    this.skills.set(next.name, next);
+    this.persist(next);
   }
 
   remove(name: string): boolean {
@@ -144,6 +171,7 @@ export class SkillRegistry {
     const skill = this.skills.get(name);
     if (skill) {
       skill.usageCount++;
+      skill.lastUsedAt = Date.now();
       this.persist(skill);
     }
   }
@@ -159,6 +187,7 @@ export class SkillRegistry {
     const matches: { skill: SkillDefinition; confidence: number }[] = [];
 
     for (const skill of this.skills.values()) {
+      if (isSkillAutoDisabled(skill)) continue;
       let bestConfidence = 0;
       for (const trigger of skill.triggers) {
         const tLower = trigger.toLowerCase();

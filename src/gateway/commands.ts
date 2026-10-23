@@ -1,5 +1,7 @@
 import type { NtoxAliveBridge } from "../alive/ntox.js";
+import { SKILL_INSTALL_USAGE } from "../skills/installer.js";
 import { APPROVAL_SCOPES, SCOPE_TO_DECISION, type ApprovalDecision, type ApprovalScope } from "../tools/approval.js";
+import type { SkillDefinition } from "../types/index.js";
 
 type AliveSnapshot = ReturnType<NtoxAliveBridge["inspect"]>;
 
@@ -14,10 +16,16 @@ function compact(value: unknown, max = 80): string {
     .slice(0, max);
 }
 
+const ALIVE_SUBJECT = "\\b(notice|noticed|recent|events?|wake|state)\\b";
+const ALIVE_NEAR_SUBJECT = new RegExp(
+  `\\balive\\b[\\s\\S]{0,60}${ALIVE_SUBJECT}|${ALIVE_SUBJECT}[\\s\\S]{0,60}\\balive\\b`,
+);
+
 export function isAliveQuery(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   if (normalized === "/alive") return true;
-  return normalized.includes("alive") && /\b(notice|noticed|recent|events?|wake|state)\b/.test(normalized);
+  if (normalized.length > 200) return false;
+  return ALIVE_NEAR_SUBJECT.test(normalized);
 }
 
 export function renderAliveStatus(snapshot: AliveSnapshot): string {
@@ -140,7 +148,111 @@ export function renderApprovalRequest(command: string): string {
   ].join("\n");
 }
 
+export function renderApprovalRequestInteractive(command: string): string {
+  return `Approval required: ${command}\n\nTap a button below, or reply /approve <scope> <command>.`;
+}
+
+export const APPROVAL_CALLBACK_PREFIX = "approve:";
+
+export function parseApprovalCallbackData(data: string): ApprovalScope | null {
+  if (!data.startsWith(APPROVAL_CALLBACK_PREFIX)) return null;
+  const scope = data.slice(APPROVAL_CALLBACK_PREFIX.length).toLowerCase();
+  return APPROVAL_SCOPES.includes(scope as ApprovalScope) ? (scope as ApprovalScope) : null;
+}
+
 export function renderApprovalOutcome(resolution: ApprovalResolution): string {
   if (resolution.decision === "deny") return `Denied: ${resolution.command}`;
   return `Approved (${resolution.scope}): ${resolution.command}`;
+}
+
+export const SKILL_SAVE_NO_PENDING =
+  "No skill proposal waiting. After a successful multi-step task Ntox may propose one — then reply /skill save <name>.";
+
+export type SkillSaveParse = { kind: "not-skill-save" } | { kind: "save"; name: string | null };
+
+export function parseSkillSaveCommand(text: string): SkillSaveParse {
+  const trimmed = text.trim();
+  if (!/^\/skill(\s|$)/i.test(trimmed)) return { kind: "not-skill-save" };
+  const rest = trimmed.replace(/^\/skill\s*/i, "");
+  const saveMatch = rest.match(/^save\s*(.*)$/i);
+  if (!saveMatch) return { kind: "not-skill-save" };
+  const name = saveMatch[1].trim().toLowerCase() || null;
+  return { kind: "save", name };
+}
+
+export type SkillInstallParse =
+  | { kind: "not-skill-install" }
+  | { kind: "invalid"; message: string }
+  | { kind: "install"; source: string; force: boolean };
+
+export type SkillMarketplaceParse = { kind: "not-skill-marketplace" } | { kind: "marketplace"; query: string | null };
+
+export function parseSkillMarketplaceCommand(text: string): SkillMarketplaceParse {
+  const trimmed = text.trim();
+  if (!/^\/skill(\s|$)/i.test(trimmed)) return { kind: "not-skill-marketplace" };
+  const rest = trimmed.replace(/^\/skill\s*/i, "");
+  const match = rest.match(/^marketplace(?:\s+([\s\S]*))?$/i);
+  if (!match) return { kind: "not-skill-marketplace" };
+  const query = (match[1] ?? "").trim();
+  return { kind: "marketplace", query: query || null };
+}
+
+export type SkillLifecycleParse =
+  | { kind: "not-skill-lifecycle" }
+  | { kind: "stats" }
+  | { kind: "run"; name: string | null }
+  | { kind: "diff"; name: string | null; source: string | null }
+  | { kind: "export"; name: string | null };
+
+export function parseSkillLifecycleCommand(text: string): SkillLifecycleParse {
+  const trimmed = text.trim();
+  if (!/^\/skill(\s|$)/i.test(trimmed)) return { kind: "not-skill-lifecycle" };
+  const rest = trimmed.replace(/^\/skill\s*/i, "");
+  if (/^stats$/i.test(rest)) return { kind: "stats" };
+
+  const run = /^run(?:\s+([\s\S]+))?$/i.exec(rest);
+  if (run) return { kind: "run", name: (run[1] ?? "").trim().toLowerCase() || null };
+
+  const diff = /^diff(?:\s+([\s\S]+))?$/i.exec(rest);
+  if (diff) {
+    const args = (diff[1] ?? "").trim();
+    if (!args) return { kind: "diff", name: null, source: null };
+    const splitAt = args.search(/\s/);
+    const name = (splitAt === -1 ? args : args.slice(0, splitAt)).toLowerCase();
+    const source = splitAt === -1 ? null : args.slice(splitAt).trim() || null;
+    return { kind: "diff", name, source };
+  }
+
+  const exp = /^export(?:\s+([\s\S]+))?$/i.exec(rest);
+  if (exp) return { kind: "export", name: (exp[1] ?? "").trim().toLowerCase() || null };
+
+  return { kind: "not-skill-lifecycle" };
+}
+
+export function parseSkillInstallCommand(text: string): SkillInstallParse {
+  const trimmed = text.trim();
+  if (!/^\/skill(\s|$)/i.test(trimmed)) return { kind: "not-skill-install" };
+  const rest = trimmed.replace(/^\/skill\s*/i, "");
+  const installMatch = rest.match(/^install(?:\s+([\s\S]*))?$/i);
+  if (!installMatch) return { kind: "not-skill-install" };
+  const args = (installMatch[1] ?? "").trim();
+  if (!args) return { kind: "invalid", message: `Missing source. Usage: ${SKILL_INSTALL_USAGE}` };
+  const force = /(^|\s)--force(\s|$)/.test(args);
+  const source = args.replace(/\s*--force\b/g, "").trim();
+  if (!source) return { kind: "invalid", message: `Missing source. Usage: ${SKILL_INSTALL_USAGE}` };
+  return { kind: "install", source, force };
+}
+
+export type SkillSaveOutcome = { ok: true; skill: SkillDefinition } | { ok: false; message: string };
+
+export function resolveSkillSave(name: string | null, pending?: SkillDefinition): SkillSaveOutcome {
+  if (!pending) return { ok: false, message: SKILL_SAVE_NO_PENDING };
+  if (name && name !== pending.name.toLowerCase()) {
+    return { ok: false, message: `No pending proposal named "${name}". Waiting: ${pending.name}` };
+  }
+  return { ok: true, skill: pending };
+}
+
+export function renderSkillSaveOutcome(skill: SkillDefinition): string {
+  return `Skill saved: ${skill.name}\nActivates on: ${skill.triggers.join(", ")}`;
 }

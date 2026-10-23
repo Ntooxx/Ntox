@@ -27,6 +27,16 @@ import { MistakeJournal } from "../meta/mistakes.js";
 import { SkillRegistry } from "../skills/registry.js";
 import { SkillLibrary } from "../skills/library.js";
 import { learnSkillFromDescription } from "../skills/learner.js";
+import { renderSkillProposal } from "../skills/auto-learner.js";
+import { installSkillFromSource, renderSkillInstallResult } from "../skills/installer.js";
+import { createMarketplace, renderMarketplaceList, type SkillMarketplace } from "../skills/marketplace.js";
+import { diffSkillByName, renderSkillStats } from "../skills/lifecycle.js";
+import { createRoutineRuntime, renderRoutineRun, runRoutine } from "../skills/routine.js";
+import {
+  parseSkillInstallCommand,
+  parseSkillLifecycleCommand,
+  parseSkillMarketplaceCommand,
+} from "../gateway/commands.js";
 import { Analytics } from "../meta/analytics.js";
 import { ProactiveEngine } from "../meta/proactive.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
@@ -60,6 +70,7 @@ import { processAtReferences } from "./at-refs.js";
 import { getFileChangesSince, renderFileChanges } from "../tools/change-tracker.js";
 import { loadConfig, patchConfig, loadCosts, saveCosts, loadCachedModels, saveCachedModels } from "../core/config.js";
 import type { ModelInfo, Reflection, QueryType, AgentTurnTrace, NtoxConfig } from "../types/index.js";
+import type { SkillDefinition } from "../types/index.js";
 import {
   renderHeaderBar,
   renderStatusBar,
@@ -115,8 +126,20 @@ export class Repl {
   private lastSubmittedInput: string | null = null;
   private lastReflection: Reflection | null = null;
   private lastStrategy: QueryType | null = null;
+  private pendingSkillProposal: SkillDefinition | null = null;
+  private skillMarketplaceInstance: SkillMarketplace | null = null;
+  private skillMarketplaceSource: string | null = null;
   private thinkingChars = 0;
   private turnStartedAtMs = 0;
+
+  private get marketplace(): SkillMarketplace {
+    const source = this.config.skillMarketplaceIndex;
+    if (!this.skillMarketplaceInstance || this.skillMarketplaceSource !== source) {
+      this.skillMarketplaceInstance = createMarketplace({ indexSource: source });
+      this.skillMarketplaceSource = source;
+    }
+    return this.skillMarketplaceInstance;
+  }
 
   private infra: ReturnType<typeof createAgentInfra>;
   private briefingEngine: BriefingEngine;
@@ -1018,6 +1041,15 @@ export class Repl {
         console.log(`  ${chalk.dim("Tools:       ")} ${skill.tools.join(", ") || "none"}`);
         console.log(`  ${chalk.dim("Examples:    ")} ${skill.examples.join(", ") || "none"}`);
         console.log(`  ${chalk.dim("Usage:       ")} ${skill.usageCount}x`);
+        if (skill.steps && skill.steps.length > 0) {
+          const chain = skill.steps
+            .map(
+              (step, index) =>
+                `${index + 1}.${step.kind}${step.tool ? `(${step.tool})` : step.skill ? `(${step.skill})` : ""}`,
+            )
+            .join(" -> ");
+          console.log(`  ${chalk.dim("Steps:       ")} ${chain}`);
+        }
         console.log(`  ${chalk.dim("Prompt:      ")} ${skill.prompt.slice(0, 300)}...`);
         break;
       }
@@ -1037,6 +1069,106 @@ export class Repl {
         } catch (e) {
           console.log(chalk.red(`Failed to learn skill: ${e}`));
         }
+        break;
+      }
+      case "save": {
+        const nameArg = parts.slice(1).join(" ").trim().toLowerCase();
+        const proposal = this.pendingSkillProposal;
+        if (!proposal) {
+          console.log(chalk.yellow("No skill proposal waiting. Run a multi-step task and Ntox may propose one."));
+          return;
+        }
+        if (nameArg && nameArg !== proposal.name) {
+          console.log(chalk.yellow(`No pending proposal named "${nameArg}". Waiting: ${proposal.name}`));
+          return;
+        }
+        this.skillRegistry.add(proposal);
+        this.pendingSkillProposal = null;
+        console.log(chalk.green(`Skill saved: ${proposal.name}`));
+        console.log(chalk.dim(`  Triggers: ${proposal.triggers.join(", ")}`));
+        break;
+      }
+      case "install": {
+        const parsed = parseSkillInstallCommand(`/skill ${arg}`);
+        if (parsed.kind !== "install") {
+          console.log(
+            chalk.yellow(
+              parsed.kind === "invalid" ? parsed.message : "Usage: /skill install <url|git|file|name> [--force]",
+            ),
+          );
+          return;
+        }
+        console.log(chalk.dim(`Installing from ${parsed.source}...`));
+        const result = await installSkillFromSource(parsed.source, this.skillRegistry, {
+          force: parsed.force,
+          marketplace: this.marketplace,
+        });
+        const message = renderSkillInstallResult(result);
+        const failed = result.installed.length === 0 && result.skipped.length === 0;
+        console.log(failed ? chalk.yellow(message) : chalk.green(message));
+        break;
+      }
+      case "marketplace": {
+        const parsed = parseSkillMarketplaceCommand(`/skill ${arg}`);
+        const query = parsed.kind === "marketplace" ? (parsed.query ?? undefined) : undefined;
+        const listing = await this.marketplace.list(query);
+        console.log(renderMarketplaceList(listing, query));
+        break;
+      }
+      case "stats": {
+        console.log(renderSkillStats(this.skillRegistry.list()));
+        break;
+      }
+      case "run": {
+        const parsed = parseSkillLifecycleCommand(`/skill ${arg}`);
+        if (parsed.kind !== "run" || !parsed.name) {
+          console.log(chalk.yellow("Usage: /skill run <name>"));
+          return;
+        }
+        const skill = this.skillRegistry.get(parsed.name);
+        if (!skill) {
+          console.log(chalk.yellow(`Skill "${parsed.name}" not found.`));
+          return;
+        }
+        if (!skill.steps || skill.steps.length === 0) {
+          console.log(
+            chalk.yellow(
+              `Skill "${parsed.name}" has no routine steps — plain skills activate by trigger. Just mention one of its triggers instead.`,
+            ),
+          );
+          return;
+        }
+        console.log(chalk.dim(`Running routine ${skill.name} (${skill.steps.length} steps)...`));
+        const runtime = createRoutineRuntime({ llm: this.llm, tools: this.tools, skillRegistry: this.skillRegistry });
+        const result = await runRoutine(skill, runtime);
+        this.skillRegistry.incrementUsage(skill.name);
+        const message = renderRoutineRun(skill, result);
+        console.log(result.ok ? chalk.green(message) : chalk.yellow(message));
+        break;
+      }
+      case "diff": {
+        const parsed = parseSkillLifecycleCommand(`/skill ${arg}`);
+        if (parsed.kind !== "diff" || !parsed.name) {
+          console.log(chalk.yellow("Usage: /skill diff <name> [source]"));
+          return;
+        }
+        const message = await diffSkillByName(this.skillRegistry, this.marketplace, parsed.name, parsed.source);
+        console.log(message.includes("matches the source") ? chalk.green(message) : message);
+        break;
+      }
+      case "export": {
+        const parsed = parseSkillLifecycleCommand(`/skill ${arg}`);
+        if (parsed.kind !== "export" || !parsed.name) {
+          console.log(chalk.yellow("Usage: /skill export <name>"));
+          return;
+        }
+        const json = this.skillRegistry.exportSkill(parsed.name);
+        if (!json) {
+          console.log(chalk.yellow(`Skill "${parsed.name}" not found.`));
+          return;
+        }
+        console.log(json);
+        console.log(chalk.dim("Save the above as a .json file, then /skill install <file> on the other machine."));
         break;
       }
       case "forget":
@@ -1117,7 +1249,7 @@ export class Repl {
       default:
         console.log(
           chalk.yellow(
-            "Commands: /skill, /skill show <name>, /skill learn <desc>, /skill forget <name>, /skill library, /skill browse <domain>, /skill load <name>",
+            "Commands: /skill, /skill show <name>, /skill learn <desc>, /skill save [name], /skill install <url|git|file|name>, /skill marketplace [query], /skill run <name>, /skill stats, /skill diff <name>, /skill export <name>, /skill forget <name>, /skill library, /skill browse <domain>, /skill load <name>",
           ),
         );
     }
@@ -2628,6 +2760,10 @@ export class Repl {
           if (this.config.verboseCallbacks) {
             writer.writeTag(renderInlineTag(`skill: ${name} (${(confidence * 100).toFixed(0)}%)`, chalk.magenta));
           }
+        },
+        onSkillProposal: (skill) => {
+          this.pendingSkillProposal = skill;
+          console.log(chalk.magenta("\n" + renderSkillProposal(skill)));
         },
         onProactiveSuggestion: (suggestion) => {
           if (suggestion.type === "milestone" || suggestion.type === "feedback-prompt") return;

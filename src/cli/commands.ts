@@ -47,6 +47,13 @@ export const COMMANDS: CommandDef[] = [
   { name: "mistakes", description: "learnt corrections", group: "memory" },
   { name: "skill", description: "manage skills", group: "memory" },
   { name: "skill learn", description: "create a skill", group: "memory" },
+  { name: "skill save", description: "accept the last proposed skill", group: "memory" },
+  { name: "skill install", description: "add a skill from the marketplace, URL, git, or file", group: "memory" },
+  { name: "skill marketplace", description: "browse installable skills", group: "memory" },
+  { name: "skill run", description: "run a routine skill (steps chain tools + skills)", group: "memory" },
+  { name: "skill stats", description: "usage stats and auto-disabled skills", group: "memory" },
+  { name: "skill diff", description: "compare an installed skill with its source", group: "memory" },
+  { name: "skill export", description: "print a skill as JSON for another machine", group: "memory" },
   { name: "menu skills", description: "browse skill library", group: "memory" },
 
   { name: "meta", description: "meta-cognition status", group: "diagnostics" },

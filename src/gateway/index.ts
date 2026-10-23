@@ -17,29 +17,44 @@ import { createWhatsAppChannel } from "./whatsapp.js";
 import {
   isAliveQuery,
   parseApproveCommand,
+  parseSkillInstallCommand,
+  parseSkillLifecycleCommand,
+  parseSkillMarketplaceCommand,
+  parseSkillSaveCommand,
   recordDirectGatewayResponse,
   renderAliveStatus,
   renderApprovalOutcome,
   renderApprovalRequest,
+  renderSkillSaveOutcome,
   resolveApproval,
+  resolveSkillSave,
   type PendingApproval,
 } from "./commands.js";
+import { renderSkillProposal } from "../skills/auto-learner.js";
+import { installSkillFromSource, renderSkillInstallResult } from "../skills/installer.js";
+import { createMarketplace, renderMarketplaceList } from "../skills/marketplace.js";
+import { diffSkillByName, renderSkillStats } from "../skills/lifecycle.js";
+import { createRoutineRuntime, renderRoutineRun, runRoutine } from "../skills/routine.js";
 import { ConversationStore } from "./conversations.js";
 import { createInspectServices, extractApprovalCommand, isApprovalRequired } from "./inspect.js";
 import { approvalStore } from "../tools/approval.js";
 import { createSettingsService } from "./settings.js";
 import { suggestWorkspacePaths } from "./paths.js";
 import { audioFilenameFor, clampTtsText } from "./voice.js";
+import { handleVoiceCommand } from "./voice-mode.js";
 import type { WebVoiceHandlers } from "./web.js";
 import { processAtReferences } from "../cli/at-refs.js";
 import type { GatewayChannel } from "./types.js";
+import type { SkillDefinition } from "../types/index.js";
 
 const config = loadConfig();
 const shared = createSharedInfra(config);
+const marketplace = createMarketplace({ indexSource: config.skillMarketplaceIndex });
 const sessionInfras = new Map<string, ReturnType<typeof createSessionInfra>>();
 const cron = new CronManager();
 const channelSenders = new Map<string, (chatId: string, message: string) => Promise<void>>();
 const pendingApprovals = new Map<string, PendingApproval>();
+const pendingSkillProposals = new Map<string, SkillDefinition>();
 const conversations = new ConversationStore();
 
 function getOrCreateSessionInfra(chatId: string, sharedInfra: SharedInfra) {
@@ -47,6 +62,18 @@ function getOrCreateSessionInfra(chatId: string, sharedInfra: SharedInfra) {
     sessionInfras.set(chatId, createSessionInfra(sharedInfra, config));
   }
   return sessionInfras.get(chatId)!;
+}
+
+async function executeRoutineByName(name: string): Promise<string> {
+  const skill = shared.skillRegistry.get(name);
+  if (!skill) return `Skill "${name}" not found.`;
+  if (!skill.steps || skill.steps.length === 0) {
+    return `Skill "${name}" has no routine steps. Add a "steps" array to make it a routine.`;
+  }
+  const runtime = createRoutineRuntime({ llm: shared.llm, tools: shared.tools, skillRegistry: shared.skillRegistry });
+  const result = await runRoutine(skill, runtime);
+  shared.skillRegistry.incrementUsage(name);
+  return renderRoutineRun(skill, result);
 }
 
 function handleCronCommand(text: string, ctx: string, chatId: string): string | null {
@@ -78,6 +105,7 @@ function handleCronCommand(text: string, ctx: string, chatId: string): string | 
       "Schedules: 'every 30m', 'every 2h', 'daily', 'every morning', 'at 9pm', 'every monday', or cron expression '0 9 * * *'",
       "",
       "Example: /cron add weather | every morning | What's the weather in NYC?",
+      "Routine: /cron add brief | every morning | /skill run morning-brief",
     ].join("\n");
   }
 
@@ -148,7 +176,7 @@ export async function runGateway(channel?: string): Promise<void> {
           return direct("Fresh start. Go ahead.", false);
         }
         if (text === "/help") {
-          return `Ntox on ${ctx}.\n\nSend any message. I can read/write files, run commands, search the web, and code.\n\n/new — reset conversation\n/cron — scheduled automations\n/approve <once|session|always|deny> <command> — allow or block a risky command\n/help — this message`;
+          return `Ntox on ${ctx}.\n\nSend any message — text or voice. I can read/write files, run commands, search the web, and code.\n\n/new — reset conversation\n/voice on|off|auto — spoken replies\n/cron — scheduled automations\n/approve <once|session|always|deny> <command> — allow or block a risky command\n/skill save <name> — accept a skill Ntox proposed after a finished task\n/skill install <url|git|file|name> — add a skill from the marketplace, a URL, git repo, or local file\n/skill marketplace [query] — browse installable skills\n/skill stats · /skill diff <name> · /skill export <name> — usage, compare with source, share as JSON\n/skill run <name> — run a routine skill (steps chain tools + skills)\n/help — this message`;
         }
 
         sessions.touch(chatId);
@@ -172,13 +200,78 @@ export async function runGateway(channel?: string): Promise<void> {
             if (command) {
               pendingApprovals.set(pendingKey, { command, prompt: promptText });
               if (ctx !== "web") {
-                const sender = channelSenders.get(ctx);
-                if (sender) void sender(chatId, renderApprovalRequest(command)).catch(() => {});
+                const channel = channelsByName.get(ctx);
+                if (channel?.sendApprovalRequest) {
+                  void channel.sendApprovalRequest(chatId, command).catch(() => {});
+                } else {
+                  const sender = channelSenders.get(ctx);
+                  if (sender) void sender(chatId, renderApprovalRequest(command)).catch(() => {});
+                }
               }
+            }
+          }
+          if (event.type === "skill_proposal" && event.skill) {
+            const skill = event.skill as SkillDefinition;
+            pendingSkillProposals.set(pendingKey, skill);
+            if (ctx !== "web") {
+              const sender = channelSenders.get(ctx);
+              if (sender) void sender(chatId, renderSkillProposal(skill)).catch(() => {});
             }
           }
           onEvent?.(event);
         };
+
+        const skillSaveParse = parseSkillSaveCommand(text);
+        if (skillSaveParse.kind === "save") {
+          const pending = pendingSkillProposals.get(pendingKey);
+          const saved = resolveSkillSave(skillSaveParse.name, pending);
+          if (!saved.ok) return direct(saved.message);
+          shared.skillRegistry.add(saved.skill);
+          pendingSkillProposals.delete(pendingKey);
+          return direct(renderSkillSaveOutcome(saved.skill));
+        }
+
+        const skillInstallParse = parseSkillInstallCommand(text);
+        if (skillInstallParse.kind !== "not-skill-install") {
+          if (skillInstallParse.kind === "invalid") return direct(skillInstallParse.message);
+          const installResult = await installSkillFromSource(skillInstallParse.source, shared.skillRegistry, {
+            force: skillInstallParse.force,
+            marketplace,
+          });
+          return direct(renderSkillInstallResult(installResult));
+        }
+
+        const skillMarketplaceParse = parseSkillMarketplaceCommand(text);
+        if (skillMarketplaceParse.kind === "marketplace") {
+          const listing = await marketplace.list(skillMarketplaceParse.query ?? undefined);
+          return direct(renderMarketplaceList(listing, skillMarketplaceParse.query ?? undefined));
+        }
+
+        const skillLifecycleParse = parseSkillLifecycleCommand(text);
+        if (skillLifecycleParse.kind === "stats") {
+          return direct(renderSkillStats(shared.skillRegistry.list()));
+        }
+        if (skillLifecycleParse.kind === "run") {
+          if (!skillLifecycleParse.name) return direct("Usage: /skill run <name>");
+          return direct(await executeRoutineByName(skillLifecycleParse.name));
+        }
+        if (skillLifecycleParse.kind === "diff") {
+          if (!skillLifecycleParse.name) return direct("Usage: /skill diff <name> [source]");
+          return direct(
+            await diffSkillByName(
+              shared.skillRegistry,
+              marketplace,
+              skillLifecycleParse.name,
+              skillLifecycleParse.source,
+            ),
+          );
+        }
+        if (skillLifecycleParse.kind === "export") {
+          if (!skillLifecycleParse.name) return direct("Usage: /skill export <name>");
+          const json = shared.skillRegistry.exportSkill(skillLifecycleParse.name);
+          if (!json) return direct(`Skill "${skillLifecycleParse.name}" not found.`);
+          return direct(json);
+        }
 
         const approveParse = parseApproveCommand(text);
         if (approveParse.kind !== "not-approve") {
@@ -219,6 +312,11 @@ export async function runGateway(channel?: string): Promise<void> {
         const cronResponse = handleCronCommand(text, ctx, chatId);
         if (cronResponse) {
           return direct(cronResponse);
+        }
+
+        const voiceResponse = handleVoiceCommand(text, ctx, chatId);
+        if (voiceResponse) {
+          return direct(voiceResponse);
         }
 
         if (mode === "regenerate") {
@@ -291,8 +389,31 @@ export async function runGateway(channel?: string): Promise<void> {
     return null;
   };
 
+  const transcribeAudio = async (audio: string, mimeType: string): Promise<string | null> => {
+    const tool = shared.tools.get("stt");
+    if (!tool) return null;
+    const result = await tool.execute({ audio, filename: audioFilenameFor(mimeType) });
+    const data = result.data as { text?: string } | undefined;
+    return result.success && data?.text ? data.text : null;
+  };
+
+  const synthesizeSpeech = async (text: string): Promise<string | null> => {
+    const tool = shared.tools.get("tts");
+    if (!tool) return null;
+    const result = await tool.execute({ text: clampTtsText(text), format: "opus" });
+    const data = result.data as { audio?: string } | undefined;
+    return result.success && data?.audio ? data.audio : null;
+  };
+
   if ((!channel || channel === "telegram") && config.telegramToken) {
-    channels.push(createTelegramChannel({ token: config.telegramToken, onMessage: makeHandler("telegram") }));
+    channels.push(
+      createTelegramChannel({
+        token: config.telegramToken,
+        onMessage: makeHandler("telegram"),
+        transcribe: transcribeAudio,
+        synthesize: synthesizeSpeech,
+      }),
+    );
     const sender = makeSender("telegram");
     if (sender) channelSenders.set("telegram", sender);
   }
@@ -310,6 +431,8 @@ export async function runGateway(channel?: string): Promise<void> {
         appSecret: config.whatsappAppSecret,
         port: config.whatsappPort || 3001,
         onMessage: makeHandler("whatsapp"),
+        transcribe: transcribeAudio,
+        synthesize: synthesizeSpeech,
       }),
     );
     const sender = makeSender("whatsapp");
@@ -376,6 +499,8 @@ export async function runGateway(channel?: string): Promise<void> {
     process.exit(1);
   }
 
+  for (const ch of channels) channelsByName.set(ch.name, ch);
+
   setInterval(
     () => {
       const purged = sessions.purge();
@@ -387,6 +512,10 @@ export async function runGateway(channel?: string): Promise<void> {
   for (const ch of channels) await ch.start();
 
   cron.setExecutor(async (prompt) => {
+    const routineParse = parseSkillLifecycleCommand(prompt);
+    if (routineParse.kind === "run" && routineParse.name) {
+      return executeRoutineByName(routineParse.name);
+    }
     const sid = `cron_${Date.now()}`;
     const sessionInfra = createSessionInfra(shared, config);
     const agent = new (await import("../core/agent.js")).Agent(
