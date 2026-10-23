@@ -38,6 +38,15 @@ export interface WorkspaceProfile {
   autoCheckpoint: boolean;
 }
 
+export interface McpServerEntry {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  enabled?: boolean;
+}
+
 export interface PolicyDecision {
   tool: string;
   allowed: boolean;
@@ -107,6 +116,7 @@ export interface NtoxConfig {
   metaMinConfidence: number;
   skillAutoLearnEnabled: boolean;
   skillMarketplaceIndex: string;
+  mcpServers?: Record<string, McpServerEntry>;
   cognitiveEnabled: boolean;
   theoryEnabled: boolean;
   animationLevel: "off" | "minimal" | "full";

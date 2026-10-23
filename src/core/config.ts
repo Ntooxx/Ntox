@@ -39,6 +39,18 @@ const ConfigSchema = z.object({
   metaMinConfidence: z.number().min(0).max(1),
   skillAutoLearnEnabled: z.boolean(),
   skillMarketplaceIndex: z.string(),
+  mcpServers: z
+    .record(
+      z.object({
+        command: z.string().optional(),
+        args: z.array(z.string()).optional(),
+        env: z.record(z.string()).optional(),
+        url: z.string().optional(),
+        headers: z.record(z.string()).optional(),
+        enabled: z.boolean().optional(),
+      }),
+    )
+    .default({}),
   cognitiveEnabled: z.boolean(),
   theoryEnabled: z.boolean(),
   animationLevel: z.enum(["off", "minimal", "full"]),
@@ -233,6 +245,7 @@ const DEFAULT_CONFIG: NtoxConfig = {
   metaMinConfidence: 0.5,
   skillAutoLearnEnabled: true,
   skillMarketplaceIndex: defaultMarketplaceIndex(),
+  mcpServers: {},
   cognitiveEnabled: true,
   theoryEnabled: true,
   animationLevel: "minimal" as const,

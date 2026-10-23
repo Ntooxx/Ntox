@@ -47,6 +47,14 @@ describe("ToolRegistry", () => {
     r.register(newer);
     expect(r.get("test")!.description).toBe("updated");
   });
+
+  it("unregisters tools", () => {
+    const r = new ToolRegistry();
+    r.register(testTool);
+    expect(r.unregister("test")).toBe(true);
+    expect(r.get("test")).toBeUndefined();
+    expect(r.unregister("test")).toBe(false);
+  });
 });
 
 describe("executeToolCall", () => {

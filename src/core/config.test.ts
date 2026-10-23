@@ -163,6 +163,23 @@ describe("config", () => {
     expect(existsSync(config.skillMarketplaceIndex)).toBe(true);
   });
 
+  it("defaults to no MCP servers and validates the mcpServers shape", () => {
+    if (existsSync(cfgPath())) unlinkSync(cfgPath());
+    const base = loadConfig();
+    expect(base.mcpServers).toEqual({});
+
+    const good: Partial<NtoxConfig> = {
+      mcpServers: {
+        files: { command: "npx", args: ["-y", "mcp-files"], env: { TOKEN: "x" } },
+        remote: { url: "https://example.com/mcp", headers: { Authorization: "Bearer x" }, enabled: false },
+      },
+    };
+    expect(validateConfig({ ...base, ...good } as NtoxConfig).valid).toBe(true);
+
+    const bad = { mcpServers: { files: { command: 42 } } } as unknown as Partial<NtoxConfig>;
+    expect(validateConfig({ ...base, ...bad } as NtoxConfig).valid).toBe(false);
+  });
+
   it("saves and loads config correctly", () => {
     const testConfig: Partial<NtoxConfig> = {
       model: "openai/gpt-4o",
