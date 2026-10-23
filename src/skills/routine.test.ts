@@ -121,6 +121,13 @@ describe("renderRoutineTemplate", () => {
     expect(renderRoutineTemplate("missing {{ghost}} end", outputs)).toBe("missing  end");
     expect(renderRoutineTemplate("no refs here", outputs)).toBe("no refs here");
   });
+
+  it("resolves a nested routine's own namespace before the shared outputs", () => {
+    const outputs = { step1: "PARENT", child_step1: "CHILD", weather: "SHARED" };
+    expect(renderRoutineTemplate("{{step1}}", outputs, "child")).toBe("CHILD");
+    expect(renderRoutineTemplate("{{step1}}", outputs)).toBe("PARENT");
+    expect(renderRoutineTemplate("{{missing}}/{{weather}}", outputs, "child")).toBe("/SHARED");
+  });
 });
 
 describe("runRoutine", () => {
@@ -209,7 +216,7 @@ describe("runRoutine", () => {
     const parent = makeRoutine({
       steps: [
         { kind: "skill", name: "invoke-child", skill: "child-routine" },
-        { kind: "llm", name: "wrap", prompt: "wrap {{child-work}}" },
+        { kind: "llm", name: "wrap", prompt: "wrap {{child-routine_child-work}}" },
       ],
     });
 
@@ -218,8 +225,34 @@ describe("runRoutine", () => {
     expect(result.ok).toBe(true);
     expect(completions).toEqual(["child work", "wrap llm:1"]);
     expect(result.steps.map((step) => step.skill)).toEqual(["child-routine", "deploy-checklist", "deploy-checklist"]);
-    expect(result.outputs["child-work"]).toBe("llm:1");
+    expect(result.outputs["child-routine_child-work"]).toBe("llm:1");
     expect(result.outputs["invoke-child"]).toBe("llm:1");
+  });
+
+  it("namespaces nested outputs so a child's implicit keys cannot clobber the parent's", async () => {
+    const child = makeRoutine({
+      name: "child-routine",
+      steps: [
+        { kind: "llm", prompt: "child first" },
+        { kind: "llm", prompt: "child reads {{step1}}" },
+      ],
+    });
+    const { runtime, completions } = fakeRuntime({ skills: [child] });
+    const parent = makeRoutine({
+      steps: [
+        { kind: "llm", prompt: "parent first" },
+        { kind: "skill", name: "invoke-child", skill: "child-routine" },
+        { kind: "llm", prompt: "parent reads {{step1}}" },
+      ],
+    });
+
+    const result = await runRoutine(parent, runtime);
+
+    expect(result.ok).toBe(true);
+    expect(completions).toEqual(["parent first", "child first", "child reads llm:2", "parent reads llm:1"]);
+    expect(result.outputs["step1"]).toBe("llm:1");
+    expect(result.outputs["child-routine_step1"]).toBe("llm:2");
+    expect(result.outputs["child-routine_step2"]).toBe("llm:3");
   });
 
   it("treats a plain skill step as an instruction to the model", async () => {

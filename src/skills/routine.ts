@@ -112,8 +112,16 @@ export function createRoutineRuntime(deps: {
   };
 }
 
-export function renderRoutineTemplate(value: string, outputs: Record<string, string>): string {
-  return value.replace(/\{\{\s*([a-zA-Z][a-zA-Z0-9_-]*)\s*\}\}/g, (_match, key: string) => outputs[key] ?? "");
+export function renderRoutineTemplate(value: string, outputs: Record<string, string>, namespace?: string): string {
+  return value.replace(/\{\{\s*([a-zA-Z][a-zA-Z0-9_-]*)\s*\}\}/g, (_match, key: string) => {
+    const scoped = namespace ? outputs[`${namespace}_${key}`] : undefined;
+    return scoped ?? outputs[key] ?? "";
+  });
+}
+
+function outputNamespace(skillName: string): string {
+  const clean = skillName.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+  return /^[a-z]/.test(clean) ? clean : `s_${clean}`;
 }
 
 function clampOutput(text: string): string {
@@ -167,6 +175,7 @@ async function runSteps(
   depth: number,
   chain: string[],
 ): Promise<boolean> {
+  const ns = chain.length > 1 ? outputNamespace(skill.name) : undefined;
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     const label = stepLabel(step, i);
@@ -187,7 +196,7 @@ async function runSteps(
       }
       const args: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(step.args ?? {})) {
-        args[key] = typeof value === "string" ? renderRoutineTemplate(value, state.outputs) : value;
+        args[key] = typeof value === "string" ? renderRoutineTemplate(value, state.outputs, ns) : value;
       }
       const result = await runtime.runTool(toolName, args);
       if (!result.success) {
@@ -203,7 +212,7 @@ async function runSteps(
       }
       output = extractToolOutput(result);
     } else if (step.kind === "llm") {
-      const prompt = renderRoutineTemplate(step.prompt ?? skill.prompt, state.outputs);
+      const prompt = renderRoutineTemplate(step.prompt ?? skill.prompt, state.outputs, ns);
       output = clampOutput(await runtime.complete(prompt));
     } else {
       const target = runtime.getSkill(step.skill!);
@@ -253,7 +262,7 @@ async function runSteps(
         );
       } else {
         const instruction = step.prompt
-          ? renderRoutineTemplate(step.prompt, state.outputs)
+          ? renderRoutineTemplate(step.prompt, state.outputs, ns)
           : `Follow this skill exactly and answer with the result:\n\n${target.prompt}`;
         output = clampOutput(await runtime.complete(instruction));
       }
@@ -264,7 +273,8 @@ async function runSteps(
     }
     state.totalChars += output.length;
 
-    const key = step.saveAs || step.name || `step${i + 1}`;
+    const localKey = step.name || `step${i + 1}`;
+    const key = step.saveAs || (ns ? `${ns}_${localKey}` : localKey);
     state.outputs[key] = output;
     state.results.push({ skill: skill.name, step: i + 1, kind: step.kind, label, ok: true, output });
   }
