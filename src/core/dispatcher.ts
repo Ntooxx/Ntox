@@ -43,6 +43,7 @@ import { NtoxAliveHostAdapters } from "../alive/host.js";
 import { JsonFileAliveStore } from "../alive/store.js";
 import { NtoxAliveBridge } from "../alive/ntox.js";
 import { Mind } from "../mind/mind.js";
+import { McpBridge } from "../mcp/bridge.js";
 import type { NtoxConfig, CostUsage, WorkspaceProfile, SkillDefinition } from "../types/index.js";
 import type { SessionStore } from "../gateway/types.js";
 import { createPolicyRuntime, enforceToolPolicy, getDefaultProfile, type PolicyRuntime } from "./policy.js";
@@ -69,6 +70,7 @@ export interface AgentInfra {
   alive?: NtoxAliveBridge;
   aliveHosts?: NtoxAliveHostAdapters;
   mind: Mind;
+  mcp: McpBridge;
 }
 
 export interface SharedInfra {
@@ -81,6 +83,7 @@ export interface SharedInfra {
   alive: NtoxAliveBridge;
   aliveHosts: NtoxAliveHostAdapters;
   mind: Mind;
+  mcp: McpBridge;
 }
 
 export interface SessionInfra {
@@ -167,7 +170,9 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
 
   const mind = new Mind();
 
-  return { llm, tools, skillRegistry, skillExecutor, skillLibrary, policy, alive, aliveHosts, mind };
+  const mcp = new McpBridge({ registry: tools, servers: config.mcpServers });
+
+  return { llm, tools, skillRegistry, skillExecutor, skillLibrary, policy, alive, aliveHosts, mind, mcp };
 }
 
 export function createSessionInfra(shared: SharedInfra, config?: NtoxConfig): SessionInfra {

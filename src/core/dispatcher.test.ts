@@ -177,6 +177,19 @@ describe("runAgentMessage", () => {
   });
 });
 
+describe("createSharedInfra MCP wiring", () => {
+  it("builds an unconnected bridge and registers no MCP tools until servers connect", async () => {
+    const { createSharedInfra } = await import("./dispatcher.js");
+    const { loadConfig } = await import("./config.js");
+    const shared = createSharedInfra({ ...loadConfig(), mcpServers: {} });
+
+    expect(shared.mcp).toBeDefined();
+    expect(shared.mcp.registeredTools()).toEqual([]);
+    await expect(shared.mcp.connectAll()).resolves.toEqual([]);
+    expect(shared.tools.list().some((tool) => tool.name.startsWith("mcp_"))).toBe(false);
+  });
+});
+
 describe("createSessionInfra cognitive kernel", () => {
   async function makeShared() {
     const { SkillRegistry } = await import("../skills/registry.js");

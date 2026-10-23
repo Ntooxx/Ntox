@@ -35,6 +35,7 @@ import { installSkillFromSource, renderSkillInstallResult } from "../skills/inst
 import { createMarketplace, renderMarketplaceList } from "../skills/marketplace.js";
 import { diffSkillByName, renderSkillStats } from "../skills/lifecycle.js";
 import { createRoutineRuntime, renderRoutineRun, runRoutine } from "../skills/routine.js";
+import { renderMcpStatus } from "../mcp/bridge.js";
 import { ConversationStore } from "./conversations.js";
 import { createInspectServices, extractApprovalCommand, isApprovalRequired } from "./inspect.js";
 import { approvalStore } from "../tools/approval.js";
@@ -134,6 +135,17 @@ function handleCronCommand(text: string, ctx: string, chatId: string): string | 
 }
 
 export async function runGateway(channel?: string): Promise<void> {
+  const mcpStatuses = await shared.mcp.connectAll().catch((error: unknown) => {
+    console.error("[mcp] connect failed:", error);
+    return [];
+  });
+  for (const status of mcpStatuses) {
+    if (status.state === "connected") {
+      console.log(`[mcp] ${status.name}: ${status.tools.length} tool(s)`);
+    } else if (status.state === "failed") {
+      console.error(`[mcp] ${status.name} failed: ${status.error}`);
+    }
+  }
   const sessions = new SessionManager();
   const channelsByName = new Map<string, GatewayChannel>();
   const makeHandler =
@@ -176,7 +188,10 @@ export async function runGateway(channel?: string): Promise<void> {
           return direct("Fresh start. Go ahead.", false);
         }
         if (text === "/help") {
-          return `Ntox on ${ctx}.\n\nSend any message — text or voice. I can read/write files, run commands, search the web, and code.\n\n/new — reset conversation\n/voice on|off|auto — spoken replies\n/cron — scheduled automations\n/approve <once|session|always|deny> <command> — allow or block a risky command\n/skill save <name> — accept a skill Ntox proposed after a finished task\n/skill install <url|git|file|name> — add a skill from the marketplace, a URL, git repo, or local file\n/skill marketplace [query] — browse installable skills\n/skill stats · /skill diff <name> · /skill export <name> — usage, compare with source, share as JSON\n/skill run <name> — run a routine skill (steps chain tools + skills)\n/help — this message`;
+          return `Ntox on ${ctx}.\n\nSend any message — text or voice. I can read/write files, run commands, search the web, and code.\n\n/new — reset conversation\n/voice on|off|auto — spoken replies\n/cron — scheduled automations\n/approve <once|session|always|deny> <command> — allow or block a risky command\n/skill save <name> — accept a skill Ntox proposed after a finished task\n/skill install <url|git|file|name> — add a skill from the marketplace, a URL, git repo, or local file\n/skill marketplace [query] — browse installable skills\n/skill stats · /skill diff <name> · /skill export <name> — usage, compare with source, share as JSON\n/skill run <name> — run a routine skill (steps chain tools + skills)\n/mcp — external MCP servers and their tools\n/help — this message`;
+        }
+        if (text === "/mcp" || text.startsWith("/mcp ")) {
+          return renderMcpStatus(shared.mcp.statuses());
         }
 
         sessions.touch(chatId);
@@ -549,6 +564,7 @@ export async function runGateway(channel?: string): Promise<void> {
   process.on("SIGINT", async () => {
     cron.stop();
     for (const ch of channels) await ch.stop();
+    await shared.mcp.disconnect().catch(() => {});
     process.exit(0);
   });
 }

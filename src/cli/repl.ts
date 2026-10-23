@@ -32,6 +32,7 @@ import { installSkillFromSource, renderSkillInstallResult } from "../skills/inst
 import { createMarketplace, renderMarketplaceList, type SkillMarketplace } from "../skills/marketplace.js";
 import { diffSkillByName, renderSkillStats } from "../skills/lifecycle.js";
 import { createRoutineRuntime, renderRoutineRun, runRoutine } from "../skills/routine.js";
+import { renderMcpStatus } from "../mcp/bridge.js";
 import {
   parseSkillInstallCommand,
   parseSkillLifecycleCommand,
@@ -234,6 +235,7 @@ export class Repl {
       }
     }
     this.refreshModelsInBackground();
+    this.connectMcpServersInBackground();
     this.agent.initKernel(this.config.model);
 
     const providerNames = getProviderNames();
@@ -410,6 +412,25 @@ export class Repl {
       })
       .catch(() => {
         /* local provider probe is best-effort */
+      });
+  }
+
+  private connectMcpServersInBackground(): void {
+    if (Object.keys(this.config.mcpServers ?? {}).length === 0) return;
+    void this.infra.mcp
+      .connectAll()
+      .then((statuses) => {
+        const connected = statuses.filter((status) => status.state === "connected");
+        const toolCount = connected.reduce((total, status) => total + status.tools.length, 0);
+        if (connected.length > 0) {
+          console.log(chalk.dim(`MCP: ${connected.length} server(s) connected, ${toolCount} tool(s) available — /mcp`));
+        }
+        for (const status of statuses) {
+          if (status.state === "failed") console.log(chalk.yellow(`MCP "${status.name}" failed: ${status.error}`));
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("[mcp]", error);
       });
   }
 
@@ -647,6 +668,9 @@ export class Repl {
         break;
       case "skill":
         await this.handleSkillCommand(arg);
+        break;
+      case "mcp":
+        console.log(renderMcpStatus(this.infra.mcp.statuses()));
         break;
       case "analytics":
         this.printAnalytics();
@@ -2904,14 +2928,19 @@ export class Repl {
     }
     animateExit()
       .then(() => {
-        this.doExit();
+        void this.doExit();
       })
       .catch(() => {
-        this.doExit();
+        void this.doExit();
       });
   }
 
-  private doExit(): void {
+  private async doExit(): Promise<void> {
+    try {
+      await this.infra.mcp.disconnect();
+    } catch {
+      /* best-effort MCP shutdown */
+    }
     try {
       this.infra.aliveHosts?.stop();
       const awarenessSummary = this.agent.recordSessionEnd(this.sessionId);
