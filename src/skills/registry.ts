@@ -211,23 +211,4 @@ export class SkillRegistry {
     if (!skill) return null;
     return JSON.stringify(skill, null, 2);
   }
-
-  importSkill(json: string): { success: boolean; error?: string; name?: string } {
-    try {
-      const parsed = JSON.parse(json) as SkillDefinition;
-      if (!parsed.name || !parsed.prompt || !parsed.triggers) {
-        return { success: false, error: "Invalid skill: missing name, prompt, or triggers" };
-      }
-      parsed.created = parsed.created || Date.now();
-      parsed.updated = Date.now();
-      parsed.usageCount = parsed.usageCount || 0;
-      parsed.triggers = parsed.triggers || [];
-      parsed.tools = parsed.tools || [];
-      parsed.examples = parsed.examples || [];
-      this.add(parsed);
-      return { success: true, name: parsed.name };
-    } catch {
-      return { success: false, error: "Invalid JSON" };
-    }
-  }
 }

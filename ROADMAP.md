@@ -80,8 +80,7 @@ no lifecycle (nothing learns from successful sessions); registry has 3 built-ins
 
 ### 2.2 Skill installation · P0 · M · ✅ shipped
 - `/skill install <url|git|file>` on all channels: fetch JSON or markdown,
-  validate schema, import via existing `importSkill` /
-  `exportAsMarkdown` formats.
+  validate schema with `parseSkillJson` / `exportAsMarkdown` formats.
 - Support plain-URL skill packs (a folder index.json + markdown files —
   same shape as the bundled `skills/` library).
 
