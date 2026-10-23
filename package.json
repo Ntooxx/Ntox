@@ -32,6 +32,7 @@
   "files": [
     "dist/",
     "skills/",
+    "marketplace/",
     "web/",
     "LICENSE",
     "README.md",
@@ -98,6 +99,7 @@
     "gpt-tokenizer": "^3.4.0",
     "linkedom": "^0.18.13",
     "ora": "^8.1.1",
+    "puppeteer-core": "^25.16.0",
     "socket.io": "^4.8.3",
     "ws": "^8.21.1",
     "zod": "^3.24.3"

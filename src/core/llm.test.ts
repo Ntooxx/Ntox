@@ -512,13 +512,15 @@ describe("LLMClient.stream (OpenAI-compatible reasoning)", () => {
   it("yields reasoning deltas as thinking, not as visible content", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        sse([
-          line({ role: "assistant", reasoning: "planning the " }),
-          line({ reasoning: "approach first" }),
-          line({ content: "Here is the result." }),
-        ]),
-      ),
+      vi
+        .fn()
+        .mockResolvedValue(
+          sse([
+            line({ role: "assistant", reasoning: "planning the " }),
+            line({ reasoning: "approach first" }),
+            line({ content: "Here is the result." }),
+          ]),
+        ),
     );
     const client = new LLMClient("key", "openrouter/mimo", "openai/text-embedding-3-small", 4096, 0.7);
 
@@ -530,7 +532,10 @@ describe("LLMClient.stream (OpenAI-compatible reasoning)", () => {
     const thinking = chunks.filter((c) => c.thinking).map((c) => c.thinking);
     expect(thinking.join("")).toBe("planning the approach first");
 
-    const visible = chunks.filter((c) => c.delta).map((c) => c.delta).join("");
+    const visible = chunks
+      .filter((c) => c.delta)
+      .map((c) => c.delta)
+      .join("");
     expect(visible).toBe("Here is the result.");
     expect(visible).not.toContain("planning");
   });
@@ -567,7 +572,11 @@ describe("LLMClient.stream (OpenAI-compatible reasoning)", () => {
       ),
     );
     const client = new LLMClient("key", "openrouter/mimo", "openai/text-embedding-3-small", 150000, 0.7);
-    const chunks: { delta: string; toolCalls?: { id: string; name: string; arguments: string }[]; toolCallLimitReached?: boolean }[] = [];
+    const chunks: {
+      delta: string;
+      toolCalls?: { id: string; name: string; arguments: string }[];
+      toolCallLimitReached?: boolean;
+    }[] = [];
 
     for await (const chunk of client.stream([{ role: "user", content: "read pages" }])) chunks.push(chunk);
 
@@ -578,9 +587,11 @@ describe("LLMClient.stream (OpenAI-compatible reasoning)", () => {
   it("does not throw EmptyResponseError for a reasoning-only turn", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        sse([line({ reasoning: "thinking hard about this" }), line({ reasoning: "still thinking" })]),
-      ),
+      vi
+        .fn()
+        .mockResolvedValue(
+          sse([line({ reasoning: "thinking hard about this" }), line({ reasoning: "still thinking" })]),
+        ),
     );
     const client = new LLMClient("key", "openrouter/mimo", "openai/text-embedding-3-small", 4096, 0.7);
 

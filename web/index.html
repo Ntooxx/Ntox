@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>NTOX — Chat</title>
-<meta name="description" content="NTOX — cognitive chat gateway with memory, skills, and meta-cognition.">
+<meta name="description" content="NTOX cognitive chat web app.">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#ffffff" id="theme-color">
+<meta name="theme-color" content="#070808" id="theme-color">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
@@ -14,7 +14,7 @@
   (function () {
     try {
       var t = localStorage.getItem('ntox_theme');
-      if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      if (!t) t = 'dark';
       document.documentElement.dataset.theme = t;
     } catch (e) {}
   })();

@@ -84,10 +84,44 @@ export const writeTool: Tool = {
   },
 };
 
+const GLOB_IGNORED_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".ntox",
+  "dist",
+  "build",
+  "coverage",
+  ".next",
+  ".cache",
+  "__pycache__",
+]);
+
+const GLOB_MAX_RESULTS = 500;
+
+async function walkGlob(dir: string, relBase: string, regex: RegExp, out: string[]): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (out.length >= GLOB_MAX_RESULTS) return;
+    const rel = relBase ? `${relBase}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (GLOB_IGNORED_DIRS.has(entry.name)) continue;
+      await walkGlob(join(dir, entry.name), rel, regex, out);
+      continue;
+    }
+    if (regex.test(rel)) out.push(join(dir, entry.name));
+  }
+}
+
 export const globTool: Tool = {
   name: "glob",
   parallelSafe: true,
-  description: "Find files matching a glob pattern. Uses ** for recursive.",
+  description:
+    "Find files matching a glob pattern. Uses ** for recursive. Case-insensitive. Skips node_modules, .git, dist, build, coverage, and cache directories.",
   parameters: {
     type: "object",
     properties: {
@@ -101,15 +135,9 @@ export const globTool: Tool = {
     if (!pattern) return { success: false, error: "Missing required argument: pattern" };
     const dir = args.path ? String(args.path) : process.cwd();
     try {
-      const regex = globToRegex(pattern);
-      const entries = await readdir(dir, { recursive: true });
-      const matching = (entries as string[])
-        .map((name) => ({
-          name: name.replace(/\\/g, "/"),
-          fullPath: join(dir, name),
-        }))
-        .filter((e) => regex.test(e.name))
-        .map((e) => e.fullPath);
+      const regex = globToRegex(pattern, "i");
+      const matching: string[] = [];
+      await walkGlob(dir, "", regex, matching);
       return { success: true, data: matching };
     } catch (e) {
       return { success: false, error: `Glob failed: ${e}` };

@@ -1,104 +1,231 @@
-# NTOX - Feature Study & Roadmap
+# NTOX Roadmap
 
-## 1. What Exists Today (studied from the codebase)
+High-level plan for the next stage of NTOX: from "capable CLI agent" to
+"an agent you talk to, that grows its own skills, anywhere you chat."
 
-### Core agent loop
-- `src/core/agent.ts` — main loop: push message, prompt-injection guard, classify response mode, kernel routing, quick handlers, strategy classification, streaming LLM response with native function calling (OpenAI `tool_calls` / Anthropic `tool_use`), false-success self-correction, memory storage, theory triggers, mistake detection, post-turn reflection and context-window management. Currently ~1,500 lines — owns too many responsibilities in one file.
-- `src/core/llm.ts` — streaming client supporting 10 providers (OpenRouter, OpenAI, Groq, DeepSeek, Together, Mistral, Anthropic, OpenAI-compatible, Ollama, LM Studio). Note: Ollama does not parse tool calls yet.
-- `src/core/config.ts` — Zod-validated config at `~/.ntox/config.json`; saves with `0o600` permissions (plaintext-secrets tradeoff documented in `SECURITY.md`).
-- `src/core/dispatcher.ts` — builds shared/session infra (`createSharedInfra`, `createSessionInfra`, `createAgentConfig`) used by both the REPL and subagents.
-- `src/core/orchestrator.ts` — 8-voice debate system (Researcher, Critic, Physicist, Mathematician, Systems Architect, Economist, Inventor, Experimentalist) that synthesizes multiple perspectives on a question.
-
-### Cognition
-- `src/cognition/patterns.ts` + `cognitive-space.ts` — compiles repeated reasoning (≥5 occurrences) into an 8-dimensional cognitive vector space; `sparse-activator.ts` reactivates relevant patterns later. Introspection available via `/patterns` and `/theories`.
-- `src/cognition/kernel.ts` — cognitive kernel routing for tool-execute modes.
-- `src/cognition/compressor.ts`, `critique.ts`, `domains.ts` — supporting compression/critique/domain-mapping logic.
-
-### Memory
-- `src/memory/episodic.ts` — episodic store with embedding-based cosine similarity retrieval.
-- `src/memory/local-embed.ts` (in `core/`) — deterministic 256-dim feature-hashing embeddings, zero API calls, offline-friendly.
-- `src/memory/user-model.ts` — learns verbosity, technical level, communication style over time.
-- `src/memory/relationship.ts` — tracks a "bond level" gating trust-dependent behavior.
-- `src/memory/theory-memory.ts` + `src/research/theory-store.ts` — observation → pattern → primitive → theory → meta-theory pipeline, with confidence, falsification-criteria fields, and a prediction-error feedback loop (`makeTheoryPrediction` / `resolvePrediction`), persisted to `theories.json`.
-- `src/research/false-success.ts` — detects shallow reasoning via surface vs. depth signals.
-
-### Meta-cognition
-- `src/meta/` — 19 modules: `strategist.ts`, `self-reflection.ts`, `confidence.ts`, `mistakes.ts`, `mood.ts`, `disagreement.ts`, `intervention.ts` (bond-gated), `mental-model.ts`, `proactive.ts`, `executive.ts`, `briefing.ts`, `response-mode.ts`, `style-optimizer.ts`, `time-adapter.ts`, `session-intent.ts`, `interaction-score.ts`, `analytics.ts`, `effectiveness.ts`, `self-aware.ts`.
-
-### Skills
-- `skills/` — 83 curated cognitive-framework documents across Core, Research, Mathematics, Physics, Architecture, Invention, AI, Economics, Communication, Career, Personal, Programming.
-- `src/skills/registry.ts` + `library.ts` — trigger-based auto-activation of skills; `learner.ts` for acquiring new skills; `executor.ts` for running them.
-
-### Tools
-- `src/tools/` — filesystem (`filesystem.ts`), `grep.ts`, `shell.ts` (regex blocklist + `approval.ts` gate + optional Docker sandbox), `web.ts`, `browse.ts`, `search.ts`, `image.ts`, `voice.ts` (OpenAI TTS), `stt.ts` (OpenAI Whisper), `subagent.ts` (spawns isolated subagents, own message history, filtered toolset, max 3 concurrent, 120s timeout), `job-tracker.ts`, `checkpoint.ts`, `profile-eval.ts`, `registry.ts`.
-- Voice tools exist but are **not wired into any gateway** — `AGENTS.md`'s "Good First Issues" list is stale, listing voice as missing.
-
-### Gateways
-- `src/gateway/` — Telegram, Discord, WhatsApp, web, all funneling into the same `Agent` core (`index.ts`). Web front-end (`web/index.html`) is a single-file chat UI only — no dashboard or memory browser.
-- Per `AGENTS.md`, the intended pattern is to extract `repl.ts`'s `handleMessage` into a shared service consumed by both REPL and gateways — done in `src/core/message-handler.ts`.
-
-### Kernel (decision layer, distinct from cognition kernel)
-- `src/kernel/` — `decision-kernel.ts`, `goals.ts`, `evolution.ts` (event-sourced identity log), `state.ts`, `verifier.ts`, `world.ts`.
-
-### CLI
-- `src/cli/` — REPL loop (`repl.ts`), streaming render (`render.ts`), animations (`animation.ts`, `effects.ts`, `phases.ts`), first-time setup flow (`first-time.ts`, `intro.ts`).
-
-### Quality baseline (verified by running the tools)
-- `tsc --noEmit`: clean, `strict: true`.
-- `vitest run`: **535/535 tests passing** across 57 test files.
-- `eslint src/`: clean.
-- CI pipeline exists (`.github/workflows/ci.yml`): typecheck + lint + test on Node 18/20/22.
+Status legend: **P0** = next milestone · **P1** = after · **P2** = later
+Effort: **S** < 1 day · **M** 1–3 days · **L** 1+ week
 
 ---
 
-## 2. Next Implementation Plan
+## Where we are today
 
-### Already done (since this roadmap was written)
-- GitHub Actions CI on push/PR (typecheck + lint + test, Node 18/20/22).
-- Config saves with `0o600` permissions.
-- Prediction-error feedback loop in `theory-store.ts` (with tests).
-- False-success detections wired into theory confidence decay.
-- `/theories` and `/patterns` introspection commands.
-- AGENTS.md updated to remove stale good-first-issues.
-- Ollama tool calling: `streamOllama` parses `tool_calls` from the stream (with tests).
-- Web UI auth token mode (`webAuthToken` config, socket.io middleware, token prompt UI, doctor check, tests).
-- Coverage working: `@vitest/coverage-v8` installed, vitest config includes coverage settings.
-- False-success records persisted to `~/.ntox/memory/false-success.json`.
-- Embedding fallback visible: `/cost` shows local-hash fallback count.
-- Dead code removed: `"google"` provider format, duplicate token-count implementations, orphaned `external-signals.ts`/`founder.ts`, dead `soundEnabled` config, `analytics.ts` stub.
-- Docker sandbox defaults on: POSIX auto-detects Docker and sandboxes shell commands; Windows keeps PowerShell unless `dockerEnabled` is set.
-- Prettier drift fixed: `verify:all` is fully green (12/12).
-- CI gated on coverage with thresholds; `noUnusedLocals` enabled; flaky live-network search tests replaced with deterministic mocked tests.
+| Area | State |
+|---|---|
+| Channels | Telegram, Discord, WhatsApp (Cloud API), Web — **text only** |
+| Voice | Web channel only (record → Whisper, TTS button). TG/Discord ignore voice; WA turns audio into `[audio message]` |
+| Skills | 3 built-in + 83 bundled markdown skills, trigger matching, one-shot learner via REPL `/skill learn` only |
+| Commands | Gateway: `/new /reset /help /approve /alive /cron` (+ TG `/start`). REPL: ~50 commands, no `/cron` |
+| Proactivity | Cron scheduler exists (gateway-only). Proactive suggestions and `alive` events **never reach messaging channels** |
+| Email | Does not exist |
+| Autonomy | Auto-continue plans, failure explanations, 30-turn work loop (shipped this session) |
 
-### Phase 1 — Foundation & Reliability (in progress)
-1. Refactor `agent.ts` into smaller modules (`message-manager.ts` for push/truncate/token-budget, `tool-dispatch.ts` for parsing/executing tool calls), keeping `agent.ts` as a thin orchestrator. Prerequisite for Phases 2 and 4.
+---
 
-### Phase 2 — Cognitive & Memory Depth
-1. Wire `NtoxCognitiveLayer` (tested but bypassed) into the agent runtime, or delete it.
-2. Run the cognitive benchmark (ON vs OFF) and commit results; the CI `benchmark` job runs it (round 1, per-domain deltas → step summary + artifact) whenever a `NTOX_API_KEY`/`OPENROUTER_API_KEY` secret is configured.
+## Pillar 1 — Voice everywhere (P0) "talk to him"
 
-### Phase 3 — Gateways & Integrations
-1. Wire existing `stt.ts`/`voice.ts` tools into Telegram/Discord for incoming voice messages and optional spoken replies.
-2. Add an optional local/offline STT fallback (e.g. whisper.cpp binding) for users without an OpenAI key.
-3. Add one new gateway plugin (Slack or Matrix) following the `discord.ts` pattern.
+The goal: send a voice note on Telegram or WhatsApp, get a spoken reply.
+Most plumbing exists: `src/tools/stt.ts` (Whisper), `src/tools/voice.ts` (TTS),
+`src/gateway/voice.ts` (mime/size validation), and a working reference
+implementation in the web channel (`gateway/index.ts` transcribe/synthesize).
 
-### Phase 4 — Multi-Agent / Sub-Agent Orchestration
-1. Give `subagent.ts` persistent identity: track task, outcome, and a fitness/success score per spawned subagent instead of fire-and-forget.
-2. Connect `orchestrator.ts`'s 8-voice debate to real subagent calls for actual parallelism instead of sequential prompts in one context.
-3. Add a lightweight competition/selection step: when multiple subagents attempt the same task, keep the fitness-scored winner and log the rest (a scoped version of Horizon's "selection pressure" idea, without adopting its architecture).
-4. Only after profiling cost/latency impact, consider raising `MAX_CONCURRENT` (currently 3) in `subagent.ts`.
+### 1.1 Voice-note input — TG · P0 · M · ✅ shipped
+- Download the voice file (`getFile` on Bot API), pass bytes as base64 to the
+  `stt` tool, run the transcript as a normal user message.
+- Wired into `src/gateway/telegram.ts`; errors reply with a friendly message.
 
-### Verification checklist (applies per phase)
-- `npm run typecheck`, `npm run lint`, `npm test` clean (becomes the CI gate from Phase 1 onward).
-- Manual: Telegram/Discord voice message round-trip (Phase 3).
-- Manual: `/theories` and `/patterns` reflect actual stored state (Phase 2).
-- Manual: multi-subagent debate produces recorded fitness scores and a selected winner (Phase 4).
-- Security: `~/.ntox/config.json` permissions are `600`; shell tool defaults to Docker sandbox when available (Phase 1).
+### 1.2 Voice-note input — WhatsApp · P0 · M · ✅ shipped
+- Two-hop media download (`GET /{media_id}` → signed URL) → `stt` → normal message.
+- Voice replies: media upload (`POST /{id}/media`) → `type:"audio"` message.
 
-### Open questions
-1. Local STT (whisper.cpp) would be the project's first native dependency — worth adding, or stay OpenAI-only?
-2. New gateway pick: Slack (broader reach, simpler bot API) vs. Matrix (fits the project's local-first/privacy ethos) — decide when Phase 3 starts.
+### 1.3 Voice-note input — Discord · P1 · S
+- Fetch `attachment.url`, same path. (Good first issue.)
 
-### Explicit exclusions
-- No GUI/dashboard work in this roadmap (deprioritized by choice).
-- No adoption of Horizon's OS/kernel/syscall/scheduler architecture — only isolated ideas (prediction-error tracking, fitness-based selection) are borrowed into NTOX's existing structure.
+### 1.4 Voice replies ("voice mode") · P0 · M · ✅ shipped
+- `/voice on|off|auto` per chat, persisted in `~/.ntox/voice.json` (default: auto).
+- `auto`: reply with a voice note when the *input* was voice; `on`: always; `off`: never.
+- Outbound: TTS in ogg/opus → TG `sendVoice` / WA audio message (reuses `makeSender`).
+- Capped at 600 chars, markdown stripped; full text always arrives as the message above.
+
+### 1.5 Format normalization · P0 · S · ✅ shipped
+- Extension → mime map (`.oga` → `audio/ogg`), `STT_MAX_BASE64_CHARS` guard,
+  TTS `format` param (`opus` for voice bubbles, `mp3` default elsewhere).
+
+### 1.6 Realtime voice call mode · P2 · L
+- OpenAI Realtime API or WebRTC: full-duplex spoken conversation, barge-in.
+- Prototype as a separate gateway channel (`src/gateway/voicecall.ts`).
+
+**Phase 1 acceptance:** *send a voice note in Telegram asking "what's on my
+plan today?" and get a spoken answer back, with zero typing.*
+
+---
+
+## Pillar 2 — Skills 2.0 (P0–P1) "drastically better at skills"
+
+Current limits: learner only fires from REPL `/skill learn`; no installation;
+no lifecycle (nothing learns from successful sessions); registry has 3 built-ins.
+
+### 2.1 Auto-learn from success · P0 · M · ✅ shipped
+- After a turn that succeeded (>= 2 successful tool calls across >= 2 distinct
+  tools, no corrections / false-success / tool failures, substantive request
+  and response), a fire-and-forget "skill curator" LLM pass reviews the
+  exchange and drafts a reusable skill.
+- Proposal only — never auto-saved. The user confirms with `/skill save
+  <name>` on any channel (REPL prompt included) or ignores it.
+- Guards: 20-turn cooldown between proposals, max 3 proposals per session,
+  name/trigger collision rejection against existing skills, disabled via
+  `skillAutoLearnEnabled: false` in config. Wired through both streaming
+  paths (`runAgentMessage` / `runAgentStream`); gateways store one pending
+  proposal per chat.
+
+### 2.2 Skill installation · P0 · M · ✅ shipped
+- `/skill install <url|git|file>` on all channels: fetch JSON or markdown,
+  validate schema, import via existing `importSkill` /
+  `exportAsMarkdown` formats.
+- Support plain-URL skill packs (a folder index.json + markdown files —
+  same shape as the bundled `skills/` library).
+
+### 2.3 Skill marketplace / shared registry · P1 · L · ✅ shipped
+- A curated index of community skills installable by name:
+  `/skill install weather-alerts`.
+- Start simple: a git repo of skill files + a YAML/JSON index; no server.
+
+### 2.4 Skill lifecycle & quality · P1 · M · ✅ shipped
+- Usage stats exist (`incrementUsage`) — add `/skill stats`, auto-disable
+  never-matched skills, versioning + `skill diff`, import/export between
+  machines (already half-built in `registry.ts`).
+
+### 2.5 Skill composition (routines) · P1 · M · ✅ shipped
+- Skills that chain tools + other skills: "morning brief" = cron → web_read →
+  summarize → TTS → send. This is the bridge between Pillar 2 and Pillar 4.
+
+### 2.6 Broaden the library · P2 · M · ✅ shipped
+- Grow from 83 bundled files toward domain packs (DevOps, Legal, Finance,
+  Health, Gaming, Hardware) with the existing `## Triggers / ## Voices`
+  structure.
+
+### 2.7 External tools as skills (MCP bridge) · P2 · L
+- Expose MCP servers to NTOX as skill-like tool providers, and NTOX skills
+  as MCP tools for other hosts.
+
+**Phase 2 acceptance:** *finish a novel task once; NTOX offers to save it as
+a skill; next time you type `/skill install <url>` or just mention the
+trigger and it activates on Telegram.*
+
+---
+
+## Pillar 3 — Commands & chat UX (P0–P1)
+
+### 3.1 Unified command layer · P0 · M
+- Bring high-value REPL commands to all channels: `/status`, `/plan`,
+  `/memory`, `/model`, `/skills`, `/tools`, `/cost`, `/undo`.
+- Single registry (reuse `src/cli/commands.ts` catalog + `gateway/commands.ts`
+  handler) so help text stays in sync.
+
+### 3.2 Interactive approvals · P0 · M · ✅ shipped
+- Telegram approval requests arrive with an inline keyboard — Allow once /
+  Session / Always / Deny (`callback_query` → `/approve <scope>`, spinner
+  answered immediately, keyboard cleared after the decision).
+- WhatsApp approval requests send interactive reply buttons (max 3 — Allow
+  once / Always allow / Deny; `session` stays typing-only). Button replies map
+  to `/approve <scope>` and run the same pipeline (typing, voice mode honored).
+- Channels without buttons (Discord) keep the plain-text request.
+- Fixed: `channelsByName` was never populated, so per-channel typing
+  indicators and interactive sends from the gateway handler never fired.
+
+### 3.3 `/cron` parity in REPL · P1 · S
+- Cron is gateway-only today; expose the same manager in the REPL.
+
+### 3.4 WhatsApp niceties · P1 · S · ✅ shipped (typing)
+- Typing indicator via read-receipt + `typing_indicator` (refreshed at most
+  every 8s during long generations), outbound formatting, status replies to
+  forwarded media.
+
+### 3.5 Rich media everywhere · P1 · M
+- Inbound images/files on TG/WA (already partially: captions) feed the
+  `image` tool; outbound: send screenshots/plots from tools as images.
+
+---
+
+## Pillar 4 — Proactivity & scheduling (P1) "he makes the first move"
+
+### 4.1 Push proactive suggestions to channels · P1 · S
+- `onProactiveSuggestion` is never wired in `runAgentMessage`
+  (`core/dispatcher.ts`) — one of the highest-value one-line-ish gaps.
+  Throttle to 1/day/chat.
+
+### 4.2 `alive` events → push notifications · P1 · M
+- `src/alive/` already detects file changes, git updates, open loops —
+  currently viewable only via `/alive`. Push them through `makeSender`.
+
+### 4.3 Scheduled digests · P1 · M
+- `/cron add daily 8am "morning brief"` → plan status, inbox-worthy alive
+  events, costs, open loops. Reuse `CronManager` + TTS for voice briefs.
+
+### 4.4 Open-loop reminders · P2 · M
+- "You asked me to finish X yesterday — shall I continue?" driven by
+  `alive` open loops.
+
+---
+
+## Pillar 5 — Channels & integrations (P1–P2)
+
+### 5.1 Email tool (send + read) · P1 · M
+- New `src/tools/email.ts`: SMTP or Resend/Sendgrid for sending; IMAP or
+  provider API for reading. Approval-gated (`send email` in destructive
+  patterns). Commands: `/mail unread`, "email this to…".
+- Nothing exists today — this is a greenfield pillar.
+
+### 5.2 Slack · P1 · M — Good first issue
+### 5.3 Matrix · P2 · M — Good first issue
+### 5.4 Calendar & contacts · P2 · M
+- Read/create events (Google Calendar / Outlook Graph), wired to natural
+  language ("open calendar" should create, not just launch an app).
+
+### 5.5 Files & photos · P2 · S
+- Receive a photo of a document → OCR → memory. TG and WA both make this easy.
+
+---
+
+## Pillar 6 — Safety & control (P1, tracks autonomy)
+
+- **Approval UX** (3.2) ✅ — inline buttons on TG/WA, session/always persistence exists.
+- **Per-channel budgets** — token/cost caps per chat, `/cost` on channels.
+- **Audit trail** — `shell-audit.log` exists; surface as `/audit` and keep
+  N days.
+- **Docker sandbox as default** when available (AGENTS.md known issue).
+
+---
+
+## Pillar 7 — Quality & infrastructure (parallel, S tasks)
+
+- Real-provider integration tests for each wire format (OpenAI/Anthropic/
+  Ollama) — AGENTS.md good-first-issue.
+- Publish cognitive benchmark results to README (`npm run bench:cognitive`).
+- CI running `verify:all`; badge in README.
+- Docs: per-channel setup guide (Telegram token, WA Cloud API, Discord bot).
+
+---
+
+## Suggested phases
+
+| Phase | Name | Contents | Outcome |
+|---|---|---|---|
+| **1** | Voice & talk | 1.1–1.5 ✅, 3.2 ✅, 3.4 ✅ | Voice notes in/out on TG + WA ✅, tap-to-approve ✅ |
+| **2** | Skills & commands | 2.1 ✅, 2.2, 2.4, 3.1, 3.3 | Self-learning skills ✅ (propose + `/skill save`), installable skills, command parity |
+| **3** | Proactive & email | 4.1–4.3, 5.1, 5.2 | He messages first; email send/read; Slack |
+| **4** | Deep platform | 2.3, 2.5, 2.7, 4.4, 5.3–5.5, 6 | Marketplace, routines, MCP, calendar |
+| **5** | Realtime | 1.6 | Spoken calls, wake word, hands-free |
+
+Each phase ends with one demo-able acceptance scenario (see pillar footers).
+
+---
+
+## Quick wins (< half a day each)
+
+1. Wire `onProactiveSuggestion` → gateway sender (4.1)
+2. Discord voice input (1.3)
+3. WhatsApp typing indicator (3.4)
+4. REPL `/cron` parity (3.3)
+5. `/status`, `/cost` on channels (3.1)
+6. Publish benchmarks to README (7)

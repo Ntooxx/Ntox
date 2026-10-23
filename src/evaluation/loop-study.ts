@@ -31,10 +31,23 @@ export interface LoopStudyReport {
   turns: number;
   labelSource: "human" | "objective" | "mixed";
   positiveRate: number;
-  predictor: { brier: number; baselineBrier: number; improvement: number; calibration: { bin: string; n: number; confidence: number; quality: number }[] };
+  predictor: {
+    brier: number;
+    baselineBrier: number;
+    improvement: number;
+    calibration: { bin: string; n: number; confidence: number; quality: number }[];
+  };
   proxies: ProxyMetric[];
   raterAgreement: { pairedRatings: number; exactAgreement: number; positiveAgreement: number; cohenKappa: number };
-  bandit: { turnsPerUser: number; feedbackRate: number; iterations: number; seeds: number; probabilityBestSelectedAtEnd: number; bestStance: string | null; meanRegret: number };
+  bandit: {
+    turnsPerUser: number;
+    feedbackRate: number;
+    iterations: number;
+    seeds: number;
+    probabilityBestSelectedAtEnd: number;
+    bestStance: string | null;
+    meanRegret: number;
+  };
 }
 
 function binaryMetric(name: string, rows: LabeledTurn[], predict: (row: LabeledTurn) => boolean): ProxyMetric {
@@ -73,7 +86,12 @@ function predictorReport(rows: LabeledTurn[]) {
     const lo = i / 5;
     const hi = (i + 1) / 5;
     const bin = rows.filter((row) => row.confidence >= lo && (i === 4 ? row.confidence <= hi : row.confidence < hi));
-    return { bin: `${lo.toFixed(1)}-${hi.toFixed(1)}`, n: bin.length, confidence: mean(bin.map((row) => row.confidence)), quality: mean(bin.map((row) => row.quality)) };
+    return {
+      bin: `${lo.toFixed(1)}-${hi.toFixed(1)}`,
+      n: bin.length,
+      confidence: mean(bin.map((row) => row.confidence)),
+      quality: mean(bin.map((row) => row.quality)),
+    };
   });
   return { brier, baselineBrier, improvement: baselineBrier - brier, calibration };
 }
@@ -87,7 +105,12 @@ function agreement(rows: LabeledTurn[]) {
   const secondPositive = paired.filter((row) => row.ratings![1] === 1).length / paired.length;
   const expected = firstPositive * secondPositive + (1 - firstPositive) * (1 - secondPositive);
   const exactAgreement = same / paired.length;
-  return { pairedRatings: paired.length, exactAgreement, positiveAgreement: positive / paired.length, cohenKappa: expected === 1 ? 1 : (exactAgreement - expected) / (1 - expected) };
+  return {
+    pairedRatings: paired.length,
+    exactAgreement,
+    positiveAgreement: positive / paired.length,
+    cohenKappa: expected === 1 ? 1 : (exactAgreement - expected) / (1 - expected),
+  };
 }
 
 export function validateLabeledTurns(input: unknown): LabeledTurn[] {
@@ -95,17 +118,23 @@ export function validateLabeledTurns(input: unknown): LabeledTurn[] {
   const rows = input as LabeledTurn[];
   const ids = new Set<string>();
   for (const [index, row] of rows.entries()) {
-    if (!row || typeof row.id !== "string" || !row.id.trim() || ids.has(row.id)) throw new Error(`Invalid or duplicate id at row ${index + 1}`);
+    if (!row || typeof row.id !== "string" || !row.id.trim() || ids.has(row.id))
+      throw new Error(`Invalid or duplicate id at row ${index + 1}`);
     ids.add(row.id);
-    if (!(Number.isFinite(row.confidence) && row.confidence >= 0 && row.confidence <= 1)) throw new Error(`Invalid confidence at row ${index + 1}`);
+    if (!(Number.isFinite(row.confidence) && row.confidence >= 0 && row.confidence <= 1))
+      throw new Error(`Invalid confidence at row ${index + 1}`);
     if (row.quality !== 0 && row.quality !== 1) throw new Error(`quality must be 0 or 1 at row ${index + 1}`);
-    if (!["standard", "direct", "verify", "clarify"].includes(row.stance)) throw new Error(`Invalid stance at row ${index + 1}`);
+    if (!["standard", "direct", "verify", "clarify"].includes(row.stance))
+      throw new Error(`Invalid stance at row ${index + 1}`);
     if (!row.signals || typeof row.signals !== "object") throw new Error(`Missing signals at row ${index + 1}`);
   }
   return rows;
 }
 
-export function runBanditVolumeSimulation(rows: LabeledTurn[], options: { turnsPerUser: number; seeds?: number }): LoopStudyReport["bandit"] {
+export function runBanditVolumeSimulation(
+  rows: LabeledTurn[],
+  options: { turnsPerUser: number; seeds?: number },
+): LoopStudyReport["bandit"] {
   const proxyOutcome = (row: LabeledTurn): boolean | null => {
     if (row.signals.corrected || row.signals.abandoned) return false;
     if (row.signals.falseSuccess) return false;
@@ -119,7 +148,11 @@ export function runBanditVolumeSimulation(rows: LabeledTurn[], options: { turnsP
   const rngBase = 94037;
   const arms = ["standard", "direct", "verify", "clarify"] as const;
   const observed = new Map<string, LabeledTurn[]>();
-  for (const arm of arms) observed.set(arm, rows.filter((row) => row.stance === arm));
+  for (const arm of arms)
+    observed.set(
+      arm,
+      rows.filter((row) => row.stance === arm),
+    );
   const eligible = arms.filter((arm) => (observed.get(arm)?.length ?? 0) > 0);
   const rates = eligible.map((arm) => mean(observed.get(arm)!.map((row) => row.quality)));
   const bestIndex = rates.length ? rates.indexOf(Math.max(...rates)) : -1;
@@ -136,7 +169,10 @@ export function runBanditVolumeSimulation(rows: LabeledTurn[], options: { turnsP
       let draw = -1;
       for (let arm = 0; arm < eligible.length; arm++) {
         const value = rng() ** (1 / alpha[arm]) / (rng() ** (1 / beta[arm]) + 1e-12);
-        if (value > draw) { draw = value; chosen = arm; }
+        if (value > draw) {
+          draw = value;
+          chosen = arm;
+        }
       }
       last = chosen;
       const pool = observed.get(eligible[chosen]) ?? [];
@@ -162,8 +198,11 @@ export function runBanditVolumeSimulation(rows: LabeledTurn[], options: { turnsP
   };
 }
 
-export function analyzeLabeledTurns(rows: LabeledTurn[], options: { turnsPerUser: number; seeds?: number }): LoopStudyReport {
-  const sources = new Set(rows.map((row) => row.signals.objectivePass === undefined ? "human" : "objective"));
+export function analyzeLabeledTurns(
+  rows: LabeledTurn[],
+  options: { turnsPerUser: number; seeds?: number },
+): LoopStudyReport {
+  const sources = new Set(rows.map((row) => (row.signals.objectivePass === undefined ? "human" : "objective")));
   return {
     turns: rows.length,
     labelSource: sources.size > 1 ? "mixed" : sources.has("objective") ? "objective" : "human",
@@ -187,13 +226,18 @@ export function generateLoopStudyMarkdown(report: LoopStudyReport): string {
     "",
     "| Confidence bin | n | Mean confidence | Observed quality |",
     "|---|---:|---:|---:|",
-    ...report.predictor.calibration.map((bin) => `| ${bin.bin} | ${bin.n} | ${bin.confidence.toFixed(3)} | ${bin.quality.toFixed(3)} |`),
+    ...report.predictor.calibration.map(
+      (bin) => `| ${bin.bin} | ${bin.n} | ${bin.confidence.toFixed(3)} | ${bin.quality.toFixed(3)} |`,
+    ),
     "",
     "## Feedback proxy agreement with labels",
     "",
     "| Signal | Labeled turns | Accuracy | Precision | Recall | Positive rate |",
     "|---|---:|---:|---:|---:|---:|",
-    ...report.proxies.map((proxy) => `| ${proxy.name} | ${proxy.labeledTurns} | ${proxy.accuracy.toFixed(3)} | ${proxy.precision.toFixed(3)} | ${proxy.recall.toFixed(3)} | ${proxy.positiveRate.toFixed(3)} |`),
+    ...report.proxies.map(
+      (proxy) =>
+        `| ${proxy.name} | ${proxy.labeledTurns} | ${proxy.accuracy.toFixed(3)} | ${proxy.precision.toFixed(3)} | ${proxy.recall.toFixed(3)} | ${proxy.positiveRate.toFixed(3)} |`,
+    ),
     "",
     `Second-rater subset: ${report.raterAgreement.pairedRatings} turns | Exact agreement: ${report.raterAgreement.exactAgreement.toFixed(3)} | Cohen's kappa: ${report.raterAgreement.cohenKappa.toFixed(3)}`,
     "",

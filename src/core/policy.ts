@@ -10,9 +10,10 @@ export interface PolicyRuntime {
   checkpointIds: string[];
 }
 
-const READ_TOOLS = new Set(["read", "ls", "glob", "grep", "checkpoint"]);
+const READ_TOOLS = new Set(["read", "ls", "glob", "grep", "checkpoint", "open"]);
 const WRITE_TOOLS = new Set(["write", "edit"]);
 const NETWORK_TOOLS = new Set(["web_fetch", "web_read", "search", "browse"]);
+const URL_VALUE_PATTERN = /^https?:\/\//i;
 const PATH_KEYS: Record<string, string[]> = {
   read: ["path"],
   write: ["path"],
@@ -23,6 +24,7 @@ const PATH_KEYS: Record<string, string[]> = {
   shell: ["workdir"],
   process: ["workdir"],
   checkpoint: ["path"],
+  open: ["path"],
 };
 
 export function createDefaultProfile(root = process.cwd()): WorkspaceProfile {
@@ -103,6 +105,14 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
     if (!args[key] && !fallback) {
       if (tool === "checkpoint") continue;
       return deny(runtime, tool, `Missing required path argument: ${key}`);
+    }
+    const rawValue = typeof args[key] === "string" ? args[key].trim() : "";
+    if (URL_VALUE_PATTERN.test(rawValue)) {
+      if (runtime.profile.networkPolicy === "disabled") {
+        return deny(runtime, tool, `Network disabled for profile ${runtime.profile.id}`, rawValue);
+      }
+      record(runtime, tool, true, `${tool} url allowed`, rawValue);
+      continue;
     }
     const path = argPath(args, key, fallback);
     if (tool === "shell" || tool === "process") {

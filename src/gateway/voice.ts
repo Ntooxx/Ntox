@@ -32,3 +32,13 @@ export function voiceAudioError(audio: string, mimeType: string): string | null 
   if (mimeType && !mimeType.startsWith("audio/")) return "Unsupported audio format.";
   return null;
 }
+
+export function dataUrlToVoice(dataUrl: string): { bytes: Uint8Array<ArrayBuffer>; mimeType: string } | null {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return null;
+  const header = dataUrl.slice(0, comma);
+  if (!header.startsWith("data:") || !header.includes(";base64")) return null;
+  const mime = header.slice(5, header.indexOf(";")) || "audio/ogg";
+  const bytes = new Uint8Array(Buffer.from(dataUrl.slice(comma + 1), "base64"));
+  return { bytes, mimeType: mime };
+}

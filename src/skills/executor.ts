@@ -38,7 +38,10 @@ export class SkillExecutor {
   }
 
   private normalizeSkillName(name: string): string {
-    return name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
   }
 
   buildSkillsContext(matches: SkillTriggerMatch[]): string {

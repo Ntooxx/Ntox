@@ -30,3 +30,5 @@
 - Unified skill matching across registry + library systems
 - Tool security: path traversal protection, SSRF blocking, ReDoS prevention, shell blocklist
 - Telegram user allowlist
+- Interactive approvals: tap-to-approve buttons on Telegram (inline keyboard — Allow once / Session / Always / Deny) and WhatsApp (reply buttons — Allow once / Always allow / Deny), replacing typed `/approve` for pending risky commands
+- Auto-learn skills from success: after a clean multi-tool turn, Ntox drafts a reusable skill and proposes it in chat; `/skill save <name>` (all channels) accepts it; cooldown + collision guards, `skillAutoLearnEnabled` config flag

@@ -118,6 +118,32 @@ describe("globTool", () => {
     expect(r.success).toBe(true);
     expect((r.data as string[]).length).toBe(1);
   });
+
+  it("matches case-insensitively", async () => {
+    setup();
+    writeFileSync(join(tmpBase, "AETHER.html"), "");
+    const r = await globTool.execute({ pattern: "**/*aether*", path: tmpBase });
+    expect(r.success).toBe(true);
+    expect((r.data as string[]).some((p) => p.endsWith("AETHER.html"))).toBe(true);
+  });
+
+  it("skips node_modules, .git, and build directories", async () => {
+    setup();
+    writeFileSync(join(tmpBase, "keep.html"), "");
+    mkdirSync(join(tmpBase, "node_modules", "pkg"), { recursive: true });
+    writeFileSync(join(tmpBase, "node_modules", "pkg", "skip.html"), "");
+    mkdirSync(join(tmpBase, ".git", "objects"), { recursive: true });
+    writeFileSync(join(tmpBase, ".git", "objects", "skip.html"), "");
+    mkdirSync(join(tmpBase, "dist"), { recursive: true });
+    writeFileSync(join(tmpBase, "dist", "skip.html"), "");
+    const r = await globTool.execute({ pattern: "**/*.html", path: tmpBase });
+    expect(r.success).toBe(true);
+    const found = r.data as string[];
+    expect(found.some((p) => p.endsWith("keep.html"))).toBe(true);
+    expect(found.some((p) => p.includes("node_modules"))).toBe(false);
+    expect(found.some((p) => p.includes(".git"))).toBe(false);
+    expect(found.some((p) => p.includes("dist"))).toBe(false);
+  });
 });
 
 describe("lsTool", () => {

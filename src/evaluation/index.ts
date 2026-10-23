@@ -15,7 +15,12 @@ export {
 export type { CheckSpec, ObjectiveResult } from "./objective-evaluators.js";
 export { runNecessityChecks } from "./necessity.js";
 export type { NecessityCheckResult, NecessityReport } from "./necessity.js";
-export { analyzeLabeledTurns, generateLoopStudyMarkdown, runBanditVolumeSimulation, validateLabeledTurns } from "./loop-study.js";
+export {
+  analyzeLabeledTurns,
+  generateLoopStudyMarkdown,
+  runBanditVolumeSimulation,
+  validateLabeledTurns,
+} from "./loop-study.js";
 export type { LabeledTurn, LoopStudyReport, ProxyMetric } from "./loop-study.js";
 export { dominantComparison, runLongitudinal } from "./runner.js";
 export type {

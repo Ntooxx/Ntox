@@ -1,0 +1,13 @@
+{
+  "name": "ntox-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NTOX local agent command center",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^45.0.0"
+  }
+}

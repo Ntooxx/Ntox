@@ -12,6 +12,7 @@ export interface GatewayChannel {
   start(): Promise<void>;
   stop(): Promise<void>;
   notifyTyping(chatId: string): Promise<void>;
+  sendApprovalRequest?(chatId: string, command: string): Promise<void>;
 }
 
 export interface SessionStore {

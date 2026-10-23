@@ -156,7 +156,9 @@ export function createWebChannel(config: WebConfig): GatewayChannel {
         if (serveStatic(req, res)) return;
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         const html = readHtml();
-        res.end(liveReload && html.includes("</body>") ? html.replace("</body>", LIVERELOAD_SNIPPET + "</body>") : html);
+        res.end(
+          liveReload && html.includes("</body>") ? html.replace("</body>", LIVERELOAD_SNIPPET + "</body>") : html,
+        );
       });
 
       const { Server } = await import("socket.io");

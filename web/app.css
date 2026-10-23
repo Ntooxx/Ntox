@@ -13,52 +13,52 @@
   --sidebar-w: 268px;
   --ease: cubic-bezier(.4, 0, .2, 1);
 
-  --ok: #3f7d58;
-  --warn: #b4762a;
-  --danger: #b4402e;
+  --ok: #555555;
+  --warn: #777777;
+  --danger: #333333;
 }
 
 [data-theme="light"] {
   color-scheme: light;
   --bg: #ffffff;
-  --sidebar: #f7f6f3;
-  --hover: #eceae3;
-  --active: #e2e0d6;
-  --border: #e5e2d9;
-  --border-strong: #d5d1c5;
-  --text: #1f1d1a;
-  --text-2: #5f5d57;
-  --text-3: #94918a;
-  --bubble: #f0eee6;
-  --accent: #c05e3c;
-  --accent-hover: #a94f30;
-  --accent-soft: rgba(192, 94, 60, .10);
-  --code-bg: #f7f6f2;
-  --shadow: 0 1px 3px rgba(30, 27, 24, .06), 0 8px 24px -12px rgba(30, 27, 24, .14);
-  --shadow-menu: 0 12px 40px -8px rgba(30, 27, 24, .22);
+  --sidebar: #f5f5f5;
+  --hover: #ebebeb;
+  --active: #e0e0e0;
+  --border: #e2e2e2;
+  --border-strong: #cccccc;
+  --text: #111111;
+  --text-2: #555555;
+  --text-3: #858585;
+  --bubble: #eeeeee;
+  --accent: #111111;
+  --accent-hover: #333333;
+  --accent-soft: rgba(0, 0, 0, .08);
+  --code-bg: #f3f3f3;
+  --shadow: 0 1px 3px rgba(0, 0, 0, .06), 0 8px 24px -12px rgba(0, 0, 0, .14);
+  --shadow-menu: 0 12px 40px -8px rgba(0, 0, 0, .22);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #1f1e1c;
-  --sidebar: #171614;
-  --hover: #2b2a27;
-  --active: #34322e;
-  --border: #35332f;
-  --border-strong: #47443f;
-  --text: #f2f0e9;
-  --text-2: #b3b0a8;
-  --text-3: #85827b;
-  --bubble: #302e2a;
-  --accent: #d97a5b;
-  --accent-hover: #e5896b;
-  --accent-soft: rgba(217, 122, 91, .14);
-  --code-bg: #26241f;
+  --bg: #080808;
+  --sidebar: #050505;
+  --hover: #191919;
+  --active: #222222;
+  --border: #292929;
+  --border-strong: #404040;
+  --text: #f5f5f5;
+  --text-2: #b5b5b5;
+  --text-3: #858585;
+  --bubble: #171717;
+  --accent: #f0f0f0;
+  --accent-hover: #ffffff;
+  --accent-soft: rgba(255, 255, 255, .12);
+  --code-bg: #111111;
   --shadow: 0 1px 3px rgba(0, 0, 0, .35), 0 10px 30px -14px rgba(0, 0, 0, .55);
   --shadow-menu: 0 14px 44px -8px rgba(0, 0, 0, .65);
-  --ok: #7fbf95;
-  --warn: #d9a55c;
-  --danger: #e08473;
+  --ok: #c8c8c8;
+  --warn: #999999;
+  --danger: #d0d0d0;
 }
 
 /* ============================================================
@@ -318,7 +318,7 @@ button { font-family: inherit; }
   font-size: 12px;
   font-weight: 600;
   color: #fff;
-  background: linear-gradient(140deg, var(--accent), #8a4b32);
+  background: linear-gradient(140deg, var(--accent), #555555);
 }
 
 .user-meta { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.25; min-width: 0; }
@@ -488,7 +488,7 @@ button { font-family: inherit; }
   font-size: 12px;
   font-weight: 600;
   color: #fff;
-  background: linear-gradient(140deg, var(--accent), #8a4b32);
+  background: linear-gradient(140deg, var(--accent), #555555);
   cursor: pointer;
 }
 
@@ -759,15 +759,15 @@ button { font-family: inherit; }
 }
 .codeblock .cl { display: block; min-height: 1em; }
 
-.tk-k { color: #9a5bb8; }
-.tk-s { color: #4a8a5c; }
+.tk-k { color: #666666; }
+.tk-s { color: #444444; }
 .tk-c { color: var(--text-3); font-style: italic; }
-.tk-n { color: #b0762e; }
-.tk-f { color: #3a6ea8; }
-[data-theme="dark"] .tk-k { color: #c79ae0; }
-[data-theme="dark"] .tk-s { color: #8fcaa3; }
-[data-theme="dark"] .tk-n { color: #dfae6a; }
-[data-theme="dark"] .tk-f { color: #82b2e2; }
+.tk-n { color: #777777; }
+.tk-f { color: #555555; }
+[data-theme="dark"] .tk-k { color: #d0d0d0; }
+[data-theme="dark"] .tk-s { color: #b5b5b5; }
+[data-theme="dark"] .tk-n { color: #999999; }
+[data-theme="dark"] .tk-f { color: #c0c0c0; }
 
 /* ---------- Streaming ---------- */
 .typing { display: inline-flex; gap: 4px; align-items: center; height: 24px; }
@@ -1210,8 +1210,8 @@ button { font-family: inherit; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.diff-line.add { background: rgba(63, 125, 88, .12); color: var(--ok); }
-.diff-line.del { background: rgba(180, 64, 46, .10); color: var(--danger); }
+.diff-line.add { background: rgba(255, 255, 255, .09); color: var(--ok); }
+.diff-line.del { background: rgba(255, 255, 255, .05); color: var(--danger); }
 
 /* ---------- Memory & beliefs ---------- */
 .mem-item, .belief {
@@ -1272,7 +1272,7 @@ button { font-family: inherit; }
   display: grid;
   place-items: start center;
   padding-top: 14vh;
-  background: rgba(20, 18, 15, .38);
+  background: rgba(0, 0, 0, .48);
   backdrop-filter: blur(2px);
   z-index: 80;
 }

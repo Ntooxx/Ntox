@@ -2,8 +2,12 @@ import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { GatewayChannel } from "./types.js";
+import { parseApprovalCallbackData, renderApprovalRequestInteractive } from "./commands.js";
+import { resolveVoiceReply, voiceReplyText } from "./voice-mode.js";
+import { voiceAudioError, dataUrlToVoice } from "./voice.js";
 
 const WHATSAPP_API = "https://graph.facebook.com/v18.0";
+const TYPING_REFRESH_MS = 8000;
 
 interface WhatsAppConfig {
   token: string;
@@ -12,6 +16,8 @@ interface WhatsAppConfig {
   appSecret?: string;
   port: number;
   onMessage: (chatId: string, text: string, username: string) => Promise<string>;
+  transcribe?: (audio: string, mimeType: string) => Promise<string | null>;
+  synthesize?: (text: string) => Promise<string | null>;
 }
 
 interface WebhookEntry {
@@ -35,7 +41,14 @@ interface WebhookMessage {
   audio?: { id?: string };
   document?: { caption?: string; filename?: string; id?: string };
   video?: { caption?: string; id?: string };
+  interactive?: { button_reply?: { id?: string; title?: string } };
 }
+
+const WHATSAPP_APPROVAL_BUTTONS = [
+  { id: "approve:once", title: "Allow once" },
+  { id: "approve:always", title: "Always allow" },
+  { id: "approve:deny", title: "Deny" },
+];
 
 interface WebhookContact {
   wa_id: string;
@@ -96,10 +109,82 @@ async function markAsRead(token: string, phoneNumberId: string, messageId: strin
         messaging_product: "whatsapp",
         status: "read",
         message_id: messageId,
+        typing_indicator: { type: "text" },
       }),
     });
   } catch {
     /* best-effort */
+  }
+}
+
+async function downloadWhatsAppMedia(
+  token: string,
+  mediaId: string,
+): Promise<{ base64: string; mimeType: string } | { error: string }> {
+  const metaRes = await fetch(`${WHATSAPP_API}/${mediaId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!metaRes.ok) return { error: `Media lookup failed (${metaRes.status}).` };
+  const meta = (await metaRes.json().catch(() => null)) as { url?: string; mime_type?: string } | null;
+  if (!meta?.url) return { error: "That voice note has no downloadable URL." };
+
+  const fileRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!fileRes.ok) return { error: `Media download failed (${fileRes.status}).` };
+  const base64 = Buffer.from(await fileRes.arrayBuffer()).toString("base64");
+  const mimeType = meta.mime_type || "audio/ogg";
+  const invalid = voiceAudioError(base64, mimeType.split(";")[0].trim());
+  if (invalid) return { error: invalid };
+  return { base64, mimeType };
+}
+
+async function sendWhatsAppVoiceNote(
+  token: string,
+  phoneNumberId: string,
+  to: string,
+  dataUrl: string,
+): Promise<boolean> {
+  try {
+    const voice = dataUrlToVoice(dataUrl);
+    if (!voice || voice.bytes.length === 0) return false;
+
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", voice.mimeType);
+    form.append("file", new Blob([voice.bytes], { type: voice.mimeType }), "voice.ogg");
+    const uploadRes = await fetch(`${WHATSAPP_API}/${phoneNumberId}/media`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!uploadRes.ok) {
+      console.error(`[whatsapp] media upload failed: ${uploadRes.status}`);
+      return false;
+    }
+    const uploaded = (await uploadRes.json()) as { id?: string };
+    if (!uploaded.id) return false;
+
+    const sendRes = await fetch(`${WHATSAPP_API}/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "audio",
+        audio: { id: uploaded.id },
+      }),
+    });
+    if (!sendRes.ok) {
+      const err = await sendRes.text().catch(() => "unknown");
+      console.error(`[whatsapp] voice send failed: ${sendRes.status} ${err.slice(0, 200)}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error(`[whatsapp] voice reply error: ${e instanceof Error ? e.message : e}`);
+    return false;
   }
 }
 
@@ -128,6 +213,17 @@ export function verifyWhatsAppSignature(rawBody: string, header: string | undefi
 export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
   const { token, phoneNumberId, verifyToken, appSecret, port, onMessage } = config;
   let server: ReturnType<typeof createServer> | null = null;
+  const lastMessageIds = new Map<string, string>();
+  const lastTypingAt = new Map<string, number>();
+
+  async function refreshTyping(chatId: string): Promise<void> {
+    const messageId = lastMessageIds.get(chatId);
+    if (!messageId) return;
+    const now = Date.now();
+    if (now - (lastTypingAt.get(chatId) || 0) < TYPING_REFRESH_MS) return;
+    lastTypingAt.set(chatId, now);
+    await markAsRead(token, phoneNumberId, messageId);
+  }
 
   function handleVerify(req: IncomingMessage, res: ServerResponse): void {
     const url = new URL(req.url || "/", `http://localhost:${port}`);
@@ -174,16 +270,55 @@ export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
           if (metadata?.phone_number_id && metadata.phone_number_id !== phoneNumberId) continue;
 
           for (const msg of change.value.messages) {
-            const text = extractText(msg);
-            if (!text) continue;
-
             const chatId = msg.from;
             const username = getContactName(contacts, chatId);
+            lastMessageIds.set(chatId, msg.id);
 
             try {
-              markAsRead(token, phoneNumberId, msg.id);
+              await markAsRead(token, phoneNumberId, msg.id);
+              lastTypingAt.set(chatId, Date.now());
+
+              let text: string | null = null;
+              let inputIsVoice = false;
+              const approvalScope =
+                msg.type === "interactive" ? parseApprovalCallbackData(msg.interactive?.button_reply?.id || "") : null;
+
+              if (approvalScope) {
+                text = `/approve ${approvalScope}`;
+              } else if (msg.type === "audio" && config.transcribe) {
+                const mediaId = msg.audio?.id;
+                if (!mediaId) {
+                  await sendWhatsAppMessage(token, phoneNumberId, chatId, "That voice note has no media id.");
+                  continue;
+                }
+                const download = await downloadWhatsAppMedia(token, mediaId);
+                if ("error" in download) {
+                  await sendWhatsAppMessage(token, phoneNumberId, chatId, download.error);
+                  continue;
+                }
+                const transcript = await config.transcribe(download.base64, download.mimeType);
+                if (!transcript) {
+                  await sendWhatsAppMessage(
+                    token,
+                    phoneNumberId,
+                    chatId,
+                    "Couldn't transcribe that voice note — try again or type your message.",
+                  );
+                  continue;
+                }
+                text = transcript;
+                inputIsVoice = true;
+              } else {
+                text = extractText(msg);
+              }
+              if (!text) continue;
+
               const response = await onMessage(chatId, text, username);
               await sendWhatsAppMessage(token, phoneNumberId, chatId, response);
+              if (config.synthesize && resolveVoiceReply("whatsapp", chatId, inputIsVoice)) {
+                const spoken = await config.synthesize(voiceReplyText(response));
+                if (spoken) await sendWhatsAppVoiceNote(token, phoneNumberId, chatId, spoken);
+              }
             } catch (e) {
               const errMsg = e instanceof Error ? e.message : String(e);
               console.error(`[whatsapp] processing error: ${errMsg}`);
@@ -205,7 +340,39 @@ export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
   return {
     name: "whatsapp",
 
-    notifyTyping: async () => {},
+    notifyTyping: async (chatId: string) => {
+      try {
+        await refreshTyping(chatId);
+      } catch {
+        /* best-effort: typing failure is non-critical */
+      }
+    },
+
+    sendApprovalRequest: async (chatId: string, command: string) => {
+      const body = renderApprovalRequestInteractive(command).slice(0, 1024);
+      await fetch(`${WHATSAPP_API}/${phoneNumberId}/messages`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: chatId,
+          type: "interactive",
+          interactive: {
+            type: "button",
+            body: { text: body },
+            action: {
+              buttons: WHATSAPP_APPROVAL_BUTTONS.map((b) => ({
+                type: "reply",
+                reply: { id: b.id, title: b.title },
+              })),
+            },
+          },
+        }),
+      });
+    },
 
     async start() {
       const verifyRes = await fetch(`${WHATSAPP_API}/${phoneNumberId}`, {
@@ -237,7 +404,10 @@ export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
 
     async stop() {
       if (server) {
-        await new Promise<void>((r) => server!.close(() => r()));
+        await new Promise<void>((r) => {
+          server!.close(() => r());
+          server!.closeIdleConnections();
+        });
         server = null;
       }
       console.log("[whatsapp] stopped");

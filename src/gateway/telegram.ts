@@ -1,7 +1,37 @@
 import type { GatewayChannel } from "./types.js";
+import { parseApprovalCallbackData, renderApprovalRequestInteractive } from "./commands.js";
+import { resolveVoiceReply, voiceReplyText } from "./voice-mode.js";
+import { voiceAudioError, dataUrlToVoice } from "./voice.js";
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
+const TELEGRAM_FILE_API = "https://api.telegram.org/file/bot";
 const POLL_INTERVAL = 2000;
+
+const EXT_MIME: Record<string, string> = {
+  oga: "audio/ogg",
+  ogg: "audio/ogg",
+  opus: "audio/ogg",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  wav: "audio/wav",
+  webm: "audio/webm",
+};
+
+interface TelegramAudio {
+  file_id: string;
+  mime_type?: string;
+}
+
+interface TelegramCallbackQuery {
+  id: string;
+  from?: { username?: string };
+  message?: {
+    message_id: number;
+    chat: { id: number; type: string; username?: string };
+  };
+  data?: string;
+}
 
 interface TelegramUpdate {
   update_id: number;
@@ -10,12 +40,28 @@ interface TelegramUpdate {
     chat: { id: number; type: string; username?: string };
     from?: { id: number; username?: string };
     text?: string;
+    voice?: TelegramAudio;
+    audio?: TelegramAudio;
   };
+  callback_query?: TelegramCallbackQuery;
 }
+
+const TELEGRAM_APPROVAL_KEYBOARD = {
+  inline_keyboard: [
+    [
+      { text: "Allow once", callback_data: "approve:once" },
+      { text: "Session", callback_data: "approve:session" },
+      { text: "Always", callback_data: "approve:always" },
+      { text: "Deny", callback_data: "approve:deny" },
+    ],
+  ],
+};
 
 interface TelegramConfig {
   token: string;
   onMessage: (chatId: string, text: string, username: string) => Promise<string>;
+  transcribe?: (audio: string, mimeType: string) => Promise<string | null>;
+  synthesize?: (text: string) => Promise<string | null>;
 }
 
 async function apiCall(token: string, method: string, body?: Record<string, unknown>): Promise<Response> {
@@ -45,6 +91,80 @@ async function sendChatAction(token: string, chatId: number, action: string): Pr
     /* best-effort: typing indicator failure is non-critical */
   }
 }
+
+async function answerCallbackQuery(token: string, callbackQueryId: string): Promise<void> {
+  try {
+    await apiCall(token, "answerCallbackQuery", { callback_query_id: callbackQueryId });
+  } catch {
+    /* best-effort */
+  }
+}
+
+async function clearReplyKeyboard(token: string, chatId: number, messageId: number): Promise<void> {
+  try {
+    await apiCall(token, "editMessageReplyMarkup", { chat_id: chatId, message_id: messageId });
+  } catch {
+    /* best-effort */
+  }
+}
+
+async function downloadTelegramFile(
+  token: string,
+  fileId: string,
+): Promise<{ base64: string; mimeType: string } | { error: string }> {
+  const res = await apiCall(token, "getFile", { file_id: fileId });
+  if (!res.ok) return { error: `Telegram getFile failed (${res.status}).` };
+  const data = (await res.json().catch(() => null)) as { ok?: boolean; result?: { file_path?: string } } | null;
+  const filePath = data?.result?.file_path;
+  if (!filePath) return { error: "Telegram could not locate that file." };
+
+  const fileRes = await fetch(`${TELEGRAM_FILE_API}${token}/${filePath}`);
+  if (!fileRes.ok) return { error: `Telegram file download failed (${fileRes.status}).` };
+  const bytes = Buffer.from(await fileRes.arrayBuffer());
+  const base64 = bytes.toString("base64");
+
+  const ext = (filePath.split(".").pop() || "").toLowerCase();
+  const mimeType = EXT_MIME[ext] || "audio/ogg";
+  const invalid = voiceAudioError(base64, mimeType);
+  if (invalid) return { error: invalid };
+  return { base64, mimeType };
+}
+
+async function sendVoiceNote(token: string, chatId: number, dataUrl: string): Promise<boolean> {
+  try {
+    const voice = dataUrlToVoice(dataUrl);
+    if (!voice || voice.bytes.length === 0) return false;
+    const form = new FormData();
+    form.append("chat_id", String(chatId));
+    form.append("voice", new Blob([voice.bytes], { type: voice.mimeType }), "voice.ogg");
+    const res = await fetch(`${TELEGRAM_API}${token}/sendVoice`, { method: "POST", body: form });
+    if (!res.ok) {
+      console.error(`[telegram] sendVoice failed: ${res.status}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error(`[telegram] sendVoice error: ${e instanceof Error ? e.message : String(e)}`);
+    return false;
+  }
+}
+
+const START_TEXT =
+  "Hello! I'm NTOX - your cognitive CLI agent.\n\n" +
+  "Send me any message (text or voice note) and I'll help you with coding, research, analysis, or anything else.\n\n" +
+  "Commands:\n" +
+  "/new - start fresh conversation\n" +
+  "/voice on|off|auto - spoken replies\n" +
+  "/approve once|session|always|deny <command> - allow or block a risky command\n" +
+  "/help - show this message";
+
+const HELP_TEXT =
+  "NTOX Telegram Bot\n\n" +
+  "Just send me a message — text or voice note.\n" +
+  "/new - reset conversation\n" +
+  "/voice on|off|auto - spoken replies\n" +
+  "/approve once|session|always|deny <command> - allow or block a risky command\n" +
+  "/help - this message";
 
 export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
   const { token, onMessage } = config;
@@ -76,46 +196,84 @@ export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
 
       for (const update of data.result) {
         if (update.update_id >= lastUpdateId) lastUpdateId = update.update_id;
-        if (!update.message?.text || !update.message.chat) continue;
-        const chatId = String(update.message.chat.id);
-        const text = update.message.text;
-        const username = update.message.from?.username || update.message.chat.username || "unknown";
+
+        const callbackQuery = update.callback_query;
+        if (callbackQuery?.message?.chat) {
+          await answerCallbackQuery(token, callbackQuery.id);
+          const scope = parseApprovalCallbackData(callbackQuery.data || "");
+          const chatId = String(callbackQuery.message.chat.id);
+          const username = callbackQuery.from?.username || callbackQuery.message.chat.username || "unknown";
+          if (scope) {
+            try {
+              const response = await onMessage(chatId, `/approve ${scope}`, username);
+              await sendMessage(token, callbackQuery.message.chat.id, response);
+              if (config.synthesize && resolveVoiceReply("telegram", chatId, false)) {
+                const spoken = await config.synthesize(voiceReplyText(response));
+                if (spoken) await sendVoiceNote(token, callbackQuery.message.chat.id, spoken);
+              }
+            } catch (e) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              console.error(`[telegram] approval callback error: ${errMsg}`);
+              await sendMessage(token, callbackQuery.message.chat.id, `Error: ${errMsg.slice(0, 200)}`).catch(() => {});
+            }
+          }
+          if (callbackQuery.message.message_id) {
+            await clearReplyKeyboard(token, callbackQuery.message.chat.id, callbackQuery.message.message_id);
+          }
+          continue;
+        }
+
+        const msg = update.message;
+        if (!msg?.chat) continue;
+        const chatId = String(msg.chat.id);
+        const username = msg.from?.username || msg.chat.username || "unknown";
+        let text = msg.text;
+        let inputIsVoice = false;
+        const media = msg.voice || msg.audio;
+
+        if (!text && config.transcribe && media) {
+          const download = await downloadTelegramFile(token, media.file_id);
+          if ("error" in download) {
+            await sendMessage(token, msg.chat.id, download.error).catch(() => {});
+            continue;
+          }
+          const mimeType = media.mime_type || download.mimeType;
+          const transcript = await config.transcribe(download.base64, mimeType);
+          if (!transcript) {
+            await sendMessage(
+              token,
+              msg.chat.id,
+              "Couldn't transcribe that voice note — try again or type your message.",
+            ).catch(() => {});
+            continue;
+          }
+          text = transcript;
+          inputIsVoice = true;
+        }
+
+        if (!text) continue;
 
         if (text.startsWith("/start")) {
-          await sendMessage(
-            token,
-            update.message.chat.id,
-            "Hello! I'm NTOX - your cognitive CLI agent.\n\n" +
-              "Send me any message and I'll help you with coding, research, analysis, or anything else.\n" +
-              "Commands:\n" +
-              "/new - start fresh conversation\n" +
-              "/approve once|session|always|deny <command> - allow or block a risky command\n" +
-              "/help - show this message",
-          );
+          await sendMessage(token, msg.chat.id, START_TEXT);
           continue;
         }
 
         if (text === "/help") {
-          await sendMessage(
-            token,
-            update.message.chat.id,
-            "NTOX Telegram Bot\n\n" +
-              "Just send me a message and I'll respond.\n" +
-              "/new - reset conversation\n" +
-              "/approve once|session|always|deny <command> - allow or block a risky command\n" +
-              "/help - this message",
-          );
+          await sendMessage(token, msg.chat.id, HELP_TEXT);
           continue;
         }
 
         try {
-          const msg = update.message!;
           const response = await onMessage(chatId, text, username);
           await sendMessage(token, msg.chat.id, response);
+          if (config.synthesize && resolveVoiceReply("telegram", chatId, inputIsVoice)) {
+            const spoken = await config.synthesize(voiceReplyText(response));
+            if (spoken) await sendVoiceNote(token, msg.chat.id, spoken);
+          }
         } catch (e) {
           const errMsg = e instanceof Error ? e.message : String(e);
           console.error(`[telegram] processing error: ${errMsg}`);
-          await sendMessage(token, update.message!.chat.id, `Error: ${errMsg.slice(0, 200)}`).catch(() => {});
+          await sendMessage(token, msg.chat.id, `Error: ${errMsg.slice(0, 200)}`).catch(() => {});
         }
       }
     } catch (e) {
@@ -136,6 +294,13 @@ export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
     name: "telegram",
     notifyTyping: async (chatId: string) => {
       await sendChatAction(token, Number(chatId), "typing");
+    },
+    sendApprovalRequest: async (chatId: string, command: string) => {
+      await apiCall(token, "sendMessage", {
+        chat_id: Number(chatId),
+        text: renderApprovalRequestInteractive(command),
+        reply_markup: TELEGRAM_APPROVAL_KEYBOARD,
+      });
     },
     async start() {
       running = true;

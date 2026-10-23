@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'">
+  <title>NTOX Desktop</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="runtime.css">
+  <link rel="stylesheet" href="chat.css">
+</head>
+<body>
+  <div id="ntox-console" class="console"></div>
+  <section id="desktop-chat" class="desktop-chat" aria-label="NTOX desktop chat">
+    <header class="desktop-chat-top"><div class="desktop-chat-brand"><span>NTOX</span><small>DESKTOP / PRIVATE SESSION</small></div><div class="desktop-runtime"><i></i> LOCAL RUNTIME</div><button class="desktop-back" data-back-console>‹ Dashboard</button></header>
+    <aside class="desktop-chat-sidebar"><button id="desktop-new-chat" class="desktop-new-chat">＋ <span>New conversation</span><kbd>Ctrl N</kbd></button><label class="desktop-search"><span>⌕</span><input id="desktop-search" placeholder="Search conversations"></label><div class="desktop-chat-label">RECENT</div><nav id="desktop-conversations"></nav><div class="desktop-chat-profile"><i>N</i><span><b>NTOX Agent</b><small>Local cognitive runtime</small></span><span class="desktop-profile-menu">···</span></div></aside>
+    <main class="desktop-chat-main"><header class="desktop-conversation-head"><div><span class="desktop-session-dot"></span><b id="desktop-session-title">New conversation</b><small>Private to this desktop app</small></div><button id="desktop-clear-chat" title="Clear conversation">Clear</button></header><div id="desktop-messages" class="desktop-messages" aria-live="polite"><div class="desktop-welcome"><div class="desktop-welcome-mark">N</div><span class="eyebrow">YOUR LOCAL NTOX AGENT</span><h1>What are we<br>working on?</h1><p>This is the desktop agent’s private chat. Its conversations are separate from the NTOX web app.</p><div class="desktop-suggestions"><button data-prompt="Give me a quick briefing of my NTOX workspace."><b>Workspace briefing</b><small>Summarize what needs attention</small></button><button data-prompt="Help me plan a multi-agent research task."><b>Plan with agents</b><small>Turn an idea into a coordinated task</small></button></div></div></div><form id="desktop-chat-form" class="desktop-composer"><textarea id="desktop-message-input" rows="1" placeholder="Message your desktop agent…" aria-label="Message your desktop agent"></textarea><div class="desktop-composer-bottom"><span><i></i> Runs locally · NTOX memory enabled</span><button type="submit" aria-label="Send message">↑</button></div></form><p class="desktop-chat-note">NTOX can make mistakes. Review important changes before applying them.</p></main>
+    <aside class="desktop-context"><div class="desktop-context-head"><span class="eyebrow">AGENT CONTEXT</span><button aria-label="Close context panel">×</button></div><article><span class="eyebrow">ACTIVE NTOX AGENTS</span><div id="desktop-context-agents"><div class="context-agent"><i>N</i><span><b>Connecting</b><small>Local runtime</small></span><em></em></div></div><button class="context-link" data-back-console>Manage agents →</button></article><article><span class="eyebrow">MEMORY</span><b class="context-stat" id="desktop-memory-count">Checking runtime memory</b><small>Desktop chat uses the configured local NTOX memory services.</small><button class="context-link" data-back-console>Explore memory →</button></article><article><span class="eyebrow">SESSION</span><div class="context-kv"><span>Workspace</span><b>Local</b></div><div class="context-kv"><span>Privacy</span><b>Desktop only</b></div><div class="context-kv"><span>Tools</span><b>Runtime policy</b></div></article></aside>
+  </section>
+  <button class="back-to-console" data-back-console>◉ Dashboard</button>
+  <script src="dashboard.js"></script>
+  <script src="chat.js"></script>
+</body>
+</html>
