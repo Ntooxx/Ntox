@@ -141,6 +141,7 @@ export async function runAgentStream(
     onReflection: (reflection) => callbacks.onReflection?.(reflection),
     onCorrectionDetected: (topicKey, correction) => callbacks.onCorrectionDetected?.(topicKey, correction),
     onSkillTriggered: (name, confidence) => callbacks.onSkillTriggered?.(name, confidence),
+    onSkillProposal: (skill) => callbacks.onSkillProposal?.(skill),
     onProactiveSuggestion: (suggestion) => callbacks.onProactiveSuggestion?.(suggestion),
     onCognitive: (summary) => callbacks.onCognitive?.(summary),
     onStyleGuidance: (guidance) => callbacks.onStyleGuidance?.(guidance),

@@ -2,8 +2,15 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Agent, commitsToImmediateAction, extractLegacyXmlToolCalls } from "./agent.js";
+import {
+  Agent,
+  commitsToImmediateAction,
+  extractLegacyXmlToolCalls,
+  unfinishedPlanTasks,
+  responseAddressesFailures,
+} from "./agent.js";
 import type { AgentConfig, AgentCallbacks } from "./agent.js";
+import { planTool, loadPlan } from "../tools/plan.js";
 import type { ToolCall } from "../types/index.js";
 import { Mind } from "../mind/mind.js";
 import { LLMClient } from "./llm.js";
@@ -379,10 +386,10 @@ describe("Agent — run() integration", () => {
         ) => AsyncGenerator<{ delta: string }>;
       }
     ).stream = async function* (_messages, system, tools) {
-        systemPrompt = system;
-        availableTools = tools.map((tool) => tool.function.name);
-        yield { delta: "I found related work." };
-      };
+      systemPrompt = system;
+      availableTools = tools.map((tool) => tool.function.name);
+      yield { delta: "I found related work." };
+    };
 
     await drainRun(new Agent(cfg), "Is my idea novel, or has anyone done it?");
 
@@ -405,11 +412,12 @@ describe("Agent — run() integration", () => {
     vi.spyOn(webFetchTool, "execute").mockResolvedValue({ success: false, error: "offline" });
     const cfg = makeConfig();
     let systemPrompt = "";
-    (cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }).stream =
-      async function* (_messages, system) {
-        systemPrompt = system;
-        yield { delta: "The source could not be verified." };
-      };
+    (
+      cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }
+    ).stream = async function* (_messages, system) {
+      systemPrompt = system;
+      yield { delta: "The source could not be verified." };
+    };
 
     await drainRun(new Agent(cfg), "Has anyone studied this? Is it novel?");
 
@@ -422,11 +430,12 @@ describe("Agent — run() integration", () => {
   it("adds recommendation guidance only to advice and next-build questions", async () => {
     const cfg = makeConfig();
     let systemPrompt = "";
-    (cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }).stream =
-      async function* (_messages, system) {
-        systemPrompt = system;
-        yield { delta: "Start with a small measurable change." };
-      };
+    (
+      cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }
+    ).stream = async function* (_messages, system) {
+      systemPrompt = system;
+      yield { delta: "Start with a small measurable change." };
+    };
 
     await drainRun(new Agent(cfg), "What should I build next?");
 
@@ -438,11 +447,12 @@ describe("Agent — run() integration", () => {
     vi.spyOn(searchTool, "execute").mockResolvedValue({ success: false, error: "offline" });
     const cfg = makeConfig();
     let systemPrompt = "";
-    (cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }).stream =
-      async function* (_messages, system) {
-        systemPrompt = system;
-        yield { delta: "I cannot verify novelty." };
-      };
+    (
+      cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }
+    ).stream = async function* (_messages, system) {
+      systemPrompt = system;
+      yield { delta: "I cannot verify novelty." };
+    };
 
     await drainRun(new Agent(cfg), "Is this research idea original?");
 
@@ -470,11 +480,12 @@ describe("Agent — run() integration", () => {
     });
     cfg.cognitiveKernel.setEnabled(true);
     const prompts: string[] = [];
-    (cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }).stream =
-      async function* (_messages, system) {
-        prompts.push(system);
-        yield { delta: "ok" };
-      };
+    (
+      cfg.llm as unknown as { stream: (messages: unknown[], system: string) => AsyncGenerator<{ delta: string }> }
+    ).stream = async function* (_messages, system) {
+      prompts.push(system);
+      yield { delta: "ok" };
+    };
 
     const agent = new Agent(cfg);
     await drainRun(agent, "What is 2 plus 2?");
@@ -660,6 +671,93 @@ describe("Agent — run() integration", () => {
     expect(trace!.toolCalls[1].success).toBe(false);
     expect(trace!.toolCalls[1].reason).toBe("repeat-skipped");
     expect(trace!.toolCalls[1].error).toContain("Repeated failed tool call skipped");
+  });
+
+  it("nudges the model when consecutive successful batches return the same information", async () => {
+    const tools = new ToolRegistry();
+    const labels: string[] = [];
+    tools.register({
+      name: "probe",
+      description: "probe",
+      parameters: { type: "object", properties: {}, required: [] },
+      execute: async (args) => {
+        labels.push(String(args.label));
+        return { success: true, data: `${args.label}: {"secure":false,"gpu":false}` };
+      },
+    });
+    const cfg = makeConfig({ tools });
+    let calls = 0;
+    (
+      cfg.llm as unknown as {
+        stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }>;
+      }
+    ).stream = async function* () {
+      calls++;
+      if (calls <= 4) {
+        const variant = calls % 2 === 0 ? `edge-swiftshader${calls}` : `edge-vulkan-ss${calls}`;
+        yield {
+          delta: "",
+          toolCalls: [{ id: `tc_${calls}`, name: "probe", arguments: JSON.stringify({ label: variant }) }],
+        };
+        return;
+      }
+      yield { delta: "navigator.gpu is unavailable in this context." };
+    };
+    const agent = new Agent(cfg);
+    const result = await drainRun(agent, "create a webgpu probe script");
+
+    expect(labels).toHaveLength(4);
+    expect(calls).toBe(5);
+    expect(agent.getMessages().some((m) => m.content.includes("[REPEAT GUARD]"))).toBe(true);
+    expect(agent.getLastTrace()!.toolCalls.some((tc) => tc.reason === "repeat-detected")).toBe(true);
+    expect(result.response).toContain("unavailable");
+  });
+
+  it("does not fire the repeat guard when batches carry different information", async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "probe",
+      description: "probe",
+      parameters: { type: "object", properties: {}, required: [] },
+      execute: async (args) => ({ success: true, data: String(args.label) }),
+    });
+    const cfg = makeConfig({ tools });
+    let calls = 0;
+    (
+      cfg.llm as unknown as {
+        stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }>;
+      }
+    ).stream = async function* () {
+      calls++;
+      if (calls <= 5) {
+        yield {
+          delta: "",
+          toolCalls: [
+            {
+              id: `tc_${calls}`,
+              name: "probe",
+              arguments: JSON.stringify({
+                label: [
+                  "mango river crimson",
+                  "tundra amber lantern",
+                  "quartz cobalt meadow",
+                  "pepper granite aviary",
+                  "saffron marble delta",
+                ][calls - 1],
+              }),
+            },
+          ],
+        };
+        return;
+      }
+      yield { delta: "Done." };
+    };
+    const agent = new Agent(cfg);
+    await drainRun(agent, "create a webgpu probe script");
+
+    expect(calls).toBe(6);
+    expect(agent.getMessages().some((m) => m.content.includes("[REPEAT GUARD]"))).toBe(false);
+    expect(agent.getLastTrace()!.toolCalls.some((tc) => tc.reason === "repeat-detected")).toBe(false);
   });
 
   it("runs parallel-safe tool calls concurrently", async () => {
@@ -1266,5 +1364,340 @@ describe("Agent — legacy XML tool calls and action nudges", () => {
     expect(executed).toBe(1);
     expect(seenPrompts.some((p) => p.includes("[ACTION REQUIRED]"))).toBe(true);
     expect(response).toContain("Done");
+  });
+});
+
+describe("Agent — autonomous continuation", () => {
+  const realNtoxDir = process.env.NTOX_DIR;
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "ntox-autonomy-"));
+    process.env.NTOX_DIR = tempDir;
+  });
+
+  afterEach(() => {
+    if (realNtoxDir === undefined) delete process.env.NTOX_DIR;
+    else process.env.NTOX_DIR = realNtoxDir;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function scriptedStream(
+    cfg: AgentConfig,
+    steps: { delta?: string; toolCalls?: { id: string; name: string; arguments: string }[] }[],
+  ): { count: () => number } {
+    let calls = 0;
+    (
+      cfg.llm as unknown as {
+        stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }>;
+      }
+    ).stream = async function* () {
+      const step = steps[Math.min(calls, steps.length - 1)];
+      calls++;
+      const chunk: { delta: string; toolCalls?: { id: string; name: string; arguments: string }[] } = {
+        delta: step.delta ?? "",
+      };
+      if (step.toolCalls) chunk.toolCalls = step.toolCalls;
+      yield chunk;
+    };
+    return { count: () => calls };
+  }
+
+  async function runTurn(agent: Agent, input: string): Promise<string> {
+    let response = "";
+    const stream = agent.run(input, {
+      onToken: (t) => {
+        response += t;
+      },
+      onToolCall: () => {},
+      onToolResult: () => {},
+      onUsage: () => {},
+      onThinking: () => {},
+    } as AgentCallbacks);
+    for await (const _ of stream) {
+      /* drain */
+    }
+    return response;
+  }
+
+  it("keeps working while the plan has unfinished tasks", async () => {
+    await planTool.execute(
+      { action: "create", goal: "ship feature", tasks: ["do the work"] },
+      { sessionId: "test-session" },
+    );
+    const tools = new ToolRegistry();
+    tools.register(planTool);
+    let probed = 0;
+    tools.register({
+      name: "probe",
+      description: "probe",
+      parameters: { type: "object", properties: {}, required: [] },
+      execute: async () => {
+        probed++;
+        return { success: true, data: "ok" };
+      },
+    });
+    const cfg = makeConfig({ tools });
+    const script = scriptedStream(cfg, [
+      { delta: "Standing by." },
+      { toolCalls: [{ id: "tc_1", name: "probe", arguments: "{}" }] },
+      { toolCalls: [{ id: "tc_2", name: "plan", arguments: JSON.stringify({ action: "complete", taskId: "t1" }) }] },
+      { delta: "All tasks are done." },
+    ]);
+    const agent = new Agent(cfg);
+    const response = await runTurn(agent, "what should I do?");
+    expect(script.count()).toBe(4);
+    expect(probed).toBe(1);
+    expect(response).toContain("All tasks are done.");
+    expect(agent.getMessages().some((m) => m.content.includes("[AUTO-CONTINUE]"))).toBe(true);
+    expect(loadPlan("test-session")?.tasks[0].status).toBe("completed");
+  });
+
+  it("ends the turn immediately when there is no plan and no failures", async () => {
+    const cfg = makeConfig({ tools: new ToolRegistry() });
+    const script = scriptedStream(cfg, [{ delta: "Here is your answer." }]);
+    const agent = new Agent(cfg);
+    const response = await runTurn(agent, "what should I do?");
+    expect(script.count()).toBe(1);
+    expect(response).toContain("Here is your answer.");
+  });
+
+  it("forces an explanation when tool failures go unaddressed", async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "probe",
+      description: "failing probe",
+      parameters: { type: "object", properties: {}, required: [] },
+      execute: async () => ({ success: false, error: "boom" }),
+    });
+    const cfg = makeConfig({ tools });
+    const script = scriptedStream(cfg, [
+      { toolCalls: [{ id: "tc_1", name: "probe", arguments: "{}" }] },
+      { delta: "Everything works perfectly!" },
+      { delta: "The probe failed with: boom. Nothing more I can do." },
+    ]);
+    const agent = new Agent(cfg);
+    const response = await runTurn(agent, "what should I do?");
+    expect(script.count()).toBe(3);
+    expect(response).toContain("failed with");
+    expect(agent.getMessages().some((m) => m.content.includes("[EXPLAIN FAILURES]"))).toBe(true);
+  });
+
+  it("emits a visible stop notice when the attempt limit is hit", async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "probe",
+      description: "probe",
+      parameters: { type: "object", properties: {}, required: [] },
+      execute: async () => ({ success: true, data: "ok" }),
+    });
+    const cfg = makeConfig({ tools });
+    let calls = 0;
+    (
+      cfg.llm as unknown as {
+        stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }>;
+      }
+    ).stream = async function* () {
+      calls++;
+      yield {
+        delta: "",
+        toolCalls: [{ id: `tc_${calls}`, name: "probe", arguments: JSON.stringify({ n: calls }) }],
+      };
+    };
+    const agent = new Agent(cfg);
+    const response = await runTurn(agent, "what should I do?");
+    expect(calls).toBeGreaterThan(10);
+    expect(response).toContain("work limit");
+  });
+
+  it("responseAddressesFailures spots addressed and unaddressed replies", () => {
+    const failures = [{ name: "shell", error: "boom" }];
+    expect(responseAddressesFailures("any reply", [])).toBe(true);
+    expect(responseAddressesFailures("Everything works perfectly!", failures)).toBe(false);
+    expect(responseAddressesFailures("The command failed.", failures)).toBe(true);
+    const denied = [{ name: "read", error: "POLICY_DENIED: path outside allowed roots" }];
+    expect(responseAddressesFailures("The path policy denied it.", denied)).toBe(true);
+    expect(responseAddressesFailures("Sure — the plan is 50% done!", denied)).toBe(false);
+  });
+
+  it("unfinishedPlanTasks reflects plan state", async () => {
+    expect(unfinishedPlanTasks("test-session")).toEqual([]);
+    await planTool.execute({ action: "create", goal: "g", tasks: ["a", "b"] }, { sessionId: "test-session" });
+    expect(unfinishedPlanTasks("test-session").map((t) => t.id)).toEqual(["t1", "t2"]);
+    await planTool.execute({ action: "complete", taskId: "t1" }, { sessionId: "test-session" });
+    expect(unfinishedPlanTasks("test-session").map((t) => t.id)).toEqual(["t2"]);
+  });
+});
+
+describe("Agent — skill auto-learn", () => {
+  async function waitFor(condition: () => boolean, timeoutMs = 2000): Promise<void> {
+    const start = Date.now();
+    while (!condition()) {
+      if (Date.now() - start > timeoutMs) throw new Error("waitFor timeout");
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
+  }
+
+  const PROPOSAL_JSON =
+    '{"name":"migrate-tests","description":"Migrate a test suite","category":"coding","prompt":"Read config, migrate files step by step.","triggers":["migrate tests"],"tools":["fake_read","fake_shell"],"examples":["migrate tests"]}';
+
+  function registerSuccessTools(registry: ToolRegistry): void {
+    for (const name of ["fake_read", "fake_shell"]) {
+      registry.register({
+        name,
+        description: name,
+        parameters: { type: "object", properties: {}, required: [] },
+        execute: async () => ({ success: true, data: "ok" }),
+      });
+    }
+  }
+
+  it("proposes a skill after a successful multi-tool turn without saving it", async () => {
+    const tools = new ToolRegistry();
+    registerSuccessTools(tools);
+    const cfg = makeConfig({ tools, skillRegistry: { list: () => [] } as unknown as SkillRegistry });
+    let calls = 0;
+    (
+      cfg.llm as unknown as {
+        stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }>;
+      }
+    ).stream = async function* () {
+      calls++;
+      if (calls === 1) {
+        yield { delta: "", toolCalls: [{ id: "tc_1", name: "fake_read", arguments: "{}" }] };
+        return;
+      }
+      if (calls === 2) {
+        yield { delta: "", toolCalls: [{ id: "tc_2", name: "fake_shell", arguments: "{}" }] };
+        return;
+      }
+      if (calls === 3) {
+        yield { delta: "I migrated every file, fixed the specs, and the suite passes. ".repeat(6) };
+        return;
+      }
+      yield { delta: PROPOSAL_JSON };
+    };
+    const proposals: string[] = [];
+    const agent = new Agent(cfg);
+    const stream = agent.run("migrate our tests to the new runner", {
+      onToken: () => {},
+      onToolCall: () => {},
+      onToolResult: () => {},
+      onUsage: () => {},
+      onThinking: () => {},
+      onSkillProposal: (skill) => proposals.push(skill.name),
+    } as AgentCallbacks);
+    for await (const _ of stream) {
+      /* drain */
+    }
+    await waitFor(() => proposals.length > 0);
+    expect(proposals).toEqual(["migrate-tests"]);
+    expect(calls).toBe(4);
+  });
+
+  it("stays quiet on the next turn via the cooldown", async () => {
+    const tools = new ToolRegistry();
+    registerSuccessTools(tools);
+    const cfg = makeConfig({ tools, skillRegistry: { list: () => [] } as unknown as SkillRegistry });
+    let calls = 0;
+    (
+      cfg.llm as unknown as {
+        stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }>;
+      }
+    ).stream = async function* () {
+      calls++;
+      if (calls === 1 || calls === 5) {
+        yield { delta: "", toolCalls: [{ id: `tc_${calls}`, name: "fake_read", arguments: "{}" }] };
+        return;
+      }
+      if (calls === 2 || calls === 6) {
+        yield { delta: "", toolCalls: [{ id: `tc_${calls}`, name: "fake_shell", arguments: "{}" }] };
+        return;
+      }
+      if (calls === 3 || calls === 7) {
+        yield { delta: "I migrated every file, fixed the specs, and the suite passes. ".repeat(6) };
+        return;
+      }
+      yield { delta: PROPOSAL_JSON };
+    };
+    const proposals: string[] = [];
+    const agent = new Agent(cfg);
+    const callbacks = {
+      onToken: () => {},
+      onToolCall: () => {},
+      onToolResult: () => {},
+      onUsage: () => {},
+      onThinking: () => {},
+      onSkillProposal: (skill: { name: string }) => proposals.push(skill.name),
+    } as AgentCallbacks;
+    const first = agent.run("migrate our tests to the new runner", callbacks);
+    for await (const _ of first) {
+      /* drain */
+    }
+    await waitFor(() => proposals.length > 0);
+    const second = agent.run("migrate our tests to the new runner again", callbacks);
+    for await (const _ of second) {
+      /* drain */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(proposals).toEqual(["migrate-tests"]);
+    expect(calls).toBe(7);
+  });
+
+  it("suppresses proposals that collide with existing skills", async () => {
+    const tools = new ToolRegistry();
+    registerSuccessTools(tools);
+    const conflicting = [
+      {
+        name: "migrate-tests",
+        description: "existing",
+        category: "coding",
+        prompt: "old steps",
+        triggers: ["migrate tests"],
+        tools: [],
+        examples: [],
+        created: 1,
+        updated: 1,
+        usageCount: 0,
+      },
+    ];
+    const cfg = makeConfig({ tools, skillRegistry: { list: () => conflicting } as unknown as SkillRegistry });
+    let calls = 0;
+    (
+      cfg.llm as unknown as {
+        stream: () => AsyncGenerator<{ delta: string; toolCalls?: { id: string; name: string; arguments: string }[] }>;
+      }
+    ).stream = async function* () {
+      calls++;
+      if (calls === 1) {
+        yield { delta: "", toolCalls: [{ id: "tc_1", name: "fake_read", arguments: "{}" }] };
+        return;
+      }
+      if (calls === 2) {
+        yield { delta: "", toolCalls: [{ id: "tc_2", name: "fake_shell", arguments: "{}" }] };
+        return;
+      }
+      if (calls === 3) {
+        yield { delta: "I migrated every file, fixed the specs, and the suite passes. ".repeat(6) };
+        return;
+      }
+      yield { delta: PROPOSAL_JSON };
+    };
+    const proposals: string[] = [];
+    const agent = new Agent(cfg);
+    const stream = agent.run("migrate our tests to the new runner", {
+      onToken: () => {},
+      onToolCall: () => {},
+      onToolResult: () => {},
+      onUsage: () => {},
+      onThinking: () => {},
+      onSkillProposal: (skill) => proposals.push(skill.name),
+    } as AgentCallbacks);
+    for await (const _ of stream) {
+      /* drain */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(proposals).toEqual([]);
+    expect(calls).toBe(4);
   });
 });

@@ -20,6 +20,7 @@ import { checkpointTool } from "../tools/checkpoint.js";
 import { planTool } from "../tools/plan.js";
 import { processTool } from "../tools/process.js";
 import { browseTool } from "../tools/browse.js";
+import { openTool } from "../tools/open.js";
 import { jobTrackerTool } from "../tools/job-tracker.js";
 import { createProfileEvalTool } from "../tools/profile-eval.js";
 import { MemoryStore } from "../memory/episodic.js";
@@ -42,7 +43,7 @@ import { NtoxAliveHostAdapters } from "../alive/host.js";
 import { JsonFileAliveStore } from "../alive/store.js";
 import { NtoxAliveBridge } from "../alive/ntox.js";
 import { Mind } from "../mind/mind.js";
-import type { NtoxConfig, CostUsage, WorkspaceProfile } from "../types/index.js";
+import type { NtoxConfig, CostUsage, WorkspaceProfile, SkillDefinition } from "../types/index.js";
 import type { SessionStore } from "../gateway/types.js";
 import { createPolicyRuntime, enforceToolPolicy, getDefaultProfile, type PolicyRuntime } from "./policy.js";
 import { getNtoxDir, loadCachedModels } from "./config.js";
@@ -144,6 +145,7 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
     planTool,
     processTool,
     browseTool,
+    openTool,
     jobTrackerTool,
     createProfileEvalTool(llm),
   ]) {
@@ -233,6 +235,8 @@ export function createAgentConfig(
     strategyEnabled: config.metaStrategyEnabled,
     mistakesEnabled: config.metaMistakesEnabled,
     minConfidence: config.metaMinConfidence,
+    skillAutoLearn: config.skillAutoLearnEnabled,
+    skillRegistry: infra.skillRegistry,
     maxContextMessages: 120,
     contextTokenBudget: 300_000,
     ...overrides,
@@ -349,6 +353,7 @@ export interface MessageOutput {
   onStrategy?(type: Parameters<NonNullable<AgentCallbacks["onStrategy"]>>[0]): void;
   onCorrectionDetected?(topicKey: string, correction: string): void;
   onSkillTriggered?(skillName: string, confidence: number): void;
+  onSkillProposal?(skill: SkillDefinition): void;
   onAliveAction?(action: Parameters<NonNullable<AgentCallbacks["onAliveAction"]>>[0]): void;
   onEnd?(): void;
   flush(): string;
@@ -399,6 +404,7 @@ export async function runAgentMessage(
       onStrategy: (type) => output.onStrategy?.(type),
       onCorrectionDetected: (topicKey, correction) => output.onCorrectionDetected?.(topicKey, correction),
       onSkillTriggered: (name, confidence) => output.onSkillTriggered?.(name, confidence),
+      onSkillProposal: (skill) => output.onSkillProposal?.(skill),
       onAliveAction: (action) => output.onAliveAction?.(action),
     };
 
@@ -494,6 +500,9 @@ export class GatewayOutput implements MessageOutput {
   }
   onSkillTriggered(skillName: string, confidence: number): void {
     this.externalOnEvent?.({ type: "skill", skillName, confidence });
+  }
+  onSkillProposal(skill: SkillDefinition): void {
+    this.externalOnEvent?.({ type: "skill_proposal", skill });
   }
   onAliveAction(action: Parameters<NonNullable<AgentCallbacks["onAliveAction"]>>[0]): void {
     this.externalOnEvent?.({ type: "alive", action });

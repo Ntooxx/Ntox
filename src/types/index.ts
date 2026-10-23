@@ -105,6 +105,8 @@ export interface NtoxConfig {
   metaReflectionEnabled: boolean;
   metaMistakesEnabled: boolean;
   metaMinConfidence: number;
+  skillAutoLearnEnabled: boolean;
+  skillMarketplaceIndex: string;
   cognitiveEnabled: boolean;
   theoryEnabled: boolean;
   animationLevel: "off" | "minimal" | "full";
@@ -348,6 +350,9 @@ export interface SkillDefinition {
   created: number;
   updated: number;
   usageCount: number;
+  version?: number;
+  lastUsedAt?: number;
+  steps?: RoutineStep[];
   domain?: string;
   importance?: number;
   contentPath?: string;
@@ -359,6 +364,18 @@ export interface SkillDefinition {
 export interface SkillTriggerMatch {
   skill: SkillDefinition;
   confidence: number;
+}
+
+export type RoutineStepKind = "tool" | "llm" | "skill";
+
+export interface RoutineStep {
+  kind: RoutineStepKind;
+  name?: string;
+  tool?: string;
+  args?: Record<string, string | number | boolean>;
+  prompt?: string;
+  skill?: string;
+  saveAs?: string;
 }
 
 export interface AgentToolTrace {

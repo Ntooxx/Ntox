@@ -6,6 +6,13 @@ import { classifyQuery, getStrategyPrompt } from "../meta/strategist.js";
 import { Reflector } from "../meta/reflector.js";
 import { MistakeJournal, isUserCorrection, extractCorrection } from "../meta/mistakes.js";
 import { SkillExecutor } from "../skills/executor.js";
+import { SkillRegistry } from "../skills/registry.js";
+import {
+  findTriggerConflict,
+  proposeSkillFromTurn,
+  shouldProposeSkill,
+  MAX_SKILL_PROPOSALS_PER_SESSION,
+} from "../skills/auto-learner.js";
 import { Analytics } from "../meta/analytics.js";
 import { ProactiveEngine, type ProactiveSuggestion } from "../meta/proactive.js";
 import { ObservationEngine } from "../meta/observation.js";
@@ -60,6 +67,7 @@ import type {
   ToolContext,
   QueryType,
   Reflection,
+  SkillDefinition,
   SkillTriggerMatch,
   ThinkPhase,
   CognitiveTrace,
@@ -70,7 +78,7 @@ import type {
 import { checkForSurfaceReasoning } from "../research/false-success.js";
 import { searchTool } from "../tools/search.js";
 import { webFetchTool } from "../tools/web.js";
-import { renderPlanContext } from "../tools/plan.js";
+import { renderPlanContext, loadPlan, type PlanTask } from "../tools/plan.js";
 import { deleteSessionSnapshot, loadSessionSnapshot, saveSessionSnapshot } from "./session-store.js";
 import { resetPolicyRuntime, type PolicyRuntime } from "./policy.js";
 import {
@@ -90,19 +98,57 @@ import { modelCritique } from "../cognition/model-critique.js";
 import { extractOpenLoops, normalizeLoopGoal } from "../alive/open-loops.js";
 import type { ContextKind, MindTurnHandle, TurnSignals } from "../mind/types.js";
 
-const RESEARCH_QUESTION_PATTERN = /\b(novel(?:ty)?|original(?:ity)?|saturat(?:ed|ion)|prior work|related work|literature|state of the art|research gap|already (?:been )?done|has anyone|anyone (?:working|studying)|contribute to (?:ai|artificial intelligence) research|recent papers?)\b/i;
-const RECOMMENDATION_QUESTION_PATTERN = /\b(what should i|what do you recommend|what would you recommend|should i|advise me|personal advice|what to build next|what would you build next|what should we build|next feature|which option|best next step)\b/i;
+const RESEARCH_QUESTION_PATTERN =
+  /\b(novel(?:ty)?|original(?:ity)?|saturat(?:ed|ion)|prior work|related work|literature|state of the art|research gap|already (?:been )?done|has anyone|anyone (?:working|studying)|contribute to (?:ai|artificial intelligence) research|recent papers?)\b/i;
+const RECOMMENDATION_QUESTION_PATTERN =
+  /\b(what should i|what do you recommend|what would you recommend|should i|advise me|personal advice|what to build next|what would you build next|what should we build|next feature|which option|best next step)\b/i;
 const DEFAULT_SYSTEM_CONTEXT_TOKEN_BUDGET = 6000;
 const TOOL_CONCURRENCY = 4;
 const MAX_TOOL_CALLS_PER_RESPONSE = 8;
-const MAX_TOOL_CALLS_PER_TURN = 24;
+const MAX_TOOL_CALLS_PER_TURN = 40;
 const MAX_WEB_TOOL_CALLS_PER_TURN = 8;
 const WEB_TOOL_NAMES = new Set(["search", "web_fetch", "web_read", "browse"]);
 const MAX_ACTION_NUDGES = 2;
+const MAX_TURN_ATTEMPTS = 30;
+const MAX_PLAN_CONTINUES = 8;
+const MAX_FAILURE_EXPLAINS = 1;
 
 interface ToolCallBudget {
   total: number;
   web: number;
+}
+
+interface RepeatWatch {
+  names: string | null;
+  tokens: Set<string> | null;
+  strikes: number;
+  notifiedAt: number;
+}
+
+const REPEAT_SIMILARITY_THRESHOLD = 0.6;
+const REPEAT_STRIKES_BEFORE_NUDGE = 3;
+const REPEAT_MIN_TOKENS = 4;
+
+function resultTokens(content: string): Set<string> {
+  const tokens = content
+    .toLowerCase()
+    .replace(/\d+/g, " ")
+    .split(/[^a-z]+/)
+    .filter((token) => token.length >= 3);
+  return new Set(tokens);
+}
+
+function toolResultSignature(result: ToolResult): string {
+  if (typeof result.data === "string") return result.data;
+  if (result.data !== undefined && result.data !== null) return JSON.stringify(result.data);
+  return result.error ?? "";
+}
+
+function tokenSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const token of a) if (b.has(token)) shared++;
+  return shared / (a.size + b.size - shared);
 }
 
 const LEGACY_TOOL_CALL_BLOCK = /<?\s*\/?\s*tool_call\s*>?\s*(\{[\s\S]*?\})\s*<?\s*\/?\s*tool_call\s*>?/gi;
@@ -122,6 +168,71 @@ const ACTION_COMMITMENT_PATTERNS = [
 export function commitsToImmediateAction(text: string): boolean {
   if (!text || text.length > 2000) return false;
   return ACTION_COMMITMENT_PATTERNS.some((p) => p.test(text));
+}
+
+export function unfinishedPlanTasks(sessionId: string): PlanTask[] {
+  try {
+    const plan = loadPlan(sessionId);
+    if (!plan) return [];
+    return plan.tasks.filter((task) => task.status === "pending" || task.status === "in_progress");
+  } catch {
+    return [];
+  }
+}
+
+export function collectTurnFailures(
+  trace: { toolCalls: AgentToolTrace[] } | null | undefined,
+): { name: string; error: string }[] {
+  if (!trace) return [];
+  const seen = new Set<string>();
+  const failures: { name: string; error: string }[] = [];
+  for (const call of trace.toolCalls) {
+    if (call.success !== false || !call.error || call.reason) continue;
+    const key = `${call.name}:${call.error}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    failures.push({ name: call.name, error: call.error });
+  }
+  return failures;
+}
+
+const FAILURE_ADDRESS_MARKERS = [
+  /\bfail/i,
+  /\berror\b/i,
+  /could ?n[o']t|couldn'?t/i,
+  /can ?n[o']t|can't/i,
+  /\bunable\b/i,
+  /\bdenied\b/i,
+  /\bunavailable\b/i,
+  /\bnot available\b/i,
+  /\bnot installed\b/i,
+  /\bisn'?t installed\b/i,
+  /\bno such\b/i,
+  /\bnot found\b/i,
+  /\bno (app|application)\b/i,
+  /\bblocked\b/i,
+  /\bmissing\b/i,
+  /\bredirect/i,
+  /\bbounc/i,
+  /\bstore\b/i,
+  /\bwrong\b/i,
+  /\bdoes ?n[o']t work\b/i,
+  /\bno longer\b/i,
+  /\bwasn'?t able\b/i,
+];
+
+export function responseAddressesFailures(response: string, failures: { name: string; error: string }[]): boolean {
+  if (failures.length === 0) return true;
+  if (FAILURE_ADDRESS_MARKERS.some((pattern) => pattern.test(response))) return true;
+  const lower = response.toLowerCase();
+  for (const failure of failures) {
+    const words = failure.error
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length > 5);
+    if (words.some((word) => lower.includes(word))) return true;
+  }
+  return false;
 }
 
 export function extractLegacyXmlToolCalls(
@@ -209,6 +320,8 @@ export interface AgentConfig {
   contextTokenBudget: number;
   policy?: PolicyRuntime;
   skipReflection?: boolean;
+  skillAutoLearn?: boolean;
+  skillRegistry?: SkillRegistry;
   alive?: NtoxAliveBridge;
   mind?: Mind;
 }
@@ -226,6 +339,7 @@ export interface AgentCallbacks {
   onReflection?: (reflection: Reflection) => void;
   onCorrectionDetected?: (topicKey: string, correction: string) => void;
   onSkillTriggered?: (skillName: string, confidence: number) => void;
+  onSkillProposal?: (skill: SkillDefinition) => void;
   onProactiveSuggestion?: (suggestion: ProactiveSuggestion) => void;
   onCognitive?: (summary: string) => void;
   onStyleGuidance?: (guidance: string) => void;
@@ -260,6 +374,9 @@ export class Agent {
   private sessionStartTime = Date.now();
   private correctionsThisSession = 0;
   private falseSuccessRetriesThisSession = 0;
+  private skillProposalTurn = 0;
+  private lastSkillProposalTurn: number | null = null;
+  private skillProposalsThisSession = 0;
   private sessionContext: SessionContext = {
     intent: "casual",
     startedAt: Date.now(),
@@ -476,6 +593,42 @@ export class Agent {
       }
     }
     return out;
+  }
+
+  private scheduleSkillProposal(fullResponse: string, corrected: boolean, callbacks: AgentCallbacks): void {
+    const trace = this.lastTrace;
+    if (!trace) return;
+    const cfg = this.cfg;
+
+    this.skillProposalTurn++;
+    const gate = shouldProposeSkill({
+      userInput: trace.userInput,
+      response: fullResponse,
+      toolCalls: trace.toolCalls,
+      corrected,
+      falseSuccess: this.falseSuccessThisTurn,
+      turnNumber: this.skillProposalTurn,
+      turnsSinceLastProposal:
+        this.lastSkillProposalTurn === null ? null : this.skillProposalTurn - this.lastSkillProposalTurn,
+    });
+    if (!gate.ok || this.skillProposalsThisSession >= MAX_SKILL_PROPOSALS_PER_SESSION) return;
+
+    const atTurn = this.skillProposalTurn;
+    void (async () => {
+      const candidate = await proposeSkillFromTurn(cfg.llm, {
+        userInput: trace.userInput,
+        response: fullResponse,
+        toolCalls: trace.toolCalls,
+      });
+      if (!candidate) return;
+      if (cfg.skillRegistry) {
+        const conflict = findTriggerConflict(candidate, cfg.skillRegistry.list());
+        if (conflict) return;
+      }
+      this.lastSkillProposalTurn = atTurn;
+      this.skillProposalsThisSession++;
+      callbacks.onSkillProposal?.(candidate);
+    })().catch((e) => console.error("[skill-learn]", e));
   }
 
   private stableToolKey(name: string, args: Record<string, unknown>): string {
@@ -744,11 +897,7 @@ export class Agent {
   private async resolveSearchContext(userInput: string): Promise<string> {
     const researchQuestion = RESEARCH_QUESTION_PATTERN.test(userInput);
     if (researchQuestion) {
-      const queries = [
-        userInput,
-        `site:arxiv.org ${userInput}`,
-        `site:aclanthology.org ${userInput}`,
-      ];
+      const queries = [userInput, `site:arxiv.org ${userInput}`, `site:aclanthology.org ${userInput}`];
       const results = await Promise.all(
         queries.map(async (query) => {
           try {
@@ -766,7 +915,10 @@ export class Agent {
       const blocks = searchResults.join("\n---\n").split(/\n---\n/);
       const seenUrls = new Set<string>();
       const candidates = blocks.flatMap((block) => {
-        const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const lines = block
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
         const url = lines.find((line) => /^https?:\/\//i.test(line));
         if (!url || seenUrls.has(url)) return [];
         seenUrls.add(url);
@@ -776,24 +928,42 @@ export class Agent {
         } catch {
           return [];
         }
-        const scholarlyHost = /(^|\.)(arxiv\.org|aclanthology\.org|openreview\.net|acm\.org|ieeexplore\.ieee\.org|doi\.org|proceedings\.neurips\.cc|aaai\.org)$/i.test(host);
-        return [{ url, title: lines[0] ?? url, snippet: lines.filter((line) => line !== url).slice(1).join(" "), scholarlyHost }];
+        const scholarlyHost =
+          /(^|\.)(arxiv\.org|aclanthology\.org|openreview\.net|acm\.org|ieeexplore\.ieee\.org|doi\.org|proceedings\.neurips\.cc|aaai\.org)$/i.test(
+            host,
+          );
+        return [
+          {
+            url,
+            title: lines[0] ?? url,
+            snippet: lines
+              .filter((line) => line !== url)
+              .slice(1)
+              .join(" "),
+            scholarlyHost,
+          },
+        ];
       });
       const toRead = candidates.filter((candidate) => candidate.scholarlyHost).slice(0, 3);
-      const opened = await Promise.all(toRead.map(async (candidate) => {
-        try {
-          const result = await webFetchTool.execute({ url: candidate.url, format: "markdown" });
-          const data = result.data && typeof result.data === "object" ? result.data as Record<string, unknown> : {};
-          const content = typeof data.content === "string" ? data.content : "";
-          if (!result.success || content.length < 200) return "";
-          return `Title: ${String(data.title || candidate.title)}\nURL: ${String(data.url || candidate.url)}\nFetched source text (excerpt):\n${content.slice(0, 4500)}`;
-        } catch {
-          return "";
-        }
-      }));
-      const leads = candidates.slice(0, 10).map((candidate) =>
-        `Title: ${candidate.title}\nURL: ${candidate.url}\nSearch snippet (unverified; use as a lead only): ${candidate.snippet}`,
+      const opened = await Promise.all(
+        toRead.map(async (candidate) => {
+          try {
+            const result = await webFetchTool.execute({ url: candidate.url, format: "markdown" });
+            const data = result.data && typeof result.data === "object" ? (result.data as Record<string, unknown>) : {};
+            const content = typeof data.content === "string" ? data.content : "";
+            if (!result.success || content.length < 200) return "";
+            return `Title: ${String(data.title || candidate.title)}\nURL: ${String(data.url || candidate.url)}\nFetched source text (excerpt):\n${content.slice(0, 4500)}`;
+          } catch {
+            return "";
+          }
+        }),
       );
+      const leads = candidates
+        .slice(0, 10)
+        .map(
+          (candidate) =>
+            `Title: ${candidate.title}\nURL: ${candidate.url}\nSearch snippet (unverified; use as a lead only): ${candidate.snippet}`,
+        );
       const openedSources = opened.filter(Boolean);
       return `\n\n## Research Evidence\nNTOX searched these queries: ${queries.join(" | ")}\nOpened source excerpts below are direct fetched text; search snippets are unverified leads. Do not cite a snippet as if the paper itself was checked. Search coverage is limited and cannot establish that nobody has done something. For each important claim, identify the evidence that supports it; distinguish source-backed facts from inference and recommendation. For novelty, state the narrow scope searched and leave novelty unverified unless the evidence warrants a stronger conclusion.\n\n### Opened sources\n${openedSources.length ? openedSources.join("\n\n---\n\n") : "No scholarly source page could be opened. Treat all search results as leads and say source verification was unavailable."}\n\n### Search leads\n${leads.join("\n\n---\n\n")}`;
     }
@@ -1725,10 +1895,13 @@ export class Agent {
     let fullResponse = "";
     let attempts = 0;
     let actionNudges = 0;
+    let planContinues = 0;
+    let failureExplains = 0;
     const toolCallBudget: ToolCallBudget = { total: 0, web: 0 };
     const failedToolCalls = new Map<string, string>();
+    const repeatWatch: RepeatWatch = { names: null, tokens: null, strikes: 0, notifiedAt: 0 };
 
-    while (!done && attempts < 10) {
+    while (!done && attempts < MAX_TURN_ATTEMPTS) {
       attempts++;
       if (this.currentTrace) this.currentTrace.retries = Math.max(0, attempts - 1);
       let responseBuffer = "";
@@ -1786,7 +1959,14 @@ export class Agent {
 
       if (pendingToolCalls.length > 0) {
         this.pushMessage({ role: "assistant", content: responseBuffer || "(tool call)", tool_calls: pendingToolCalls });
-        await this.executeToolBatch(pendingToolCalls, toolContext, failedToolCalls, callbacks, toolCallBudget);
+        await this.executeToolBatch(
+          pendingToolCalls,
+          toolContext,
+          failedToolCalls,
+          callbacks,
+          toolCallBudget,
+          repeatWatch,
+        );
         if (discardedToolCalls > 0 || providerToolCallLimitReached) {
           this.pushMessage({
             role: "user",
@@ -1802,6 +1982,16 @@ export class Agent {
             content:
               `[TOOL LIMIT] This turn has reached its limit of ${toolCallBudget.web >= MAX_WEB_TOOL_CALLS_PER_TURN ? MAX_WEB_TOOL_CALLS_PER_TURN + " web calls" : MAX_TOOL_CALLS_PER_TURN + " total tool calls"}. ` +
               `Synthesize the evidence and work completed so far, state any gaps, and answer now without requesting more tools.`,
+          });
+        }
+        if (repeatWatch.strikes >= REPEAT_STRIKES_BEFORE_NUDGE && repeatWatch.strikes !== repeatWatch.notifiedAt) {
+          repeatWatch.notifiedAt = repeatWatch.strikes;
+          this.pushMessage({
+            role: "user",
+            content:
+              `[REPEAT GUARD] The last ${repeatWatch.strikes} tool batches returned the same information (${repeatWatch.names}). ` +
+              `Varying the arguments is not producing new evidence. Use the results already available: answer the user now, ` +
+              `or state the blocker and the single next step that would actually change the outcome.`,
           });
         }
         fullResponse += responseBuffer;
@@ -1953,6 +2143,58 @@ export class Agent {
         continue;
       }
 
+      if (
+        !done &&
+        planContinues < MAX_PLAN_CONTINUES &&
+        attempts < MAX_TURN_ATTEMPTS &&
+        openaiTools.length > 0 &&
+        toolCallBudget.total < MAX_TOOL_CALLS_PER_TURN &&
+        responseMode !== "profile-update"
+      ) {
+        const openTasks = unfinishedPlanTasks(cfg.sessionId);
+        if (openTasks.length > 0) {
+          planContinues++;
+          const taskList = openTasks
+            .slice(0, 6)
+            .map((task) => `${task.id} (${task.status}) ${task.title}`)
+            .join("; ");
+          this.pushMessage({ role: "assistant", content: responseBuffer });
+          this.pushMessage({
+            role: "user",
+            content:
+              `[AUTO-CONTINUE] The active plan still has unfinished tasks: ${taskList}. ` +
+              `Keep working now — call the next tool and drive the plan to completion. Do not stop to ask the user to say go, continue, or proceed. ` +
+              `If the user's latest message deserves a direct reply, reply to it first, then continue the plan. ` +
+              `Only end your turn when every task is completed, or you are genuinely blocked — and if blocked, say exactly what blocks it.`,
+          });
+          continue;
+        }
+      }
+
+      if (!done && failureExplains < MAX_FAILURE_EXPLAINS && attempts < MAX_TURN_ATTEMPTS) {
+        const failures = collectTurnFailures(this.currentTrace);
+        if (
+          failures.length > 0 &&
+          responseBuffer.trim().length > 0 &&
+          !responseAddressesFailures(responseBuffer, failures)
+        ) {
+          failureExplains++;
+          const failureList = failures
+            .slice(0, 5)
+            .map((failure) => `${failure.name}: ${failure.error.slice(0, 300)}`)
+            .join("; ");
+          this.pushMessage({ role: "assistant", content: responseBuffer });
+          this.pushMessage({
+            role: "user",
+            content:
+              `[EXPLAIN FAILURES] Your reply ends the turn while these tool calls failed: ${failureList}. ` +
+              `Reply again with an explanation the user can act on: what you tried, why it failed, and what you did instead or what they should do about it. ` +
+              `Include that explanation in your final answer.`,
+          });
+          continue;
+        }
+      }
+
       fullResponse += responseBuffer;
       this.pushMessage({ role: "assistant", content: responseBuffer });
 
@@ -1971,6 +2213,10 @@ export class Agent {
         } catch (e) {
           console.error("[reflect]", e);
         }
+      }
+
+      if (cfg.skillAutoLearn !== false && callbacks.onSkillProposal) {
+        this.scheduleSkillProposal(fullResponse, wasCorrection, callbacks);
       }
 
       if (callbacks.onProactiveSuggestion) {
@@ -2175,6 +2421,42 @@ export class Agent {
       this.saveSession();
       return;
     }
+
+    if (!done) {
+      const notice = this.buildTurnLimitNotice(cfg.sessionId);
+      callbacks.onToken(notice);
+      this.pushMessage({ role: "assistant", content: notice });
+      const finalText = (fullResponse + notice).trim();
+      this.lastAssistantResponse = finalText;
+      this.lastUserMessage = userInput;
+      this.finishTrace(finalText);
+      yield notice;
+      this.saveSession();
+    }
+  }
+
+  private buildTurnLimitNotice(sessionId: string): string {
+    const tasks = unfinishedPlanTasks(sessionId);
+    const failures = collectTurnFailures(this.currentTrace);
+    const parts: string[] = [];
+    if (tasks.length > 0) {
+      const taskList = tasks
+        .slice(0, 5)
+        .map((task) => `${task.id} ${task.title}`)
+        .join("; ");
+      parts.push(`the plan is unfinished (${taskList})`);
+    }
+    if (failures.length > 0) {
+      const failureList = failures
+        .slice(0, 3)
+        .map((failure) => `${failure.name} — ${failure.error.slice(0, 160)}`)
+        .join("; ");
+      parts.push(`some calls failed (${failureList})`);
+    }
+    if (parts.length === 0) {
+      return `\n\n[Note: I hit this turn's work limit. Say "continue" to resume where I left off.]`;
+    }
+    return `\n\n[Note: I stopped at this turn's work limit with ${parts.join(" and ")}. Say "continue" to resume.]`;
   }
 
   private async handleSurprise(
@@ -2218,6 +2500,7 @@ export class Agent {
     failedToolCalls: Map<string, string>,
     callbacks: AgentCallbacks,
     budget: ToolCallBudget,
+    repeatWatch: RepeatWatch,
   ): Promise<void> {
     const prepared: PreparedToolCall[] = toolCalls.map((tc) => {
       let args: Record<string, unknown> = {};
@@ -2280,8 +2563,40 @@ export class Agent {
     }
     if (parallelGroup.length > 0) groups.push(parallelGroup);
 
+    const batchTokens = new Set<string>();
     for (const group of groups) {
-      await this.runToolGroup(group, toolContext, failedToolCalls, callbacks);
+      for (const content of await this.runToolGroup(group, toolContext, failedToolCalls, callbacks)) {
+        for (const token of resultTokens(content)) batchTokens.add(token);
+      }
+    }
+    this.trackRepeatBatch(repeatWatch, prepared, batchTokens);
+  }
+
+  private trackRepeatBatch(watch: RepeatWatch, prepared: PreparedToolCall[], batchTokens: Set<string>): void {
+    const names = [
+      ...new Set(prepared.filter((item) => !item.skipReason && !item.duplicate).map((item) => item.tc.name)),
+    ]
+      .sort()
+      .join(",");
+
+    if (!names || batchTokens.size < REPEAT_MIN_TOKENS) {
+      watch.names = null;
+      watch.tokens = null;
+      watch.strikes = 0;
+      return;
+    }
+
+    const similar =
+      watch.names === names &&
+      watch.tokens !== null &&
+      tokenSimilarity(watch.tokens, batchTokens) >= REPEAT_SIMILARITY_THRESHOLD;
+    watch.names = names;
+    watch.tokens = batchTokens;
+    watch.strikes = similar ? watch.strikes + 1 : 0;
+    if (!similar) return;
+
+    for (const item of prepared) {
+      if (item.trace && !item.skipReason && !item.duplicate) item.trace.reason = "repeat-detected";
     }
   }
 
@@ -2290,7 +2605,7 @@ export class Agent {
     toolContext: ToolContext,
     failedToolCalls: Map<string, string>,
     callbacks: AgentCallbacks,
-  ): Promise<void> {
+  ): Promise<string[]> {
     const results: ToolResult[] = new Array(group.length);
     let cursor = 0;
     const workerCount = Math.min(TOOL_CONCURRENCY, group.length);
@@ -2334,6 +2649,7 @@ export class Agent {
     });
     await Promise.all(workers);
 
+    const contents: string[] = [];
     for (let i = 0; i < group.length; i++) {
       const item = group[i];
       const skipReason = item.skipReason ?? (item.duplicate ? "duplicate in batch" : undefined);
@@ -2356,6 +2672,7 @@ export class Agent {
       }
       if (!result.success && !skipReason) failedToolCalls.set(item.key, result.error || "failed");
       const resultContent = this.compressToolResult(result);
+      if (!skipReason) contents.push(toolResultSignature(result));
       if (this.currentTrace?.contextBudget) {
         const tokens = Math.ceil(resultContent.length / 4);
         this.currentTrace.contextBudget.toolResults += tokens;
@@ -2377,6 +2694,7 @@ export class Agent {
       }
       this.pushMessage({ role: "tool", tool_call_id: item.tc.id, content: resultContent });
     }
+    return contents;
   }
 
   private recordAliveToolOutcome(

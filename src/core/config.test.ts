@@ -1,6 +1,14 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { NTOX_DIR, hasLegacyToolPrompt, loadConfig, normalizeConfig, patchConfig, saveConfig, validateConfig } from "./config.js";
+import {
+  NTOX_DIR,
+  hasLegacyToolPrompt,
+  loadConfig,
+  normalizeConfig,
+  patchConfig,
+  saveConfig,
+  validateConfig,
+} from "./config.js";
 import type { NtoxConfig } from "../types/index.js";
 
 describe("validateConfig", () => {
@@ -25,6 +33,8 @@ describe("validateConfig", () => {
     metaReflectionEnabled: false,
     metaMistakesEnabled: true,
     metaMinConfidence: 0.5,
+    skillAutoLearnEnabled: true,
+    skillMarketplaceIndex: "https://example.com/index.json",
     cognitiveEnabled: true,
     theoryEnabled: true,
     animationLevel: "minimal",
