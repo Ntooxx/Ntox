@@ -3,6 +3,7 @@ import { join, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NTOX_DIR } from "../core/config.js";
 import { cosineSimilarity } from "../memory/episodic.js";
+import { extractMdSection } from "./markdown.js";
 import type { SkillDefinition } from "../types/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -108,7 +109,13 @@ export class SkillLibrary {
       return {
         name: cleanName,
         description,
-        category: subdomain || domain,
+        category:
+          extractMdSection(content, "Category")
+            .split(/\s*\n\s*/)[0]
+            .trim()
+            .toLowerCase() ||
+          subdomain ||
+          domain,
         domain,
         importance: Math.min(10, Math.max(1, importance)),
         triggers,
@@ -125,10 +132,7 @@ export class SkillLibrary {
   }
 
   private extractSection(content: string, heading: string): string {
-    const regex = new RegExp(`## ${heading}\\s*\\n\\n([\\s\\S]*?)(?:\\n## |\\n---|$)`);
-    const match = regex.exec(content);
-    if (!match) return "";
-    return match[1].trim();
+    return extractMdSection(content, heading);
   }
 
   private extractSectionNames(lines: string[]): string[] {
@@ -444,6 +448,9 @@ export class SkillLibrary {
     md += `## Triggers\n`;
     for (const t of def.triggers) md += `- "${t}"\n`;
     md += `\n## Purpose\n${def.description}\n\n`;
+    if (def.category && def.category !== "custom") md += `## Category\n${def.category}\n\n`;
+    if (def.tools.length > 0) md += `## Tools\n${def.tools.join(", ")}\n\n`;
+    if (def.examples.length > 0) md += `## Examples\n${def.examples.join("\n")}\n\n`;
     if ((def.voices ?? []).length > 0) md += `## Voices\n${(def.voices ?? []).join(", ")}\n\n`;
     if ((def.combos ?? []).length > 0) md += `## Recommended Combinations\n${(def.combos ?? []).join(", ")}\n\n`;
     md += `## Prompt\n${def.prompt}\n`;
