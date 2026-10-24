@@ -6,6 +6,7 @@ export interface CommandDef {
   group: CommandGroupId;
   aliases?: string[];
   replOnly?: boolean;
+  channel?: boolean;
 }
 
 export const COMMAND_GROUPS: { id: CommandGroupId; title: string }[] = [
@@ -18,42 +19,61 @@ export const COMMAND_GROUPS: { id: CommandGroupId; title: string }[] = [
 ];
 
 export const COMMANDS: CommandDef[] = [
-  { name: "status", description: "compact agent dashboard", group: "daily" },
+  { name: "help", description: "list commands", group: "daily", aliases: ["ask"], channel: true },
+  { name: "status", description: "compact agent dashboard", group: "daily", channel: true },
   { name: "last", description: "what just happened", group: "daily" },
   { name: "tips", description: "practical usage guide", group: "daily" },
   { name: "ui", description: "set interface mode", group: "daily" },
-  { name: "model", description: "switch or refresh OpenRouter models", group: "daily" },
+  { name: "model", description: "switch or refresh OpenRouter models", group: "daily", channel: true },
   { name: "provider", description: "switch provider", group: "daily" },
-  { name: "cost", description: "token usage", group: "daily" },
+  { name: "cost", description: "token usage", group: "daily", channel: true },
   { name: "tokens", description: "view / set the model output token limit", group: "daily" },
   { name: "clear", description: "clear conversation", group: "daily", aliases: ["new"] },
   { name: "exit", description: "quit", group: "daily", aliases: ["quit"] },
 
-  { name: "undo", description: "remove last exchange", group: "recovery" },
+  { name: "undo", description: "remove last exchange", group: "recovery", channel: true },
   { name: "retry", description: "rerun last prompt", group: "recovery" },
   { name: "diff", description: "last turn file diff", group: "recovery" },
   { name: "checkpoints", description: "list file checkpoints", group: "recovery" },
   { name: "rollback", description: "restore a checkpoint", group: "recovery" },
   { name: "doctor", description: "setup health checks", group: "recovery" },
 
-  { name: "memory", description: "view / search / clear", group: "memory" },
-  { name: "remember", description: "save durable memory", group: "memory" },
-  { name: "forget", description: "delete durable memory", group: "memory" },
+  { name: "memory", description: "view / search / clear", group: "memory", channel: true },
+  { name: "remember", description: "save durable memory", group: "memory", channel: true },
+  { name: "forget", description: "delete durable memory", group: "memory", channel: true },
   { name: "memory why", description: "explain a durable memory", group: "memory" },
   { name: "memory update", description: "revise durable memory", group: "memory" },
   { name: "theories", description: "inspect learned theories", group: "memory" },
   { name: "patterns", description: "inspect cognitive patterns", group: "memory" },
   { name: "profile", description: "user preferences", group: "memory" },
   { name: "mistakes", description: "learnt corrections", group: "memory" },
-  { name: "skill", description: "manage skills", group: "memory" },
+  { name: "skills", description: "installed skill stats", group: "memory", channel: true },
+  { name: "tools", description: "tools NTOX can call", group: "memory", channel: true },
+  { name: "plan", description: "current plan tasks", group: "memory", channel: true },
+  { name: "skill", description: "manage skills", group: "memory", channel: true },
   { name: "skill learn", description: "create a skill", group: "memory" },
-  { name: "skill save", description: "accept the last proposed skill", group: "memory" },
-  { name: "skill install", description: "add a skill from the marketplace, URL, git, or file", group: "memory" },
-  { name: "skill marketplace", description: "browse installable skills", group: "memory" },
-  { name: "skill run", description: "run a routine skill (steps chain tools + skills)", group: "memory" },
-  { name: "skill stats", description: "usage stats and auto-disabled skills", group: "memory" },
-  { name: "skill diff", description: "compare an installed skill with its source", group: "memory" },
-  { name: "skill export", description: "print a skill as JSON for another machine", group: "memory" },
+  { name: "skill save", description: "accept the last proposed skill", group: "memory", channel: true },
+  {
+    name: "skill install",
+    description: "add a skill from the marketplace, URL, git, or file",
+    group: "memory",
+    channel: true,
+  },
+  { name: "skill marketplace", description: "browse installable skills", group: "memory", channel: true },
+  {
+    name: "skill run",
+    description: "run a routine skill (steps chain tools + skills)",
+    group: "memory",
+    channel: true,
+  },
+  { name: "skill stats", description: "usage stats and auto-disabled skills", group: "memory", channel: true },
+  { name: "skill diff", description: "compare an installed skill with its source", group: "memory", channel: true },
+  {
+    name: "skill export",
+    description: "print a skill as JSON for another machine",
+    group: "memory",
+    channel: true,
+  },
   { name: "menu skills", description: "browse skill library", group: "memory" },
 
   { name: "meta", description: "meta-cognition status", group: "diagnostics" },
@@ -64,14 +84,14 @@ export const COMMANDS: CommandDef[] = [
   { name: "mind alive", description: "ALIVE-1 metrics and M5 status", group: "diagnostics" },
   { name: "analytics", description: "usage stats", group: "diagnostics" },
   { name: "trace", description: "last turn trace", group: "diagnostics" },
-  { name: "alive", description: "host events and wake state", group: "diagnostics" },
-  { name: "mcp", description: "MCP servers and external tools", group: "diagnostics" },
+  { name: "alive", description: "host events and wake state", group: "diagnostics", channel: true },
+  { name: "mcp", description: "MCP servers and external tools", group: "diagnostics", channel: true },
   { name: "workspace", description: "active workspace", group: "diagnostics" },
   { name: "permissions", description: "tool policy status", group: "diagnostics" },
   { name: "agents", description: "subagent runs", group: "diagnostics" },
 
   { name: "config", description: "view / set config", group: "advanced" },
-  { name: "approve", description: "allow a risky shell command", group: "diagnostics" },
+  { name: "approve", description: "allow a risky shell command", group: "diagnostics", channel: true },
   { name: "suggest", description: "proactive suggestion", group: "diagnostics" },
   { name: "benchmark", description: "test cognitive kernel", group: "advanced" },
   { name: "reset", description: "reset everything", group: "advanced" },
@@ -117,4 +137,24 @@ export function getSlashCommandNames(): string[] {
     .flatMap((command) => [command.name.split(/\s+/)[0], ...(command.aliases || [])])
     .filter((name, index, names) => names.indexOf(name) === index)
     .sort();
+}
+
+export function getChannelCommandGroups(): { title: string; items: [string, string][] }[] {
+  return COMMAND_GROUPS.map((group) => ({
+    title: group.title,
+    items: COMMANDS.filter((command) => command.channel && command.group === group.id).map(
+      (command): [string, string] => [`/${command.name}`, command.description],
+    ),
+  })).filter((group) => group.items.length > 0);
+}
+
+export function renderChannelHelp(extraLines: string[] = []): string {
+  const sections = ["NTOX commands:"];
+  for (const group of getChannelCommandGroups()) {
+    sections.push("", `${group.title}:`);
+    for (const [cmd, desc] of group.items) sections.push(`  ${cmd.padEnd(18)} ${desc}`);
+  }
+  if (extraLines.length > 0) sections.push("", ...extraLines);
+  sections.push("", "Send any message to chat — the commands above reply instantly.");
+  return sections.join("\n");
 }

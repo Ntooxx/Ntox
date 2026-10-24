@@ -33,6 +33,7 @@ import { createMarketplace, renderMarketplaceList, type SkillMarketplace } from 
 import { diffSkillByName, renderSkillStats } from "../skills/lifecycle.js";
 import { createRoutineRuntime, renderRoutineRun, runRoutine } from "../skills/routine.js";
 import { renderMcpStatus } from "../mcp/bridge.js";
+import { handleChannelCommand, type ChannelCommandContext } from "../core/channel-commands.js";
 import {
   parseSkillInstallCommand,
   parseSkillLifecycleCommand,
@@ -171,6 +172,20 @@ export class Repl {
   private createAgent(): Agent {
     const cfg = createAgentConfig(this.infra, this.config, this.sessionId, { sessionSource: "repl" });
     return new Agent(cfg);
+  }
+
+  private channelCommandContext(): ChannelCommandContext {
+    return {
+      config: this.config,
+      llm: this.llm,
+      tools: this.tools,
+      skills: this.skillRegistry,
+      memory: this.memory,
+      policy: this.infra.policy,
+      agent: this.agent,
+      models: this.models,
+      sessionId: this.sessionId,
+    };
   }
 
   async start(): Promise<void> {
@@ -669,6 +684,13 @@ export class Repl {
       case "skill":
         await this.handleSkillCommand(arg);
         break;
+      case "skills":
+      case "tools":
+      case "plan": {
+        const outcome = await handleChannelCommand(`/${cmd} ${arg}`.trim(), this.channelCommandContext());
+        if (outcome) console.log(outcome.text);
+        break;
+      }
       case "mcp":
         console.log(renderMcpStatus(this.infra.mcp.statuses()));
         break;

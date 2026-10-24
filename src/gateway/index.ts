@@ -1,4 +1,7 @@
-import { loadConfig } from "../core/config.js";
+import { loadCachedModels, loadConfig } from "../core/config.js";
+import { handleChannelCommand } from "../core/channel-commands.js";
+import { renderChannelHelp } from "../cli/commands.js";
+import { stripAnsi } from "../cli/theme.js";
 import {
   createSharedInfra,
   createSessionInfra,
@@ -188,10 +191,31 @@ export async function runGateway(channel?: string): Promise<void> {
           return direct("Fresh start. Go ahead.", false);
         }
         if (text === "/help") {
-          return `Ntox on ${ctx}.\n\nSend any message — text or voice. I can read/write files, run commands, search the web, and code.\n\n/new — reset conversation\n/voice on|off|auto — spoken replies\n/cron — scheduled automations\n/approve <once|session|always|deny> <command> — allow or block a risky command\n/skill save <name> — accept a skill Ntox proposed after a finished task\n/skill install <url|git|file|name> — add a skill from the marketplace, a URL, git repo, or local file\n/skill marketplace [query] — browse installable skills\n/skill stats · /skill diff <name> · /skill export <name> — usage, compare with source, share as JSON\n/skill run <name> — run a routine skill (steps chain tools + skills)\n/mcp — external MCP servers and their tools\n/help — this message`;
+          return renderChannelHelp([
+            "/new — reset conversation",
+            "/voice on|off|auto — spoken replies",
+            "/cron — scheduled automations",
+            "/approve <once|session|always|deny> <command> — allow or block a risky command",
+          ]);
         }
         if (text === "/mcp" || text.startsWith("/mcp ")) {
           return renderMcpStatus(shared.mcp.statuses());
+        }
+
+        const unifiedCommand = await handleChannelCommand(text, {
+          config,
+          llm: shared.llm,
+          tools: shared.tools,
+          skills: shared.skillRegistry,
+          memory: sessionInfra.memory,
+          policy: shared.policy,
+          agent,
+          models: loadCachedModels() ?? [],
+          sessionId: `${ctx}_${chatId}`,
+        });
+        if (unifiedCommand) {
+          const body = stripAnsi(unifiedCommand.text);
+          return unifiedCommand.record ? direct(body) : body;
         }
 
         sessions.touch(chatId);

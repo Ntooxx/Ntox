@@ -120,11 +120,20 @@ trigger and it activates on Telegram.*
 
 ## Pillar 3 — Commands & chat UX (P0–P1)
 
-### 3.1 Unified command layer · P0 · M
+### 3.1 Unified command layer · P0 · M · ✅ shipped
 - Bring high-value REPL commands to all channels: `/status`, `/plan`,
   `/memory`, `/model`, `/skills`, `/tools`, `/cost`, `/undo`.
 - Single registry (reuse `src/cli/commands.ts` catalog + `gateway/commands.ts`
   handler) so help text stays in sync.
+- All ten read/write variants (`/status`, `/plan`, `/memory`, `/remember`,
+  `/forget`, `/model`, `/skills`, `/tools`, `/cost`, `/undo`) answered by one
+  `src/core/channel-commands.ts` handler wired into every channel; REPL gained
+  `/skills`, `/tools`, `/plan` through the same handlers.
+- Catalog entries carry `channel: true`; gateway `/help` renders from it via
+  `renderChannelHelp`, so REPL and gateway help cannot drift.
+- Read-only commands reply outside the transcript; `/model`, `/remember`,
+  `/forget` are recorded through the session. Channel output is ANSI-stripped
+  so styled renderer text stays plain in chat.
 
 ### 3.2 Interactive approvals · P0 · M · ✅ shipped
 - Telegram approval requests arrive with an inline keyboard — Allow once /
