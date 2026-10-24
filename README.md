@@ -28,6 +28,12 @@ NTOX is a self-improving AI agent that runs locally. Unlike standard LLM tool lo
 
 ## Screenshots
 
+### Startup
+
+![NTOX Startup](screenshots/00-intro.png)
+
+*The NTOX Desktop welcome screen on launch.*
+
 ### Desktop Dashboard
 
 ![Dashboard](screenshots/01-dashboard-overview.png)
