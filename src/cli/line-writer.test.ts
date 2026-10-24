@@ -38,4 +38,33 @@ describe("LineWriter", () => {
     writer.flush();
     expect((stream as unknown as { output: () => string }).output()).toBe("| code\n|   indented");
   });
+
+  it("puts tags on their own line and resumes prose with the prefix", () => {
+    const stream = makeStream();
+    const writer = new LineWriter(stream, "| ");
+    writer.startLine();
+    writer.write("checking state");
+    writer.writeTag("\n· recalled 3 memories");
+    writer.write("next sentence");
+    writer.flush();
+    expect((stream as unknown as { output: () => string }).output()).toBe(
+      "| checking state\n· recalled 3 memories\n| next sentence",
+    );
+  });
+
+  it("does not leave blank lines between consecutive tags", () => {
+    const stream = makeStream();
+    const writer = new LineWriter(stream, "| ");
+    writer.writeTag("\n· first");
+    writer.writeTag("\n· second");
+    expect((stream as unknown as { output: () => string }).output()).toBe("· first\n· second\n");
+  });
+
+  it("does not emit an extra blank line when a tag follows a completed line", () => {
+    const stream = makeStream();
+    const writer = new LineWriter(stream, "| ");
+    writer.write("done\n");
+    writer.writeTag("\n· tool finished");
+    expect((stream as unknown as { output: () => string }).output()).toBe("| done\n· tool finished\n");
+  });
 });

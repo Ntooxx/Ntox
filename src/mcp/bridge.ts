@@ -6,6 +6,8 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult, Tool as RemoteTool } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServerEntry, ToolResult } from "../types/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import { enforceToolPolicy } from "../core/policy.js";
+import type { PolicyRuntime } from "../core/policy.js";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 const DEFAULT_CALL_TIMEOUT_MS = 30_000;
@@ -26,6 +28,7 @@ export interface McpServerStatus {
 
 export interface McpBridgeOptions {
   registry: ToolRegistry;
+  policy: PolicyRuntime;
   servers?: Record<string, McpServerEntry>;
   connectTimeoutMs?: number;
   callTimeoutMs?: number;
@@ -115,6 +118,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 export class McpBridge {
   private readonly registry: ToolRegistry;
+  private readonly policy: PolicyRuntime;
   private readonly servers: Record<string, McpServerEntry>;
   private readonly connectTimeoutMs: number;
   private readonly callTimeoutMs: number;
@@ -125,6 +129,7 @@ export class McpBridge {
 
   constructor(options: McpBridgeOptions) {
     this.registry = options.registry;
+    this.policy = options.policy;
     this.servers = options.servers ?? {};
     this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     this.callTimeoutMs = options.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
@@ -213,16 +218,21 @@ export class McpBridge {
       }
       const route: ToolRoute = { client, remote: tool.name, server: name };
       this.routes.set(qualified, route);
-      this.registry.register({
-        name: qualified,
-        description: describeRemoteTool(tool, name),
-        parameters: {
-          type: "object",
-          properties: tool.inputSchema?.properties ?? {},
-          required: tool.inputSchema?.required ?? [],
-        },
-        execute: (args) => this.callTool(qualified, route, args),
-      });
+      this.registry.register(
+        enforceToolPolicy(
+          {
+            name: qualified,
+            description: describeRemoteTool(tool, name),
+            parameters: {
+              type: "object",
+              properties: tool.inputSchema?.properties ?? {},
+              required: tool.inputSchema?.required ?? [],
+            },
+            execute: (args) => this.callTool(qualified, route, args),
+          },
+          this.policy,
+        ),
+      );
       registered.push(qualified);
     }
     return { ...status, state: "connected", tools: registered };

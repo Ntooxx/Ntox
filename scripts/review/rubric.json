@@ -1,0 +1,177 @@
+{
+  "version": "1.1.0",
+  "scale": {
+    "min": 1,
+    "max": 10,
+    "anchor_1": "absent or misleading",
+    "anchor_5": "present but shallow or inconsistent",
+    "anchor_10": "best in class, evidenced and reliable"
+  },
+  "sensitivity": {
+    "adoption": {
+      "label": "Adoption-weighted",
+      "rationale": "Weights what decides whether a stranger can install, trust and keep using it today",
+      "weights": {
+        "product_clarity": 7,
+        "core_loop": 14,
+        "cognition": 7,
+        "memory": 8,
+        "integration": 11,
+        "engineering": 18,
+        "security": 14,
+        "ux": 12,
+        "distribution": 9
+      }
+    }
+  },
+  "dimensions": [
+    {
+      "id": "product_clarity",
+      "name": "Product clarity and documentation",
+      "weight": 8,
+      "question": "Does a competent stranger understand what this is, who it is for, and how to start, without trusting marketing?",
+      "signals": [
+        { "id": "positioning", "label": "One-line positioning above the fold", "weight": 0.18 },
+        { "id": "quickstart", "label": "Runnable quick start", "weight": 0.16 },
+        { "id": "highlights_evidence", "label": "Evidence-backed highlights document", "weight": 0.16 },
+        { "id": "docs_breadth", "label": "Breadth of written documentation", "weight": 0.1 },
+        { "id": "examples", "label": "Usage examples and integration snippets", "weight": 0.1 },
+        { "id": "docs_accuracy", "label": "Documented claims match the tree", "weight": 0.3 }
+      ]
+    },
+    {
+      "id": "core_loop",
+      "name": "Core agent loop",
+      "weight": 13,
+      "question": "Is the agent loop competitive with modern coding and computer-use agents: tools, streaming, context budget, recovery, repo awareness, edit precision?",
+      "signals": [
+        { "id": "native_tool_calling", "label": "Native function calling across wire formats", "weight": 0.12 },
+        { "id": "iteration_guard", "label": "Bounded tool iterations", "weight": 0.08 },
+        { "id": "streaming", "label": "Streaming responses", "weight": 0.08 },
+        { "id": "context_budget", "label": "Context window budgeting", "weight": 0.1 },
+        { "id": "provider_breadth", "label": "Provider breadth", "weight": 0.1 },
+        { "id": "error_recovery", "label": "Tool failure and retry handling", "weight": 0.1 },
+        { "id": "subagents", "label": "Delegation to subagents", "weight": 0.1 },
+        { "id": "repo_awareness", "label": "Repository map or language-server awareness", "weight": 0.14 },
+        { "id": "patch_precision", "label": "Patch or diff-based editing", "weight": 0.12 },
+        { "id": "parallel_tools", "label": "Parallel tool execution", "weight": 0.06 }
+      ]
+    },
+    {
+      "id": "cognition",
+      "name": "Meta-cognition and learning loop",
+      "weight": 14,
+      "question": "Do the cognitive mechanisms exist, get scored, and change behaviour, rather than being displayed?",
+      "signals": [
+        { "id": "predict_before_act", "label": "Predicts an outcome before acting", "weight": 0.12 },
+        { "id": "prediction_scored", "label": "Predictions scored (Brier, calibration)", "weight": 0.12 },
+        { "id": "prediction_acts", "label": "Prediction error changes behaviour", "weight": 0.12 },
+        { "id": "calibration_control", "label": "Calibration drives control decisions", "weight": 0.1 },
+        { "id": "bandit_selection", "label": "Learned strategy selection", "weight": 0.1 },
+        { "id": "learned_guidance_reaches_model", "label": "Learned strategy actually reaches the model", "weight": 0.1 },
+        { "id": "pattern_compiles_to_skill", "label": "Patterns compile into reusable skills", "weight": 0.12 },
+        { "id": "learning_signal_quality", "label": "Learning signal comes from outcomes, not text heuristics", "weight": 0.14 },
+        { "id": "reflection_persisted", "label": "Reflections persist and inform later turns", "weight": 0.04 },
+        { "id": "self_awareness_depth", "label": "Self-awareness grounded in measured state", "weight": 0.04 }
+      ]
+    },
+    {
+      "id": "memory",
+      "name": "Memory and personalisation",
+      "weight": 12,
+      "question": "Is memory retrieval better than naive recency, is it measured, and does it handle corrections, consolidation and user modelling?",
+      "signals": [
+        { "id": "embeddings", "label": "Embeddings with offline fallback", "weight": 0.14 },
+        { "id": "hybrid_retrieval", "label": "Hybrid semantic and lexical retrieval", "weight": 0.14 },
+        { "id": "correction_authority", "label": "Corrections outrank conflicting facts", "weight": 0.14 },
+        { "id": "consolidation", "label": "Consolidation, decay and reliability ranking", "weight": 0.1 },
+        { "id": "user_model", "label": "User model learned over time", "weight": 0.12 },
+        { "id": "theory_outcome_scoring", "label": "Theories confirmed by outcomes, not similarity", "weight": 0.12 },
+        { "id": "retrieval_measured", "label": "Retrieval quality measured, not only unit-tested", "weight": 0.14 },
+        { "id": "behavioral_tests", "label": "Memory behaviour covered by behavioural tests", "weight": 0.1 }
+      ]
+    },
+    {
+      "id": "integration",
+      "name": "Tools, channels and interoperability",
+      "weight": 12,
+      "question": "Can the agent act on the real world through tools, messaging channels, MCP and media, under coherent policy?",
+      "signals": [
+        { "id": "tool_breadth", "label": "Tool surface breadth", "weight": 0.22 },
+        { "id": "mcp_inbound", "label": "Consumes external MCP servers", "weight": 0.14 },
+        { "id": "mcp_outbound", "label": "Serves itself as an MCP server", "weight": 0.12 },
+        { "id": "channel_breadth", "label": "Messaging and web channels", "weight": 0.18 },
+        { "id": "media_voice_email", "label": "Media, voice and email capabilities", "weight": 0.12 },
+        { "id": "policy_coverage", "label": "Every registered tool is policy-reachable", "weight": 0.12 },
+        { "id": "policy_uniformity", "label": "Policy applied uniformly to all tool sources", "weight": 0.1 }
+      ]
+    },
+    {
+      "id": "engineering",
+      "name": "Engineering quality and reliability",
+      "weight": 14,
+      "question": "Would a senior engineer trust this in production: types, tests, coverage, CI, structure, maintenance load?",
+      "signals": [
+        { "id": "typecheck", "label": "Strict typecheck passes", "weight": 0.13 },
+        { "id": "lint", "label": "Lint passes", "weight": 0.09 },
+        { "id": "tests_green", "label": "Test suite passes", "weight": 0.13 },
+        { "id": "suite_size", "label": "Test suite size", "weight": 0.11 },
+        { "id": "coverage", "label": "Line coverage", "weight": 0.13 },
+        { "id": "test_ratio", "label": "Test-to-source ratio", "weight": 0.09 },
+        { "id": "ci_matrix", "label": "CI across Node versions", "weight": 0.08 },
+        { "id": "maintainability", "label": "No monolith files or dead markers", "weight": 0.12 },
+        { "id": "release_discipline", "label": "Versioning and changelog", "weight": 0.06 },
+        { "id": "bus_factor", "label": "More than one maintainer", "weight": 0.06 }
+      ]
+    },
+    {
+      "id": "security",
+      "name": "Security and trust",
+      "weight": 10,
+      "question": "If this agent runs unattended, what is the blast radius and is the boundary enforced or advisory?",
+      "signals": [
+        { "id": "blocklist", "label": "Destructive command blocklist", "weight": 0.15 },
+        { "id": "approval_gate", "label": "Approval gate for risky actions", "weight": 0.15 },
+        { "id": "sandbox_strength", "label": "Sandbox enforced and hardened by default", "weight": 0.35 },
+        { "id": "injection_guard", "label": "Prompt injection guard", "weight": 0.1 },
+        { "id": "secret_redaction", "label": "Secret redaction in output", "weight": 0.1 },
+        { "id": "policy_coverage", "label": "Policy covers every tool", "weight": 0.15 }
+      ]
+    },
+    {
+      "id": "ux",
+      "name": "Onboarding and day-to-day UX",
+      "weight": 9,
+      "question": "How much friction between install and first useful turn, and can a user inspect why the agent did something?",
+      "signals": [
+        { "id": "setup_wizard", "label": "Guided setup", "weight": 0.16 },
+        { "id": "doctor", "label": "Diagnostics command", "weight": 0.12 },
+        { "id": "inspectability", "label": "Trace and mind inspection", "weight": 0.16 },
+        { "id": "recovery_guidance", "label": "Actionable error recovery", "weight": 0.12 },
+        { "id": "install_path", "label": "Documented install command works", "weight": 0.3 },
+        { "id": "desktop_surface", "label": "Graphical surface", "weight": 0.14 }
+      ]
+    },
+    {
+      "id": "distribution",
+      "name": "Distribution and ecosystem",
+      "weight": 8,
+      "question": "Can someone adopt it today, and is there a surface for other people to build on it?",
+      "hard_gate": {
+        "signal": "npm_published",
+        "below": 0.3,
+        "cap": 5.5,
+        "reason": "no public install means the product cannot be adopted by a stranger, whatever else exists"
+      },
+      "signals": [
+        { "id": "npm_published", "label": "Installable from the public registry", "weight": 0.26 },
+        { "id": "docs_site", "label": "Public site or hosted docs", "weight": 0.12 },
+        { "id": "marketplace", "label": "Extensions or skill marketplace", "weight": 0.12 },
+        { "id": "integration_sdk", "label": "Embedding SDK for other runtimes", "weight": 0.14 },
+        { "id": "interop", "label": "Open protocol interoperability", "weight": 0.14 },
+        { "id": "release_discipline", "label": "Release cadence and changelog", "weight": 0.1 },
+        { "id": "community", "label": "External contributors and adoption", "weight": 0.12 }
+      ]
+    }
+  ]
+}

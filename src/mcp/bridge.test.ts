@@ -4,6 +4,9 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import { McpBridge, mcpToolName, renderMcpStatus } from "./bridge.js";
 import { ToolRegistry } from "../tools/registry.js";
+import { createDefaultProfile, createPolicyRuntime } from "../core/policy.js";
+import type { PolicyRuntime } from "../core/policy.js";
+import { setInteractiveApproval } from "../tools/approval.js";
 import type { McpServerEntry } from "../types/index.js";
 
 interface Harness {
@@ -20,6 +23,7 @@ interface HarnessOptions {
   connectTimeoutMs?: number;
   registry?: ToolRegistry;
   realTransports?: boolean;
+  policy?: PolicyRuntime;
 }
 
 function makeHarness(options: HarnessOptions): Harness {
@@ -27,6 +31,7 @@ function makeHarness(options: HarnessOptions): Harness {
   const created: McpServer[] = [];
   const bridge = new McpBridge({
     registry,
+    policy: options.policy ?? createPolicyRuntime(createDefaultProfile()),
     servers: options.servers,
     connectTimeoutMs: options.connectTimeoutMs ?? 5_000,
     ...(options.realTransports
@@ -241,6 +246,76 @@ describe("McpBridge", () => {
     const second = registry.list().filter((tool) => tool.name.startsWith("mcp_"));
     expect(second).toHaveLength(first);
     expect(bridge.statuses()[0].state).toBe("connected");
+  });
+});
+
+describe("McpBridge policy enforcement", () => {
+  function allowlist(...tools: string[]): PolicyRuntime {
+    return createPolicyRuntime({ ...createDefaultProfile(), allowedTools: tools });
+  }
+
+  it("denies MCP tools that the profile allowlist does not include", async () => {
+    setInteractiveApproval(null);
+    const policy = allowlist("read", "write", "shell");
+    let invocations = 0;
+    const { bridge, registry } = makeHarness({
+      servers: { demo: { command: "ignored" } },
+      populate: (server) => {
+        server.registerTool(
+          "echo",
+          { description: "Echoes text back", inputSchema: { text: z.string() } },
+          async () => {
+            invocations += 1;
+            return { content: [{ type: "text", text: "echoed" }] };
+          },
+        );
+      },
+      policy,
+    });
+    await bridge.connectAll();
+
+    const result = await registry.get("mcp_demo_echo")!.execute({ text: "leak" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("POLICY_DENIED");
+    expect(invocations).toBe(0);
+    expect(policy.decisions.some((d) => d.tool === "mcp_demo_echo" && !d.allowed)).toBe(true);
+  });
+
+  it("allows only the MCP tools the profile lists", async () => {
+    setInteractiveApproval(null);
+    const { bridge, registry } = makeHarness({
+      servers: { demo: { command: "ignored" } },
+      populate: populateDemoServer,
+      policy: allowlist("mcp_demo_echo"),
+    });
+    await bridge.connectAll();
+
+    const allowed = await registry.get("mcp_demo_echo")!.execute({ text: "hi" });
+    const blocked = await registry.get("mcp_demo_boom")!.execute({});
+
+    expect(allowed.success).toBe(true);
+    expect(allowed.data).toEqual({ content: "echo:hi", server: "demo", tool: "echo" });
+    expect(blocked.success).toBe(false);
+    expect(blocked.error).toContain("POLICY_DENIED");
+  });
+
+  it("runs a denied MCP tool after explicit interactive approval", async () => {
+    setInteractiveApproval(async () => "allow-once");
+    try {
+      const { bridge, registry } = makeHarness({
+        servers: { demo: { command: "ignored" } },
+        populate: populateDemoServer,
+        policy: allowlist("read"),
+      });
+      await bridge.connectAll();
+
+      const result = await registry.get("mcp_demo_echo")!.execute({ text: "hi" });
+
+      expect(result.success).toBe(true);
+    } finally {
+      setInteractiveApproval(null);
+    }
   });
 });
 

@@ -464,7 +464,7 @@ ipcMain.handle("ntox:desktop-request", async (event, input) => {
   if (!validSender(event)) throw new Error("Untrusted desktop renderer.");
   const route = typeof input?.route === "string" ? input.route : "";
   const method = typeof input?.method === "string" ? input.method : "GET";
-  const allowed = /^\/api\/(desktop\/bootstrap|agents|tasks(?:\/[^/]+(?:\/(?:cancel|retry))?)?|memory(?:\/graph|\/[^/]+)?|tools|evaluations|approvals|settings(?:\/(?:providers|reload))?)$/;
+  const allowed = /^\/api\/(desktop\/(?:bootstrap|permissions)|agents|tasks(?:\/[^/]+(?:\/(?:cancel|retry))?)?|memory(?:\/graph|\/[^/]+)?|tools|evaluations|approvals|settings(?:\/(?:providers|reload))?)$/;
   const routePath = route.split("?")[0];
   if (!allowed.test(routePath) || !["GET", "POST", "PATCH", "DELETE"].includes(method)) throw new Error("Desktop API request is not allowed.");
   return apiFetch(route, method, input.body);

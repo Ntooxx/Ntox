@@ -1,6 +1,5 @@
 import chalk from "chalk";
 import { LineWriter } from "./line-writer.js";
-import { termWidth } from "./render.js";
 import { accents, dimRgb, paint, palette } from "./theme.js";
 
 type ProseMode = "normal" | "heading" | "list" | "fence";
@@ -9,14 +8,32 @@ function visibleLen(s: string): number {
   return s.replace(/\x1b\[[0-9;]*m/g, "").length;
 }
 
-function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
-}
-
-function clampVisible(s: string, width: number): string {
-  const plain = stripAnsi(s);
-  if (plain.length <= width) return s;
-  return `${plain.slice(0, Math.max(1, width - 1))}…`;
+function wrapVisible(s: string, width: number): string[] {
+  if (visibleLen(s) <= width) return [s];
+  const rows: string[] = [];
+  let row = "";
+  let vis = 0;
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === "\x1b") {
+      const m = /^\x1b\[[0-9;]*m/.exec(s.slice(i));
+      if (m) {
+        row += m[0];
+        i += m[0].length;
+        continue;
+      }
+    }
+    row += s[i];
+    i++;
+    vis++;
+    if (vis >= width) {
+      rows.push(row);
+      row = "";
+      vis = 0;
+    }
+  }
+  if (row.length > 0) rows.push(row);
+  return rows;
 }
 
 function isFenceStart(line: string): boolean {
@@ -75,12 +92,12 @@ export class ChatRenderer {
         this.codeLine = "";
       }
       this.renderCodeEnd();
+      this.prose.reset();
       this.inCode = false;
-      this.atLineStart = true;
     }
     this.flushProbeAsProse();
     this.prose.writeTag(tag);
-    this.atLineStart = false;
+    this.atLineStart = true;
   }
 
   flush(): void {
@@ -88,6 +105,7 @@ export class ChatRenderer {
       if (this.codeLine.length > 0) {
         if (isFenceStart(this.codeLine)) {
           this.renderCodeEnd();
+          this.prose.reset();
           this.inCode = false;
         } else {
           this.renderCodeLine(this.codeLine);
@@ -166,6 +184,7 @@ export class ChatRenderer {
       this.codeLine = "";
       if (isFenceStart(line)) {
         this.renderCodeEnd();
+        this.prose.reset();
         this.inCode = false;
         this.atLineStart = true;
       } else {
@@ -177,7 +196,8 @@ export class ChatRenderer {
   }
 
   private codeWidth(): number {
-    return Math.max(24, termWidth() - visibleLen(this.prefix) - 4);
+    const cols = Math.min(this.out.columns || 80, 120);
+    return Math.max(24, cols - visibleLen(this.prefix) - 5);
   }
 
   private renderCodeStart(lang: string): void {
@@ -201,9 +221,10 @@ export class ChatRenderer {
 
   private renderCodeLine(line: string): void {
     const w = this.codeWidth();
-    const clamped = clampVisible(line, w);
-    const padding = w - stripAnsi(clamped).length;
     const gutter = paint(dimRgb(palette.accent, 0.5), "│");
-    this.out.write(`${this.prefix}${gutter} ${clamped}${" ".repeat(padding)} ${gutter}\n`);
+    for (const row of wrapVisible(line, w)) {
+      const padding = Math.max(0, w - visibleLen(row));
+      this.out.write(`${this.prefix}${gutter} ${row}${" ".repeat(padding)} ${gutter}\n`);
+    }
   }
 }

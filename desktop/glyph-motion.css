@@ -1,0 +1,84 @@
+.glyph-composition { position: relative; min-width: 0; }
+.page-hero > .glyph-composition {
+  position: absolute;
+  z-index: 1;
+  right: 3%;
+  top: 0;
+  bottom: 0;
+  width: 39%;
+  pointer-events: none;
+}
+.page-hero.glyph-hero {
+  min-height: 250px;
+  background: radial-gradient(ellipse at 79% 48%, #ffffff06, transparent 43%), #030303;
+}
+.glyph-hero .hero-copy { max-width: 64%; }
+.glyph-hero .hero-actions { margin-top: 17px; }
+.glyph-hero .hero-actions .primary-button { padding: 8px 12px; }
+.glyph-stage { position: absolute; inset: 0; overflow: hidden; }
+.glyph-stage > img, .glyph-stage > canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.glyph-stage > [hidden] { display: none; }
+.glyph-caption { position: absolute; bottom: 18px; right: 0; display: grid; gap: 4px; text-align: right; text-transform: uppercase; pointer-events: none; }
+.glyph-caption > span { color: #aaa; font: 9px/1.3 var(--console-mono, monospace); letter-spacing: .2em; }
+.glyph-caption > small { color: #777; font: 8px/1.3 var(--console-mono, monospace); letter-spacing: .13em; }
+.glyph-motion-toggle { position: absolute; right: 0; top: 14px; width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 0; box-sizing: border-box; display: grid; place-items: center; border: 1px solid #303030; border-radius: 50%; color: #bcbcbc; background: #070707; cursor: pointer; pointer-events: auto; opacity: .7; }
+.glyph-motion-toggle:hover, .glyph-motion-toggle:focus-visible { opacity: 1; border-color: #666; color: #fff; }
+.glyph-motion-toggle > span { width: 6px; height: 8px; border-left: 1px solid currentColor; border-right: 1px solid currentColor; }
+.glyph-motion-toggle[data-paused="true"] > span { border: 0; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 6px solid currentColor; margin-left: 2px; }
+.glyph-motion-toggle:disabled { opacity: .35; cursor: default; }
+.glyph-motion-toggle:focus-visible { outline: 2px solid #ddd; outline-offset: 3px; }
+.ntox-glyph-icon { display: inline-block; flex-shrink: 0; vertical-align: middle; }
+.nav-item .ntox-glyph-icon { width: 20px; height: 20px; }
+.nav-item.active .ntox-glyph-icon { filter: drop-shadow(0 0 5px #ffffff35); }
+.agent-avatar .ntox-glyph-icon { transition: transform .25s ease, filter .25s ease; }
+.fleet-identity:hover .ntox-glyph-icon, .fleet-row:hover .agent-avatar .ntox-glyph-icon { transform: scale(1.08); filter: drop-shadow(0 0 4px #ffffff44); }
+.task-identity-glyph { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border: 1px solid #303030; border-radius: 8px; background: radial-gradient(ellipse, #ffffff08, transparent); }
+.glyph-passage { position: fixed; z-index: 300; inset: 0; pointer-events: none; contain: strict; }
+.glyph-passage canvas { display: block; width: 100%; height: 100%; }
+.desktop-welcome > .glyph-welcome { width: 210px; height: 158px; margin: -22px auto 12px; }
+.glyph-welcome .glyph-stage { inset: 0 20px; }
+.glyph-welcome .glyph-motion-toggle { right: 2px; top: 10px; }
+.context-agent > i > .ntox-glyph-icon { width: 18px; height: 18px; }
+@media (max-width: 1250px) {
+  .page-hero > .glyph-composition { width: 35%; right: 2%; }
+  .glyph-hero .hero-copy { max-width: 68%; }
+  .glyph-caption { bottom: 14px; }
+}
+@media (max-width: 760px) {
+  .page-hero.glyph-hero { min-height: 220px; padding: 22px; }
+  .glyph-hero .hero-copy, .page-hero.glyph-hero:has(.hero-actions) .hero-copy { max-width: 68%; }
+  .glyph-hero .hero-copy h1 { font-size: 30px; }
+  .page-hero > .glyph-composition { top: 18px; bottom: 18px; width: 33%; right: 2%; }
+  .glyph-caption { right: 4px; bottom: 0; }
+  .glyph-caption > span { font-size: 8px; }
+  .glyph-caption > small { display: none; }
+  .glyph-motion-toggle { top: 0; right: 4px; }
+  .desktop-welcome > .glyph-welcome { width: 160px; height: 110px; margin-top: 0; }
+}
+@media (max-width: 480px) {
+  .page-hero.glyph-hero { padding-right: 78px; }
+  .glyph-hero .hero-copy, .page-hero.glyph-hero:has(.hero-actions) .hero-copy { max-width: 100%; }
+  .page-hero > .glyph-composition { width: 78px; right: 0; top: 10px; bottom: auto; height: 160px; opacity: .65; }
+  .glyph-caption { display: none; }
+  .glyph-motion-toggle { right: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-avatar .ntox-glyph-icon { transition: none; }
+  .glyph-passage { display: none; }
+}
+
+@media (max-height: 720px) {
+  .console-main { padding-top: 74px; }
+  .page-hero, .page-hero.glyph-hero { min-height: 154px; padding: 17px 22px; margin-bottom: 9px; }
+  .glyph-hero .hero-copy h1 { font-size: clamp(28px, 2.6vw, 38px); }
+  .glyph-hero .hero-copy .eyebrow { margin-bottom: 4px; }
+  .glyph-hero .hero-copy h1 { margin-bottom: 7px; }
+  .glyph-hero .hero-copy p { line-height: 1.4; }
+  .page-hero > .glyph-composition { top: 0; bottom: 0; }
+  .metrics-grid { gap: 7px; margin-bottom: 9px; }
+  .metric-card { min-height: 78px; padding: 10px 13px; }
+  .metric-value { font-size: 26px; margin: 5px 0 2px; }
+  .metric-card > p { margin-top: 2px; font-size: 11px; }
+  .table-toolbar { min-height: 48px; padding-top: 9px; padding-bottom: 9px; }
+  .agent-fleet td, .task-ledger td { padding-top: 10px; padding-bottom: 10px; }
+}

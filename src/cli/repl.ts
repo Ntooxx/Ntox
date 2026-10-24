@@ -20,6 +20,7 @@ import { describeError } from "../core/errors.js";
 import { Agent } from "../core/agent.js";
 import { Reflector } from "../meta/reflector.js";
 import { createIdleJobs } from "../mind/jobs.js";
+import { SparkEngine } from "../mind/spark.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { MemoryStore } from "../memory/episodic.js";
 import { UserModel } from "../memory/user-model.js";
@@ -1979,6 +1980,11 @@ export class Repl {
       pushProposal: (proposal) => mind.idle.pushProposal(proposal),
       selfPlayCursor: () => selfPlayCursor++,
       selfPlayCapPerDay: 2,
+      spark: new SparkEngine({
+        cooldownMs: this.config.sparkCooldownMs,
+        minIntervalMs: this.config.sparkMinIntervalMs,
+      }),
+      sparkEnabled: this.config.sparkEnabled,
     });
     for (const job of jobs) mind.idle.addJob(job);
   }
@@ -2766,6 +2772,17 @@ export class Repl {
     );
     const toolStarts = new Map<string, number>();
 
+    const emitTag = (tag: string) => {
+      blockBuffer.forceFlush();
+      if (!hasStarted && this.config.animationLevel !== "off") {
+        spinner.stop();
+        writer.writeTag(tag);
+        spinner.start();
+        return;
+      }
+      writer.writeTag(tag);
+    };
+
     const startOutput = () => {
       if (hasStarted) return;
       hasStarted = true;
@@ -2774,7 +2791,7 @@ export class Repl {
       writer.startLine();
       if (this.thinkingChars > 0) {
         const secs = Math.max(1, Math.round((Date.now() - this.turnStartedAtMs) / 1000));
-        writer.writeTag(
+        emitTag(
           renderInlineTag(`reasoned ${formatTokenCount(this.thinkingChars)} chars in ${secs}s`, chalk.dim),
         );
         this.thinkingChars = 0;
@@ -2811,16 +2828,16 @@ export class Repl {
           startOutput();
           spinner.setText(`using ${name}`);
           if (this.config.uiMode === "debug" && this.config.animationLevel !== "off") {
-            writer.writeTag(renderInlineTag(renderToolPill(name, "running")));
+            emitTag(renderInlineTag(renderToolPill(name, "running")));
           } else if (this.config.uiMode === "debug") {
-            writer.writeTag(renderInlineTag(`tool: ${name}`));
+            emitTag(renderInlineTag(`tool: ${name}`));
           }
         },
         onToolResult: (name, result, args) => {
           const payload = result.data as { image?: unknown } | undefined;
           if (result.success && typeof payload?.image === "string" && payload.image.startsWith("data:image")) {
             const saved = saveDataUrlImage(payload.image);
-            if (saved) writer.writeTag(renderInlineTag(`image saved: ${saved}`, chalk.cyan));
+            if (saved) emitTag(renderInlineTag(`image saved: ${saved}`, chalk.cyan));
           }
           const key = `${name}:${JSON.stringify(args)}`;
           const startedAt = toolStarts.get(key);
@@ -2828,7 +2845,7 @@ export class Repl {
           toolStarts.delete(key);
           if (this.config.uiMode === "minimal" && result.success) return;
           if (this.config.animationLevel !== "off" || this.config.uiMode !== "minimal" || !result.success) {
-            writer.writeTag(renderInlineTag(renderToolEvent(name, result, elapsed)));
+            emitTag(renderInlineTag(renderToolEvent(name, result, elapsed)));
           }
         },
         onUsage: (usage) => {
@@ -2847,14 +2864,14 @@ export class Repl {
         },
         onMemoryRecall: (count) => {
           if (this.config.animationLevel !== "off") {
-            writer.writeTag(renderInlineTag(renderMemoryPulse("recalled", count), chalk.dim));
+            emitTag(renderInlineTag(renderMemoryPulse("recalled", count), chalk.dim));
           } else {
-            writer.writeTag(renderInlineTag(`recalled ${count} memories`, chalk.dim));
+            emitTag(renderInlineTag(`recalled ${count} memories`, chalk.dim));
           }
         },
         onMemoryStore: () => {
           if (this.config.animationLevel !== "off") {
-            writer.writeTag(renderInlineTag(renderMemoryPulse("stored", 1), chalk.dim));
+            emitTag(renderInlineTag(renderMemoryPulse("stored", 1), chalk.dim));
           }
         },
         onStrategy: (type) => {
@@ -2864,7 +2881,7 @@ export class Repl {
         onReflection: (reflection) => {
           this.lastReflection = reflection;
           if (this.config.verboseCallbacks && reflection.confidence < this.config.metaMinConfidence) {
-            writer.writeTag(
+            emitTag(
               renderInlineTag(
                 `confidence: ${(reflection.confidence * 100).toFixed(0)}% — gaps: ${reflection.knowledgeGaps.join(", ") || "none"}`,
                 chalk.yellow,
@@ -2874,12 +2891,12 @@ export class Repl {
         },
         onCorrectionDetected: (topicKey) => {
           if (this.config.verboseCallbacks) {
-            writer.writeTag(renderInlineTag(`correction logged: ${topicKey}`, chalk.yellow));
+            emitTag(renderInlineTag(`correction logged: ${topicKey}`, chalk.yellow));
           }
         },
         onSkillTriggered: (name, confidence) => {
           if (this.config.verboseCallbacks) {
-            writer.writeTag(renderInlineTag(`skill: ${name} (${(confidence * 100).toFixed(0)}%)`, chalk.magenta));
+            emitTag(renderInlineTag(`skill: ${name} (${(confidence * 100).toFixed(0)}%)`, chalk.magenta));
           }
         },
         onSkillProposal: (skill) => {
@@ -2890,7 +2907,7 @@ export class Repl {
           if (suggestion.type === "milestone" || suggestion.type === "feedback-prompt") return;
           if (!this.config.verboseCallbacks) return;
           const color = suggestion.type === "goal-reminder" ? chalk.green : chalk.cyan;
-          writer.writeTag(renderInlineTag(suggestion.message, color));
+          emitTag(renderInlineTag(suggestion.message, color));
         },
         onCognitive: (summary) => {
           spinner.setText(summary);
@@ -2898,28 +2915,28 @@ export class Repl {
         onStyleGuidance: (guidance) => {
           if (!this.config.verboseCallbacks) return;
           if (guidance.includes("Keep being")) return;
-          writer.writeTag(renderInlineTag(`style: ${guidance}`, chalk.cyan));
+          emitTag(renderInlineTag(`style: ${guidance}`, chalk.cyan));
         },
         onSelfAwareness: (message) => {
           if (!this.config.verboseCallbacks) return;
           if (message.includes("communicate in a") || message.includes("learn best via")) return;
-          writer.writeTag(renderInlineTag(message, chalk.green));
+          emitTag(renderInlineTag(message, chalk.green));
         },
         onFeedbackRequest: (question) => {
           if (this.config.verboseCallbacks) {
-            writer.writeTag(renderInlineTag(question, chalk.yellow));
+            emitTag(renderInlineTag(question, chalk.yellow));
           }
         },
         onIntervention: (intervention) => {
           if (this.config.verboseCallbacks) {
             const color = intervention.confidence > 0.7 ? chalk.red : chalk.yellow;
-            writer.writeTag(renderInlineTag(intervention.message, color));
+            emitTag(renderInlineTag(intervention.message, color));
           }
         },
         onDisagreement: (disagreement) => {
           if (this.config.verboseCallbacks) {
             const color = disagreement.confidence > 0.7 ? chalk.red : chalk.yellow;
-            writer.writeTag(renderInlineTag(`I disagree: ${disagreement.reason}`, color));
+            emitTag(renderInlineTag(`I disagree: ${disagreement.reason}`, color));
           }
         },
       },

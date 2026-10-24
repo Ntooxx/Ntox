@@ -10,6 +10,8 @@ experiments/*
 *.log
 shell-audit.log
 coverage/
+review/runtime-cache.json
+review/latest.json
 .env
 .ntox/
 .ntox-ci/
@@ -21,3 +23,14 @@ Horizon.md
 /ledger*.txt
 /*.html
 neon-game/
+
+.ntox-desktop-smoke/
+Ntox_2/
+Ntox_testing_2/
+UI/
+aether-probe/
+aether/
+genesis_build/
+roma-lineup/
+wasm-demo/target/
+.commandcode/

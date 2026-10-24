@@ -111,6 +111,9 @@ export interface NtoxConfig {
   modelCritiqueEnabled: boolean;
   idleEnabled: boolean;
   idleSelfPlay: boolean;
+  sparkEnabled: boolean;
+  sparkCooldownMs: number;
+  sparkMinIntervalMs: number;
   metaStrategyEnabled: boolean;
   metaReflectionEnabled: boolean;
   metaMistakesEnabled: boolean;

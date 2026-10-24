@@ -1,14 +1,35 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, relative, isAbsolute, join } from "node:path";
-import type { PolicyDecision, Tool, ToolContext, ToolResult, WorkspaceProfile } from "../types/index.js";
+import type { NetworkPolicy, PolicyDecision, Tool, ToolContext, ToolResult, WorkspaceProfile } from "../types/index.js";
 import { checkpointTool } from "../tools/checkpoint.js";
-import { NTOX_DIR } from "./config.js";
+import { hasInteractiveApproval, requestInteractiveApproval } from "../tools/approval.js";
+import { CONFIG_PATH, NTOX_DIR, loadConfig, saveConfig } from "./config.js";
 import { MEDIA_DIR } from "./media.js";
 
 export interface PolicyRuntime {
   profile: WorkspaceProfile;
   decisions: PolicyDecision[];
   checkpointIds: string[];
+}
+
+export type PolicyGrant =
+  | { kind: "tool"; tool: string }
+  | { kind: "roots"; read?: string[]; write?: string[] }
+  | { kind: "shell" }
+  | { kind: "network"; policy: NetworkPolicy };
+
+export interface PolicyDenial {
+  tool: string;
+  reason: string;
+  path?: string;
+  grant?: PolicyGrant;
+  fix?: string;
+}
+
+export type PolicyDenialOutcome = "blocked" | "declined" | "unapproved";
+
+export interface PolicyOptions {
+  persistGrant?: (profileId: string, grant: PolicyGrant) => void;
 }
 
 const READ_TOOLS = new Set(["read", "ls", "glob", "grep", "checkpoint", "open"]);
@@ -49,6 +70,19 @@ export function getDefaultProfile(profiles: WorkspaceProfile[], id: string): Wor
   return profiles.find((p) => p.id === id) || profiles[0] || createDefaultProfile();
 }
 
+export function scopeDefaultProfile(profile: WorkspaceProfile, cwd: string): WorkspaceProfile {
+  const rebase = (roots: string[]) => {
+    const updated = [...new Set(roots.map((root) => (root === profile.workspaceRoot ? cwd : root)))];
+    return [cwd, ...updated.filter((root) => root !== cwd && !isWithinRoot(root, [cwd]))];
+  };
+  return {
+    ...profile,
+    workspaceRoot: cwd,
+    readRoots: rebase(profile.readRoots),
+    writeRoots: rebase(profile.writeRoots),
+  };
+}
+
 export function createPolicyRuntime(profile: WorkspaceProfile): PolicyRuntime {
   return { profile, decisions: [], checkpointIds: [] };
 }
@@ -77,33 +111,104 @@ function record(runtime: PolicyRuntime, tool: string, allowed: boolean, reason: 
   return decision;
 }
 
-function deny(runtime: PolicyRuntime, tool: string, reason: string, path?: string): ToolResult {
+function deny(
+  runtime: PolicyRuntime,
+  tool: string,
+  reason: string,
+  path?: string,
+  grant?: PolicyGrant,
+  fix?: string,
+): PolicyDenial {
   record(runtime, tool, false, reason, path);
-  return { success: false, error: `POLICY_DENIED: ${reason}` };
+  return { tool, reason, path, grant, fix };
 }
 
-function checkNetwork(runtime: PolicyRuntime, tool: string, args: Record<string, unknown>): ToolResult | null {
+function denialResult(denial: PolicyDenial, outcome: PolicyDenialOutcome): ToolResult {
+  const base = `POLICY_DENIED: ${denial.reason}`;
+  if (outcome === "declined") {
+    return {
+      success: false,
+      error: `${base}. The user denied this request — do not retry it; explain the blocker and ask how they would like to proceed instead.`,
+    };
+  }
+  if (outcome === "unapproved") {
+    return {
+      success: false,
+      error: `${base}. No approval arrived — grant it in ${CONFIG_PATH} (allowedTools, readRoots/writeRoots, shellPolicy, networkPolicy) or approve the prompt when it appears.`,
+    };
+  }
+  return { success: false, error: `${base}.${denial.fix ? ` ${denial.fix}` : ""}` };
+}
+
+function approvalRequest(denial: PolicyDenial): string {
+  const detail = denial.path ? `${denial.reason} — ${denial.path}` : denial.reason;
+  return `policy ${denial.tool}: ${detail}`.slice(0, 400);
+}
+
+export function applyPolicyGrant(profile: WorkspaceProfile, grant: PolicyGrant): void {
+  if (grant.kind === "tool") {
+    if (profile.allowedTools.length > 0 && !profile.allowedTools.includes(grant.tool)) {
+      profile.allowedTools.push(grant.tool);
+    }
+    return;
+  }
+  if (grant.kind === "roots") {
+    for (const root of grant.write ?? []) if (!profile.writeRoots.includes(root)) profile.writeRoots.push(root);
+    for (const root of grant.read ?? []) if (!profile.readRoots.includes(root)) profile.readRoots.push(root);
+    return;
+  }
+  if (grant.kind === "shell") {
+    profile.shellPolicy = "approval-required";
+    return;
+  }
+  profile.networkPolicy = grant.policy;
+}
+
+export function persistPolicyGrant(profileId: string, grant: PolicyGrant): void {
+  try {
+    const config = loadConfig();
+    const target = config.profiles.find((profile) => profile.id === profileId);
+    if (!target) return;
+    applyPolicyGrant(target, grant);
+    saveConfig(config);
+  } catch {
+    /* the in-memory grant still holds for this session */
+  }
+}
+
+function networkFix(profile: WorkspaceProfile): string {
+  return `Set networkPolicy to "browser-allowed" for profile ${profile.id} in ${CONFIG_PATH} to allow it.`;
+}
+
+function checkNetwork(runtime: PolicyRuntime, tool: string, args: Record<string, unknown>): PolicyDenial | null {
   const policy = runtime.profile.networkPolicy;
-  if (policy === "disabled") return deny(runtime, tool, `Network disabled for profile ${runtime.profile.id}`);
+  const grant: PolicyGrant = { kind: "network", policy: "browser-allowed" };
+  const fix = networkFix(runtime.profile);
+  if (policy === "disabled") {
+    return deny(runtime, tool, `Network disabled for profile ${runtime.profile.id}`, undefined, grant, fix);
+  }
   if (tool === "browse" && policy !== "browser-allowed") {
-    return deny(runtime, tool, `Browser disabled for profile ${runtime.profile.id}`);
+    return deny(runtime, tool, `Browser disabled for profile ${runtime.profile.id}`, undefined, grant, fix);
   }
   if (tool === "web_read") {
     args.allowBrowserFallback = policy === "browser-allowed";
     if (args.preferBrowser === true && policy !== "browser-allowed") {
-      return deny(runtime, tool, `Browser disabled for profile ${runtime.profile.id}`);
+      return deny(runtime, tool, `Browser disabled for profile ${runtime.profile.id}`, undefined, grant, fix);
     }
   }
   record(runtime, tool, true, `Network allowed by ${policy}`);
   return null;
 }
 
-function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, unknown>): ToolResult | null {
+function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, unknown>): PolicyDenial | null {
   const keys = PATH_KEYS[tool] || [];
   const fallback =
     tool === "shell" || tool === "process" || tool === "ls" || tool === "glob" || tool === "grep"
       ? runtime.profile.workspaceRoot
       : "";
+  const isWrite = WRITE_TOOLS.has(tool);
+  const rootFix = (target: string, scope: "read" | "write") =>
+    `Add ${target} to the ${scope} roots of profile ${runtime.profile.id} in ${CONFIG_PATH} to allow it.`;
   for (const key of keys) {
     if (!args[key] && !fallback) {
       if (tool === "checkpoint") continue;
@@ -112,7 +217,14 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
     const rawValue = typeof args[key] === "string" ? args[key].trim() : "";
     if (URL_VALUE_PATTERN.test(rawValue)) {
       if (runtime.profile.networkPolicy === "disabled") {
-        return deny(runtime, tool, `Network disabled for profile ${runtime.profile.id}`, rawValue);
+        return deny(
+          runtime,
+          tool,
+          `Network disabled for profile ${runtime.profile.id}`,
+          rawValue,
+          { kind: "network", policy: "browser-allowed" },
+          networkFix(runtime.profile),
+        );
       }
       record(runtime, tool, true, `${tool} url allowed`, rawValue);
       continue;
@@ -120,9 +232,23 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
     const path = argPath(args, key, fallback);
     if (tool === "shell" || tool === "process") {
       if (runtime.profile.shellPolicy === "disabled")
-        return deny(runtime, tool, `Shell disabled for profile ${runtime.profile.id}`, path);
-      if (!isWithinRoot(path, [runtime.profile.workspaceRoot]))
-        return deny(runtime, tool, `Shell workdir outside workspace`, path);
+        return deny(
+          runtime,
+          tool,
+          `Shell disabled for profile ${runtime.profile.id}`,
+          path,
+          { kind: "shell" },
+          `Set shellPolicy to "approval-required" for profile ${runtime.profile.id} in ${CONFIG_PATH} to allow it.`,
+        );
+      if (!isWithinRoot(path, [runtime.profile.workspaceRoot, ...runtime.profile.writeRoots]))
+        return deny(
+          runtime,
+          tool,
+          `Shell workdir outside workspace`,
+          path,
+          { kind: "roots", read: [path], write: [path] },
+          rootFix(path, "write"),
+        );
       record(runtime, tool, true, `Shell allowed in workspace`, path);
       args.workdir = path;
       continue;
@@ -137,22 +263,36 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
             originalPath?: string;
           };
           if (!cp.originalPath || !isWithinRoot(cp.originalPath, runtime.profile.writeRoots)) {
-            return deny(runtime, tool, "Checkpoint rollback target outside write roots", cp.originalPath);
+            return deny(
+              runtime,
+              tool,
+              "Checkpoint rollback target outside write roots",
+              cp.originalPath,
+              cp.originalPath ? { kind: "roots", write: [cp.originalPath] } : undefined,
+              cp.originalPath ? rootFix(cp.originalPath, "write") : undefined,
+            );
           }
         } catch {
           return deny(runtime, tool, "Checkpoint not readable for policy check");
         }
       }
       if (action === "rollback" || action === "create") {
+        const scope: "read" | "write" = action === "rollback" ? "write" : "read";
         const roots = action === "rollback" ? runtime.profile.writeRoots : runtime.profile.readRoots;
-        if (args.path && !isWithinRoot(path, roots))
-          return deny(runtime, tool, `Checkpoint ${action} outside allowed roots`, path);
+        if (args.path && !isWithinRoot(path, roots)) {
+          const grant: PolicyGrant = scope === "write" ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
+          return deny(runtime, tool, `Checkpoint ${action} outside allowed roots`, path, grant, rootFix(path, scope));
+        }
       }
       record(runtime, tool, true, `Checkpoint allowed`, path);
       continue;
     }
-    const roots = WRITE_TOOLS.has(tool) ? runtime.profile.writeRoots : runtime.profile.readRoots;
-    if (!isWithinRoot(path, roots)) return deny(runtime, tool, `${tool} path outside allowed roots`, path);
+    const roots = isWrite ? runtime.profile.writeRoots : runtime.profile.readRoots;
+    if (!isWithinRoot(path, roots)) {
+      const scope: "read" | "write" = isWrite ? "write" : "read";
+      const grant: PolicyGrant = isWrite ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
+      return deny(runtime, tool, `${tool} path outside allowed roots`, path, grant, rootFix(path, scope));
+    }
     record(runtime, tool, true, `${tool} path allowed`, path);
     if (key in args) args[key] = path;
   }
@@ -189,7 +329,7 @@ function attachCheckpoint(result: ToolResult, checkpointId: string | null): Tool
   return { ...result, data };
 }
 
-function checkImageArg(runtime: PolicyRuntime, args: Record<string, unknown>): ToolResult | null {
+function checkImageArg(runtime: PolicyRuntime, args: Record<string, unknown>): PolicyDenial | null {
   const raw = typeof args.image === "string" ? args.image.trim() : "";
   if (!raw) return null;
   if (raw.startsWith("data:")) {
@@ -198,7 +338,14 @@ function checkImageArg(runtime: PolicyRuntime, args: Record<string, unknown>): T
   }
   if (URL_VALUE_PATTERN.test(raw)) {
     if (runtime.profile.networkPolicy === "disabled") {
-      return deny(runtime, "image", `Network disabled for profile ${runtime.profile.id}`, raw);
+      return deny(
+        runtime,
+        "image",
+        `Network disabled for profile ${runtime.profile.id}`,
+        raw,
+        { kind: "network", policy: "browser-allowed" },
+        networkFix(runtime.profile),
+      );
     }
     record(runtime, "image", true, "image url allowed", raw);
     return null;
@@ -215,34 +362,83 @@ function checkImageArg(runtime: PolicyRuntime, args: Record<string, unknown>): T
     args.image = path;
     return null;
   }
-  return deny(runtime, "image", "image path outside allowed roots", path);
+  return deny(
+    runtime,
+    "image",
+    "image path outside allowed roots",
+    path,
+    { kind: "roots", read: [path] },
+    `Add ${path} to the read roots of profile ${runtime.profile.id} in ${CONFIG_PATH} to allow it.`,
+  );
 }
 
-export function enforceToolPolicy(tool: Tool, runtime: PolicyRuntime): Tool {
+function allowlistCheck(runtime: PolicyRuntime, tool: string): PolicyDenial | null {
+  if (runtime.profile.allowedTools.length === 0 || runtime.profile.allowedTools.includes(tool)) return null;
+  return deny(
+    runtime,
+    tool,
+    `Tool not allowed for profile ${runtime.profile.id}`,
+    undefined,
+    { kind: "tool", tool },
+    `Add "${tool}" to allowedTools of profile ${runtime.profile.id} in ${CONFIG_PATH} to allow it.`,
+  );
+}
+
+export function enforceToolPolicy(tool: Tool, runtime: PolicyRuntime, options: PolicyOptions = {}): Tool {
+  const persistGrant = options.persistGrant ?? persistPolicyGrant;
   return {
     ...tool,
     async execute(args, context?: ToolContext) {
-      if (runtime.profile.allowedTools.length > 0 && !runtime.profile.allowedTools.includes(tool.name)) {
-        return deny(runtime, tool.name, `Tool not allowed for profile ${runtime.profile.id}`);
-      }
+      const gated: (() => PolicyDenial | null)[] = [];
       if (NETWORK_TOOLS.has(tool.name)) {
-        const networkDecision = checkNetwork(runtime, tool.name, args);
-        if (networkDecision) return networkDecision;
-      }
-      if (tool.name === "image") {
-        const imageDecision = checkImageArg(runtime, args);
-        if (imageDecision) return imageDecision;
+        gated.push(() => checkNetwork(runtime, tool.name, args));
+      } else if (tool.name === "image") {
+        gated.push(() => checkImageArg(runtime, args));
       } else if (
         READ_TOOLS.has(tool.name) ||
         WRITE_TOOLS.has(tool.name) ||
         tool.name === "shell" ||
         tool.name === "process"
       ) {
-        const pathDecision = checkPaths(runtime, tool.name, args);
-        if (pathDecision) return pathDecision;
+        gated.push(() => checkPaths(runtime, tool.name, args));
       } else {
-        record(runtime, tool.name, true, "Tool allowed");
+        gated.push(() => {
+          record(runtime, tool.name, true, "Tool allowed");
+          return null;
+        });
       }
+      const checks = [() => allowlistCheck(runtime, tool.name), ...gated];
+
+      let asked = false;
+      let index = 0;
+      for (;;) {
+        let denial: PolicyDenial | null = null;
+        let deniedAt = index;
+        for (; deniedAt < checks.length; deniedAt++) {
+          denial = checks[deniedAt]();
+          if (denial) break;
+        }
+        if (!denial) break;
+        const grant = denial.grant;
+        if (!grant || asked || !hasInteractiveApproval()) return denialResult(denial, "blocked");
+
+        asked = true;
+        const decision = await requestInteractiveApproval(tool.name, approvalRequest(denial));
+        if (decision === "deny") return denialResult(denial, "declined");
+        if (!decision) return denialResult(denial, "unapproved");
+        if (decision === "allow-once") {
+          record(runtime, denial.tool, true, `Allowed once by user approval`, denial.path);
+          index = deniedAt + 1;
+          continue;
+        }
+
+        applyPolicyGrant(runtime.profile, grant);
+        const scope = decision === "allow-always" ? "permanently" : "for this session";
+        record(runtime, denial.tool, true, `Allowed ${scope} by user approval`, denial.path);
+        if (decision === "allow-always") persistGrant(runtime.profile.id, grant);
+        index = 0;
+      }
+
       const checkpointId = await maybeCheckpoint(runtime, tool.name, args);
       return attachCheckpoint(await tool.execute(args, context), checkpointId);
     },

@@ -1,0 +1,35 @@
+{
+  "glyphs": 21,
+  "exports": 42,
+  "viewports": [
+    {
+      "width": 1440,
+      "height": 1000,
+      "horizontalOverflow": false
+    },
+    {
+      "width": 760,
+      "height": 800,
+      "horizontalOverflow": false
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "horizontalOverflow": false
+    }
+  ],
+  "checks": [
+    "all glyph selections",
+    "all artwork images decoded",
+    "asset links",
+    "filters and search",
+    "reduced-motion transitions",
+    "animated transition completion",
+    "pause stops frames",
+    "offscreen stops frames",
+    "keyboard selection",
+    "static fallback without canvas",
+    "no network requests"
+  ],
+  "pageErrors": []
+}

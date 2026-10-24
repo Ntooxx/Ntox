@@ -1,7 +1,7 @@
 import { exec } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import type { Tool } from "../types/index.js";
-import { getBaseDir, loadConfig } from "../core/config.js";
+import { CONFIG_PATH, getBaseDir, loadConfig } from "../core/config.js";
 import { approvalStore, buildApprovalKey, needsApproval, requestInteractiveApproval } from "./approval.js";
 
 const IS_WINDOWS = process.platform === "win32";
@@ -148,18 +148,42 @@ function execAsync(
   });
 }
 
+type DockerProbe = () => Promise<boolean>;
+
+function probeDocker(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = exec("docker --version", { timeout: 2500, windowsHide: true }, (error) => {
+      resolve(!error);
+    });
+    probe.on("error", () => resolve(false));
+  });
+}
+
 let dockerProbe: Promise<boolean> | null = null;
+let probeDockerAvailability: DockerProbe = probeDocker;
+
+export function setDockerProbe(probe: DockerProbe | null): void {
+  probeDockerAvailability = probe ?? probeDocker;
+  dockerProbe = null;
+}
 
 function dockerAvailable(): Promise<boolean> {
-  if (!dockerProbe) {
-    dockerProbe = new Promise((resolve) => {
-      const probe = exec("docker --version", { timeout: 2500, windowsHide: true }, (error) => {
-        resolve(!error);
-      });
-      probe.on("error", () => resolve(false));
-    });
-  }
+  if (!dockerProbe) dockerProbe = probeDockerAvailability().catch(() => false);
   return dockerProbe;
+}
+
+export type SandboxMode = "docker" | "host" | "denied";
+
+export interface SandboxDecisionInput {
+  dockerEnabled: boolean;
+  isWindows: boolean;
+  dockerAvailable: boolean;
+}
+
+export function decideSandbox(input: SandboxDecisionInput): SandboxMode {
+  if (input.dockerEnabled) return input.dockerAvailable ? "docker" : "denied";
+  if (input.dockerAvailable && !input.isWindows) return "docker";
+  return "host";
 }
 
 function dockerExec(command: string, workdir: string, timeout: number): Promise<{ stdout: string; stderr: string }> {
@@ -226,7 +250,21 @@ export const shellTool: Tool = {
 
     const config = loadConfig();
     const wantsDocker = config.dockerEnabled || !IS_WINDOWS;
-    if (wantsDocker && (await dockerAvailable())) {
+    const sandbox = decideSandbox({
+      dockerEnabled: config.dockerEnabled,
+      isWindows: IS_WINDOWS,
+      dockerAvailable: wantsDocker ? await dockerAvailable() : false,
+    });
+
+    if (sandbox === "denied") {
+      auditShellCommand(command, true);
+      return {
+        success: false,
+        error: `SANDBOX_REQUIRED: dockerEnabled is true but Docker is unavailable, so this command cannot run isolated. Start Docker, or set dockerEnabled false in ${CONFIG_PATH} to permit unisolated execution.`,
+      };
+    }
+
+    if (sandbox === "docker") {
       try {
         const { stdout } = await dockerExec(command, workdir, timeout);
         return { success: true, data: stdout };

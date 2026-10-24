@@ -1,10 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Tool, WorkspaceProfile } from "../types/index.js";
-import { createPolicyRuntime, enforceToolPolicy } from "./policy.js";
+import { applyPolicyGrant, createPolicyRuntime, enforceToolPolicy, scopeDefaultProfile } from "./policy.js";
+import { setInteractiveApproval } from "../tools/approval.js";
+import { CONFIG_PATH } from "./config.js";
 import { MEDIA_DIR } from "./media.js";
 
 function profile(root: string): WorkspaceProfile {
@@ -26,6 +28,12 @@ function tempRoot(): string {
   mkdirSync(root, { recursive: true });
   return root;
 }
+
+function outsideFile(suffix: string): string {
+  return join(tmpdir(), `ntox-outside-${randomUUID().slice(0, 8)}${suffix}`);
+}
+
+afterEach(() => setInteractiveApproval(null));
 
 describe("policy", () => {
   it("allows read inside workspace", async () => {
@@ -265,5 +273,222 @@ describe("image policy", () => {
 
     expect(result.success).toBe(true);
     rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("policy approval flow", () => {
+  function writeTool(): Tool {
+    return {
+      name: "write",
+      description: "",
+      parameters: {},
+      execute: async (args) => ({ success: true, data: { path: String(args.path ?? "") } }),
+    };
+  }
+
+  function shellTool(): Tool {
+    return {
+      name: "shell",
+      description: "",
+      parameters: {},
+      execute: async (args) => ({ success: true, data: { workdir: String(args.workdir ?? "") } }),
+    };
+  }
+
+  it("offers the approval prompt when a tool is missing from the allowlist", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime({ ...profile(root), allowedTools: ["read"] });
+    const prompts: string[] = [];
+    setInteractiveApproval(async (toolName, command) => {
+      prompts.push(`${toolName}: ${command}`);
+      return "allow-once";
+    });
+
+    const result = await enforceToolPolicy(writeTool(), runtime).execute({
+      path: join(root, "a.txt"),
+      content: "x",
+    });
+
+    expect(result.success).toBe(true);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("write: policy write: Tool not allowed for profile test");
+    expect(runtime.profile.allowedTools).not.toContain("write");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("keeps an allow-session grant for the rest of the run", async () => {
+    const root = tempRoot();
+    const outside = outsideFile(".txt");
+    const runtime = createPolicyRuntime(profile(root));
+    let prompts = 0;
+    setInteractiveApproval(async () => {
+      prompts += 1;
+      return "allow-session";
+    });
+
+    const first = await enforceToolPolicy(writeTool(), runtime).execute({ path: outside, content: "x" });
+    expect(first.success).toBe(true);
+    expect(prompts).toBe(1);
+    expect(runtime.profile.writeRoots).toContain(outside);
+
+    const second = await enforceToolPolicy(writeTool(), runtime).execute({ path: outside, content: "y" });
+    expect(second.success).toBe(true);
+    expect(prompts).toBe(1);
+    expect(runtime.decisions.at(-1)?.allowed).toBe(true);
+    rmSync(outside, { force: true });
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("persists an allow-always grant through the configured persister", async () => {
+    const root = tempRoot();
+    const outside = outsideFile(".txt");
+    const runtime = createPolicyRuntime(profile(root));
+    const persisted: string[] = [];
+    setInteractiveApproval(async () => "allow-always");
+
+    const wrapped = enforceToolPolicy(writeTool(), runtime, {
+      persistGrant: (profileId, grant) => persisted.push(`${profileId}:${grant.kind}`),
+    });
+    const result = await wrapped.execute({ path: outside, content: "x" });
+
+    expect(result.success).toBe(true);
+    expect(persisted).toEqual(["test:roots"]);
+    expect(runtime.profile.writeRoots).toContain(outside);
+    rmSync(outside, { force: true });
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("expands the shell workspace only after an approval grants it", async () => {
+    const root = tempRoot();
+    const workdir = tempRoot();
+    const runtime = createPolicyRuntime(profile(root));
+    setInteractiveApproval(async () => "allow-session");
+
+    const result = await enforceToolPolicy(shellTool(), runtime).execute({ command: "npm test", workdir });
+
+    expect(result.success).toBe(true);
+    expect(runtime.profile.writeRoots).toContain(workdir);
+    rmSync(workdir, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("explains how to grant the permission when no approval channel is attached", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime({ ...profile(root), allowedTools: ["read"] });
+    setInteractiveApproval(null);
+
+    const result = await enforceToolPolicy(writeTool(), runtime).execute({
+      path: join(root, "a.txt"),
+      content: "x",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("POLICY_DENIED: Tool not allowed for profile test");
+    expect(result.error).toContain(CONFIG_PATH);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("tells the agent not to retry after the user declines", async () => {
+    const root = tempRoot();
+    const outside = outsideFile(".txt");
+    const runtime = createPolicyRuntime(profile(root));
+    setInteractiveApproval(async () => "deny");
+
+    const result = await enforceToolPolicy(writeTool(), runtime).execute({ path: outside, content: "x" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("POLICY_DENIED");
+    expect(result.error).toContain("do not retry");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("surfaces a reason when the prompt is never answered", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime({ ...profile(root), allowedTools: ["read"] });
+    setInteractiveApproval(async () => null);
+
+    const result = await enforceToolPolicy(writeTool(), runtime).execute({
+      path: join(root, "a.txt"),
+      content: "x",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("No approval arrived");
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("scopeDefaultProfile", () => {
+  const base: WorkspaceProfile = {
+    id: "default",
+    name: "Default Workspace",
+    workspaceRoot: join(tmpdir(), "ntox-default-root"),
+    readRoots: [join(tmpdir(), "ntox-default-root")],
+    writeRoots: [join(tmpdir(), "ntox-default-root")],
+    allowedTools: [],
+    shellPolicy: "approval-required",
+    networkPolicy: "browser-allowed",
+    autoCheckpoint: true,
+  };
+
+  it("follows the launch directory while the profile is untouched", () => {
+    const cwd = tempRoot();
+    const scoped = scopeDefaultProfile(base, cwd);
+
+    expect(scoped.workspaceRoot).toBe(cwd);
+    expect(scoped.readRoots).toEqual([cwd]);
+    expect(scoped.writeRoots).toEqual([cwd]);
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("keeps roots the user granted on top of the launch directory", () => {
+    const cwd = tempRoot();
+    const granted = join(tmpdir(), `ntox-granted-${randomUUID().slice(0, 8)}`);
+    const scoped = scopeDefaultProfile({ ...base, writeRoots: [base.workspaceRoot, granted] }, cwd);
+
+    expect(scoped.workspaceRoot).toBe(cwd);
+    expect(scoped.writeRoots[0]).toBe(cwd);
+    expect(scoped.writeRoots).toContain(granted);
+    rmSync(cwd, { recursive: true, force: true });
+  });
+});
+
+describe("applyPolicyGrant", () => {
+  it("adds a tool only when the profile is allowlisting", () => {
+    const restricted: WorkspaceProfile = {
+      id: "default",
+      name: "Restricted",
+      workspaceRoot: "/tmp",
+      readRoots: ["/tmp"],
+      writeRoots: ["/tmp"],
+      allowedTools: ["read"],
+      shellPolicy: "approval-required",
+      networkPolicy: "browser-allowed",
+      autoCheckpoint: true,
+    };
+    applyPolicyGrant(restricted, { kind: "tool", tool: "email_send" });
+    expect(restricted.allowedTools).toEqual(["read", "email_send"]);
+
+    const unrestricted = { ...restricted, allowedTools: [] as string[] };
+    applyPolicyGrant(unrestricted, { kind: "tool", tool: "email_send" });
+    expect(unrestricted.allowedTools).toEqual([]);
+  });
+
+  it("switches shell and network policy grants", () => {
+    const granted: WorkspaceProfile = {
+      id: "default",
+      name: "Granted",
+      workspaceRoot: "/tmp",
+      readRoots: ["/tmp"],
+      writeRoots: ["/tmp"],
+      allowedTools: ["read"],
+      shellPolicy: "disabled",
+      networkPolicy: "disabled",
+      autoCheckpoint: true,
+    };
+    applyPolicyGrant(granted, { kind: "shell" });
+    applyPolicyGrant(granted, { kind: "network", policy: "browser-allowed" });
+    expect(granted.shellPolicy).toBe("approval-required");
+    expect(granted.networkPolicy).toBe("browser-allowed");
   });
 });

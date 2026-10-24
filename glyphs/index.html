@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'">
+  <title>NTOX — Glyph studies</title>
+  <link rel="stylesheet" href="preview.css">
+  <script src="catalog.js" defer></script>
+  <script src="geometry.js" defer></script>
+  <script src="preview.js" defer></script>
+</head>
+<body>
+  <header class="masthead"><a class="wordmark" href="#top" aria-label="NTOX glyph studies home">NTOX</a><span class="masthead-label">GLYPH STUDIES / VOL. 01</span><span class="prototype-label">Independent design preview</span></header>
+  <main id="top">
+    <section class="introduction"><div><span class="eyebrow">BLACK. WHITE. IN MOTION.</span><h1>A language of light.</h1></div><p>Twenty-one identities. One visual system.<br>Explore the forms before they enter the workspace.</p></section>
+    <section class="studio" aria-label="Selected glyph preview">
+      <div class="studio-copy"><span class="eyebrow" id="selected-number">01 / EXPERIENCE</span><h2 id="selected-name">Threshold</h2><p id="selected-description">An eclipse rising above a field of light.</p><span class="section-label" id="selected-label">Intro</span><div class="icon-sizes" aria-label="Navigation icon at 20, 28, and 40 pixels"><img class="icon-small" src="icons/intro.svg" alt="20 pixel navigation glyph"><img class="icon-medium" src="icons/intro.svg" alt="28 pixel navigation glyph"><img class="icon-large" src="icons/intro.svg" alt="40 pixel navigation glyph"><span>20 / 28 / 40 PX</span></div><div class="downloads"><a id="download-artwork" href="artwork/intro.svg" download>Artwork SVG <span aria-hidden="true">↗</span></a><a id="download-icon" href="icons/intro.svg" download>Navigation SVG <span aria-hidden="true">↗</span></a></div><div class="paging"><button id="previous" aria-label="Previous glyph">←</button><span id="position">01 / 21</span><button id="next" aria-label="Next glyph">→</button></div></div>
+      <div class="stage" id="stage"><div class="stage-corner top-left"></div><div class="stage-corner bottom-right"></div><span class="stage-caption">PROCEDURAL LIGHT / VECTOR GEOMETRY</span><canvas id="glyph-canvas" aria-hidden="true"></canvas><img id="stage-fallback" src="artwork/intro.svg" alt="" hidden><div class="stage-footer"><span id="motion-label">AMBIENT MOTION</span><span id="stage-destination">INTRO / THRESHOLD</span></div><div class="transition-caption" id="transition-caption" role="status"></div></div>
+    </section>
+    <section class="controls" aria-label="Motion controls"><div class="motion-controls"><button id="motion-toggle" aria-pressed="false">Pause motion</button><button id="replay">Replay formation</button><label for="intensity">Motion <select id="intensity"><option value="ambient">Ambient</option><option value="active">Active study</option></select></label></div><div class="transition-controls"><span class="eyebrow">TRANSITION STUDIES</span><button data-transition="agents">Intro → Agents</button><button data-transition="chat">Intro → Chat</button></div></section>
+    <p class="preview-note">Motion and activity are illustrative. This preview has no connection to the NTOX runtime. Reduced-motion preferences are respected.</p>
+    <section class="collection" aria-labelledby="collection-title"><div class="collection-heading"><div><span class="eyebrow">THE COMPLETE COLLECTION</span><h2 id="collection-title">Choose a form.</h2></div><label class="search"><span class="visually-hidden">Find a glyph</span><input id="search" type="search" placeholder="Find a glyph…" autocomplete="off"></label></div><div class="filters" role="group" aria-label="Filter glyph collection"><button data-filter="All" aria-pressed="true">All <span>21</span></button><button data-filter="Workspace" aria-pressed="false">Workspace</button><button data-filter="Experience" aria-pressed="false">Experience</button><button data-filter="Agent identities" aria-pressed="false">Agent identities</button></div><div class="glyph-grid" id="glyph-grid"></div><p id="empty-results" hidden>No matching glyphs. Try another name or category.</p><p id="results-count" class="visually-hidden" role="status"></p></section>
+    <footer class="page-footer"><span>NTOX / FORM BEFORE FUNCTION</span><span>21 artwork glyphs · 21 navigation glyphs · local assets only</span></footer>
+  </main>
+</body>
+</html>

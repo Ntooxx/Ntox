@@ -49,7 +49,13 @@ import { Mind } from "../mind/mind.js";
 import { McpBridge } from "../mcp/bridge.js";
 import type { NtoxConfig, CostUsage, WorkspaceProfile, SkillDefinition } from "../types/index.js";
 import type { SessionStore } from "../gateway/types.js";
-import { createPolicyRuntime, enforceToolPolicy, getDefaultProfile, type PolicyRuntime } from "./policy.js";
+import {
+  createPolicyRuntime,
+  enforceToolPolicy,
+  getDefaultProfile,
+  scopeDefaultProfile,
+  type PolicyRuntime,
+} from "./policy.js";
 import { getNtoxDir, loadCachedModels } from "./config.js";
 
 export interface AgentInfra {
@@ -123,12 +129,7 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
   const selectedProfile = profile || getDefaultProfile(config.profiles, config.defaultProfileId);
   const runtimeProfile =
     selectedProfile.id === "default" && selectedProfile.name === "Default Workspace"
-      ? {
-          ...selectedProfile,
-          workspaceRoot: process.cwd(),
-          readRoots: [process.cwd()],
-          writeRoots: [process.cwd()],
-        }
+      ? scopeDefaultProfile(selectedProfile, process.cwd())
       : selectedProfile;
   const policy = createPolicyRuntime(runtimeProfile);
   const alive = new NtoxAliveBridge(
@@ -177,7 +178,7 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
 
   const mind = new Mind();
 
-  const mcp = new McpBridge({ registry: tools, servers: config.mcpServers });
+  const mcp = new McpBridge({ registry: tools, policy, servers: config.mcpServers });
 
   return { llm, tools, skillRegistry, skillExecutor, skillLibrary, policy, alive, aliveHosts, mind, mcp };
 }

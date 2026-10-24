@@ -6,6 +6,7 @@ import type { MemoryStore } from "../memory/episodic.js";
 import type { Mind } from "./mind.js";
 import type { IdleJob, IdleJobContext } from "./idle.js";
 import { runSelfPlay } from "./self-play.js";
+import { SparkEngine } from "./spark.js";
 import { estimateTokens } from "./util.js";
 
 export interface IdleJobsDeps {
@@ -18,6 +19,8 @@ export interface IdleJobsDeps {
   pushProposal?: (proposal: string) => void;
   selfPlayCursor?: () => number;
   selfPlayCapPerDay?: number;
+  spark?: SparkEngine;
+  sparkEnabled?: boolean;
 }
 
 const MIN_TOKEN_LEN = 4;
@@ -227,5 +230,29 @@ export function createIdleJobs(deps: IdleJobsDeps): IdleJob[] {
     },
   };
 
-  return [resolveJob, consolidateJob, reflectJob, prepareJob, selfPlayJob, proposeJob];
+  const sparkJob: IdleJob = {
+    name: "spark",
+    priority: 35,
+    run: (ctx: IdleJobContext) => {
+      if (!deps.spark || !deps.alive) return null;
+      const state = deps.alive.engine.getState();
+      const artifactsToday = deps.memory
+        ? deps.memory.getRecent(200).filter((e) => e.timestamp >= ctx.since).length
+        : 0;
+      const decision = deps.spark.decide({
+        minutesSinceLastActive: (ctx.now() - deps.spark.status().lastSentAt) / 60_000,
+        artifactsToday,
+        openLoops: state.openLoops.filter((l) => l.status === "active" || l.status === "waiting_evidence").length,
+        significantEventsSinceLastRun: state.events.filter((e) => e.timestamp >= ctx.since).length,
+        enabled: deps.sparkEnabled,
+      });
+      if (!decision.send || !decision.message) return null;
+      deps.spark.record(decision);
+      deps.alive.notify(decision.message, { source: "spark", score: decision.score });
+      deps.pushProposal?.(decision.message);
+      return { summary: `spark: ${decision.message}`, tokens: 0 };
+    },
+  };
+
+  return [resolveJob, consolidateJob, reflectJob, prepareJob, selfPlayJob, proposeJob, sparkJob];
 }

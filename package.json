@@ -58,6 +58,7 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "verify:all": "node scripts/verify-all.mjs",
+    "review": "node scripts/review/index.mjs",
     "bench:startup": "npm run build && node scripts/bench-startup.mjs",
     "bench:cognitive": "npm run build && node dist/benchmark/run-ci.js",
     "bench:alive": "npm run build && node scripts/bench-alive.mjs",

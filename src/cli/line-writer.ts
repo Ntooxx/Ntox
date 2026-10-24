@@ -11,6 +11,7 @@ export class LineWriter {
   private wrapPrefix: string;
   private col = 0;
   private prefixLen = 0;
+  private suppressPrefix = false;
 
   constructor(out: NodeJS.WriteStream, prefix: string, wrapPrefix?: string) {
     this.out = out;
@@ -31,7 +32,7 @@ export class LineWriter {
 
   private writePrefix(): void {
     if (this.col === 0) {
-      this.out.write(this.linePrefix);
+      if (!this.suppressPrefix) this.out.write(this.linePrefix);
       this.col = this.prefixLen;
     }
   }
@@ -114,7 +115,16 @@ export class LineWriter {
 
   writeTag(tag: string): void {
     this.flushWord();
-    this.write(tag);
+    const body = tag.startsWith(LF) ? tag.slice(1) : tag;
+    if (this.col !== 0) {
+      this.out.write(LF);
+      this.col = 0;
+    }
+    this.suppressPrefix = true;
+    this.write(body);
+    this.suppressPrefix = false;
     this.flushWord();
+    this.out.write(LF);
+    this.col = 0;
   }
 }

@@ -192,4 +192,8 @@ export async function requestInteractiveApproval(toolName: string, command: stri
   }
 }
 
+export function hasInteractiveApproval(): boolean {
+  return interactiveHandler !== null;
+}
+
 export const approvalStore = new ApprovalStore();

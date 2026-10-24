@@ -191,6 +191,7 @@ describe("idle jobs", () => {
       "prepare",
       "self-play",
       "propose",
+      "spark",
     ]);
   });
 });

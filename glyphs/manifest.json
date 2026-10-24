@@ -1,0 +1,212 @@
+[
+  {
+    "id": "intro",
+    "label": "Intro",
+    "name": "Threshold",
+    "description": "An eclipse rising above a field of light.",
+    "group": "Experience",
+    "number": "01",
+    "artwork": "artwork/intro.svg",
+    "navigation": "icons/intro.svg"
+  },
+  {
+    "id": "overview",
+    "label": "Overview",
+    "name": "World",
+    "description": "A luminous world held in an orbital frame.",
+    "group": "Workspace",
+    "number": "02",
+    "artwork": "artwork/overview.svg",
+    "navigation": "icons/overview.svg"
+  },
+  {
+    "id": "agents",
+    "label": "Agents",
+    "name": "Constellation",
+    "description": "Three distinct bodies sharing one orbital system.",
+    "group": "Workspace",
+    "number": "03",
+    "artwork": "artwork/agents.svg",
+    "navigation": "icons/agents.svg"
+  },
+  {
+    "id": "chat",
+    "label": "Chat",
+    "name": "Exchange",
+    "description": "Two open brackets exchanging a thread of light.",
+    "group": "Workspace",
+    "number": "04",
+    "artwork": "artwork/chat.svg",
+    "navigation": "icons/chat.svg"
+  },
+  {
+    "id": "tasks",
+    "label": "Tasks",
+    "name": "Sequence",
+    "description": "A stepped path with four deliberate checkpoints.",
+    "group": "Workspace",
+    "number": "05",
+    "artwork": "artwork/tasks.svg",
+    "navigation": "icons/tasks.svg"
+  },
+  {
+    "id": "workflows",
+    "label": "Workflows",
+    "name": "Branch",
+    "description": "One signal splits, travels, and rejoins.",
+    "group": "Workspace",
+    "number": "06",
+    "artwork": "artwork/workflows.svg",
+    "navigation": "icons/workflows.svg"
+  },
+  {
+    "id": "memory",
+    "label": "Memory / Knowledge",
+    "name": "Strata",
+    "description": "Four transparent planes storing a shared history.",
+    "group": "Workspace",
+    "number": "07",
+    "artwork": "artwork/memory.svg",
+    "navigation": "icons/memory.svg"
+  },
+  {
+    "id": "tools",
+    "label": "Tools",
+    "name": "Aperture",
+    "description": "Six precision blades around an open center.",
+    "group": "Workspace",
+    "number": "08",
+    "artwork": "artwork/tools.svg",
+    "navigation": "icons/tools.svg"
+  },
+  {
+    "id": "evaluations",
+    "label": "Evaluations",
+    "name": "Calibrate",
+    "description": "A diamond measured against an exacting frame.",
+    "group": "Workspace",
+    "number": "09",
+    "artwork": "artwork/evaluations.svg",
+    "navigation": "icons/evaluations.svg"
+  },
+  {
+    "id": "settings",
+    "label": "Settings",
+    "name": "Alignment",
+    "description": "Offset rings and indexed controls finding balance.",
+    "group": "Workspace",
+    "number": "10",
+    "artwork": "artwork/settings.svg",
+    "navigation": "icons/settings.svg"
+  },
+  {
+    "id": "onboarding",
+    "label": "Onboarding",
+    "name": "Discovery",
+    "description": "Successive portals reveal a bright destination.",
+    "group": "Experience",
+    "number": "11",
+    "artwork": "artwork/onboarding.svg",
+    "navigation": "icons/onboarding.svg"
+  },
+  {
+    "id": "create-agent",
+    "label": "Create agent",
+    "name": "Genesis",
+    "description": "Loose particles converge into a new orbital core.",
+    "group": "Experience",
+    "number": "12",
+    "artwork": "artwork/create-agent.svg",
+    "navigation": "icons/create-agent.svg"
+  },
+  {
+    "id": "agent-detail",
+    "label": "Agent detail",
+    "name": "Identity",
+    "description": "A singular world with a precise meridian signature.",
+    "group": "Experience",
+    "number": "13",
+    "artwork": "artwork/agent-detail.svg",
+    "navigation": "icons/agent-detail.svg"
+  },
+  {
+    "id": "running",
+    "label": "Running / Live view",
+    "name": "Vortex",
+    "description": "A spiral carries energy toward its central source.",
+    "group": "Experience",
+    "number": "14",
+    "artwork": "artwork/running.svg",
+    "navigation": "icons/running.svg"
+  },
+  {
+    "id": "analytics",
+    "label": "Analytics",
+    "name": "Signal",
+    "description": "Two measured waves meet at luminous samples.",
+    "group": "Workspace",
+    "number": "15",
+    "artwork": "artwork/analytics.svg",
+    "navigation": "icons/analytics.svg"
+  },
+  {
+    "id": "integrations",
+    "label": "Integrations",
+    "name": "Nexus",
+    "description": "An open hub with six connected endpoints.",
+    "group": "Workspace",
+    "number": "16",
+    "artwork": "artwork/integrations.svg",
+    "navigation": "icons/integrations.svg"
+  },
+  {
+    "id": "multi-agent",
+    "label": "Multi-agent view",
+    "name": "Collective",
+    "description": "Independent worlds connected across a shared plane.",
+    "group": "Experience",
+    "number": "17",
+    "artwork": "artwork/multi-agent.svg",
+    "navigation": "icons/multi-agent.svg"
+  },
+  {
+    "id": "research",
+    "label": "Research agent",
+    "name": "Lens",
+    "description": "A scanning lens encircles a densely sampled world.",
+    "group": "Agent identities",
+    "number": "18",
+    "artwork": "artwork/research.svg",
+    "navigation": "icons/research.svg"
+  },
+  {
+    "id": "content",
+    "label": "Content agent",
+    "name": "Composition",
+    "description": "Parallel strokes collect into a structured volume.",
+    "group": "Agent identities",
+    "number": "19",
+    "artwork": "artwork/content.svg",
+    "navigation": "icons/content.svg"
+  },
+  {
+    "id": "outreach",
+    "label": "Outreach agent",
+    "name": "Broadcast",
+    "description": "A central signal sends three expanding wavefronts.",
+    "group": "Agent identities",
+    "number": "20",
+    "artwork": "artwork/outreach.svg",
+    "navigation": "icons/outreach.svg"
+  },
+  {
+    "id": "analysis",
+    "label": "Analysis agent",
+    "name": "Prism",
+    "description": "A faceted prism separates one line into multiple readings.",
+    "group": "Agent identities",
+    "number": "21",
+    "artwork": "artwork/analysis.svg",
+    "navigation": "icons/analysis.svg"
+  }
+]

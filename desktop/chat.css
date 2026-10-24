@@ -532,6 +532,36 @@ body:has(.desktop-chat:not(.chat-visible)) {
   background: #101313;
   font: 10px var(--console-mono);
 }
+
+.desktop-message-content > p { margin: 0 0 12px; line-height: 1.75; }
+.desktop-message-content > h2,
+.desktop-message-content > h3,
+.desktop-message-content > h4 { margin: 18px 0 8px; color: #f0f0f0; font-weight: 450; line-height: 1.35; }
+.desktop-message-content > h2 { font-size: 20px; }
+.desktop-message-content > h3 { font-size: 17px; }
+.desktop-message-content > h4 { font-size: 15px; }
+.desktop-message-content > ul,
+.desktop-message-content > ol { margin: 8px 0 14px; padding-left: 24px; line-height: 1.75; }
+.desktop-message-content li + li { margin-top: 3px; }
+.desktop-message-content a { color: #f0f0f0; text-decoration-color: #777; text-underline-offset: 3px; }
+.desktop-message-content blockquote { margin: 10px 0; padding: 2px 0 2px 14px; border-left: 2px solid #777; color: #bdbdbd; }
+.desktop-message-content strong { color: #f2f2f2; font-weight: 650; }
+.desktop-message-content em { color: #dedede; }
+.desktop-message-content .message-inline-code { color: #f1f1f1; background: #111; border-color: #333; font-size: 11px; }
+.desktop-message-content .message-code { color: #ededed; background: #070707; border-color: #303030; font-size: 12px; }
+.desktop-chat-label { color: #aaa; font-size: 10px; }
+.desktop-conversation-item small,
+.desktop-chat-profile small { color: #aaa; font-size: 10px; }
+.desktop-search input { font-size: 12px; }
+.desktop-chat-main { background: #050505; }
+.desktop-chat-sidebar,
+.desktop-context { background-color: #030303; }
+.desktop-new-chat,
+.desktop-chat .desktop-conversation-head button,
+.desktop-chat .desktop-chat-top { background: #090909; border-color: #303030; color: #e5e5e5; }
+.desktop-conversation-item.active { background: #141414; border-color: #303030; }
+.message-code { background: #070707; border-color: #303030; color: #ededed; }
+.message-inline-code { background: #111; border-color: #333; }
 @media (max-width: 760px) {
   .desktop-chat.context-collapsed {
     grid-template-columns: minmax(0, 1fr);

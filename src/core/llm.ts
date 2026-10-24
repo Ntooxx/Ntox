@@ -1205,7 +1205,7 @@ export const LOCAL_PROVIDERS = ["ollama", "lmstudio"];
 export function estimateCost(modelId: string, inputTokens: number, outputTokens: number, models: ModelInfo[]): number {
   const model = models.find((m) => m.id === modelId);
   if (!model) return 0;
-  return (inputTokens / 1000) * model.pricing.prompt + (outputTokens / 1000) * model.pricing.completion;
+  return inputTokens * model.pricing.prompt + outputTokens * model.pricing.completion;
 }
 
 export function formatTokenCount(n: number): string {

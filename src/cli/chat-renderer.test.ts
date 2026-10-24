@@ -63,4 +63,35 @@ describe("ChatRenderer", () => {
     expect(out).toContain("| └ ─");
     expect(out).toContain("- tool done");
   });
+
+  it("keeps prose after a tag on a fresh line instead of gluing words", () => {
+    const stream = makeStream();
+    const renderer = new ChatRenderer(stream, "| ");
+    renderer.startLine();
+    renderer.write("Checking current state:");
+    renderer.writeTag("\n· tool: read_file done (0.2s)");
+    renderer.write("The job exists, but nothing constructs an engine.");
+    renderer.flush();
+    const out = stripAnsi((stream as unknown as { output: () => string }).output());
+    expect(out).toContain("· tool: read_file done (0.2s)\n");
+    expect(out).toContain("\n| The job exists");
+    expect(out).not.toContain("done (0.2s)The");
+  });
+
+  it("wraps long code lines instead of truncating them", () => {
+    const stream = makeStream(80);
+    const renderer = new ChatRenderer(stream, "| ");
+    renderer.startLine();
+    const line =
+      "const result = await someVeryLongFunctionName(argumentOne, argumentTwo, argumentThree, argumentFour);";
+    renderer.write("```ts\n" + line + "\n```\nDone");
+    renderer.flush();
+    const out = stripAnsi((stream as unknown as { output: () => string }).output());
+    expect(out).not.toContain("…");
+    const rows = out
+      .split("\n")
+      .filter((l) => l.startsWith("| │ "))
+      .map((l) => l.slice(4, l.length - 2).trimEnd());
+    expect(rows.join("")).toBe(line);
+  });
 });

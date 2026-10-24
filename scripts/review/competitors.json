@@ -1,0 +1,113 @@
+{
+  "disclaimer": "Analyst estimates from public documentation and product use, not measured runs. Treat competitor numbers as directional, with the confidence field as the weight. NTOX numbers are always measured by this tool.",
+  "as_of": "2026-10",
+  "axes": [
+    "product_clarity",
+    "core_loop",
+    "cognition",
+    "memory",
+    "integration",
+    "engineering",
+    "security",
+    "ux",
+    "distribution"
+  ],
+  "competitors": [
+    {
+      "name": "Claude Code",
+      "positioning": "Anthropic's terminal coding agent, strongest on tool discipline and permission UX",
+      "confidence": "high",
+      "scores": {
+        "product_clarity": 9,
+        "core_loop": 9,
+        "cognition": 4,
+        "memory": 6,
+        "integration": 8,
+        "engineering": 9,
+        "security": 8,
+        "ux": 9,
+        "distribution": 10
+      }
+    },
+    {
+      "name": "OpenAI Codex CLI",
+      "positioning": "Open-source Rust coding agent with default OS-level sandboxing",
+      "confidence": "high",
+      "scores": {
+        "product_clarity": 8,
+        "core_loop": 9,
+        "cognition": 3,
+        "memory": 4,
+        "integration": 7,
+        "engineering": 9,
+        "security": 9,
+        "ux": 8,
+        "distribution": 9
+      }
+    },
+    {
+      "name": "Aider",
+      "positioning": "Git-native pair programmer with a mature edit loop and broad model support",
+      "confidence": "high",
+      "scores": {
+        "product_clarity": 8,
+        "core_loop": 7,
+        "cognition": 3,
+        "memory": 4,
+        "integration": 6,
+        "engineering": 8,
+        "security": 6,
+        "ux": 7,
+        "distribution": 9
+      }
+    },
+    {
+      "name": "OpenHands",
+      "positioning": "Open agent platform with a web workspace and container sandbox by default",
+      "confidence": "medium",
+      "scores": {
+        "product_clarity": 7,
+        "core_loop": 8,
+        "cognition": 4,
+        "memory": 5,
+        "integration": 8,
+        "engineering": 8,
+        "security": 9,
+        "ux": 6,
+        "distribution": 8
+      }
+    },
+    {
+      "name": "Goose",
+      "positioning": "Block's MCP-native local agent with a desktop client and extension ecosystem",
+      "confidence": "medium",
+      "scores": {
+        "product_clarity": 7,
+        "core_loop": 8,
+        "cognition": 3,
+        "memory": 4,
+        "integration": 9,
+        "engineering": 8,
+        "security": 6,
+        "ux": 7,
+        "distribution": 7
+      }
+    },
+    {
+      "name": "Cline",
+      "positioning": "IDE agent with plan and act modes, large extension marketplace, high adoption",
+      "confidence": "medium",
+      "scores": {
+        "product_clarity": 8,
+        "core_loop": 7,
+        "cognition": 3,
+        "memory": 4,
+        "integration": 8,
+        "engineering": 7,
+        "security": 6,
+        "ux": 8,
+        "distribution": 9
+      }
+    }
+  ]
+}

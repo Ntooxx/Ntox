@@ -24,10 +24,53 @@
   });
 
   const escapeHtml = value => String(value).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
-  const formatMessage = value => String(value || "").split("```").map((part, index) => {
-    if (index % 2 === 1) { const newline = part.indexOf("\n"); const code = newline < 0 ? part : part.slice(newline + 1); return `<pre class="message-code"><code>${escapeHtml(code)}</code></pre>`; }
-    return escapeHtml(part).replace(/`([^`]+)`/g, "<code class=\"message-inline-code\">$1</code>");
-  }).join("");
+  const formatInline = value => {
+    const formatText = part => escapeHtml(part)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/__(.+?)__/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
+      .replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    return String(value || "").split(/(`[^`\n]+`)/g).map(part => part.startsWith("`") && part.endsWith("`") && part.length > 1
+      ? `<code class="message-inline-code">${escapeHtml(part.slice(1, -1))}</code>`
+      : formatText(part)).join("");
+  };
+  const formatMessage = value => {
+    const output = [];
+    const paragraph = [];
+    let list = null;
+    let code = null;
+    const flushParagraph = () => { if (paragraph.length) output.push(`<p>${paragraph.map(formatInline).join("<br>")}</p>`); paragraph.length = 0; };
+    const flushList = () => { if (list) output.push(`<${list.type}>${list.items.map(item => `<li>${formatInline(item)}</li>`).join("")}</${list.type}>`); list = null; };
+    const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");
+    for (const line of lines) {
+      if (/^\s*```/.test(line)) {
+        if (code) { output.push(`<pre class="message-code"><code>${escapeHtml(code.join("\n"))}</code></pre>`); code = null; }
+        else { flushParagraph(); flushList(); code = []; }
+        continue;
+      }
+      if (code) { code.push(line); continue; }
+      const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+      if (heading) { flushParagraph(); flushList(); const level = heading[1].length; output.push(`<h${level + 1}>${formatInline(heading[2])}</h${level + 1}>`); continue; }
+      const quote = /^>\s?(.*)$/.exec(line);
+      if (quote) { flushParagraph(); flushList(); output.push(`<blockquote>${formatInline(quote[1])}</blockquote>`); continue; }
+      const item = /^\s*(?:[-+*]|\d+[.)])\s+(.+)$/.exec(line);
+      if (item) {
+        flushParagraph();
+        const type = /^\s*\d/.test(line) ? "ol" : "ul";
+        if (list?.type !== type) { flushList(); list = { type, items: [] }; }
+        list.items.push(item[1]);
+        continue;
+      }
+      if (!line.trim()) { flushParagraph(); flushList(); continue; }
+      flushList();
+      paragraph.push(line);
+    }
+    if (code) output.push(`<pre class="message-code"><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+    flushParagraph();
+    flushList();
+    return output.join("");
+  };
   const save = () => window.ntoxDesktop?.saveConversations(conversations.slice(0, 80)).catch(() => {});
   const saveSoon = () => { window.clearTimeout(saveTimer); saveTimer = window.setTimeout(save, 240); };
   const active = () => conversations.find(conversation => conversation.id === activeId);

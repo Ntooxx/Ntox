@@ -1,0 +1,36 @@
+body:has(.console.landing-mode){overflow:hidden!important;background:#000!important}
+.console.landing-mode{position:fixed;inset:0;min-height:100vh;overflow:hidden;background:#000}
+.console.landing-mode>:not(.launch-screen){visibility:hidden;pointer-events:none}
+.console:not(.landing-mode)>.launch-screen{display:none}
+.launch-screen{display:none;position:fixed;z-index:50;inset:0;overflow:hidden;background:#000;color:#f5f7fa;font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;isolation:isolate}
+.console.landing-mode .launch-screen{display:block}
+.desktop-chat-brand{padding:0;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.launch-landscape,.launch-grain{position:absolute;inset:0;width:100%;height:100%}
+.launch-landscape{display:block}
+.no-gl .launch-landscape{background:radial-gradient(ellipse at 50% 45%,#080a10,#000 70%)}
+.launch-grain{z-index:1;pointer-events:none;opacity:.13;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.88' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E");mix-blend-mode:screen}
+.launch-screen:after{content:"";position:absolute;z-index:1;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.32),transparent 22%,transparent 68%,rgba(0,0,0,.58)),radial-gradient(ellipse at center,transparent 36%,rgba(0,0,0,.3) 100%)}
+.launch-top,.launch-bottom,.launch-copy{position:absolute;z-index:2}
+.launch-top{inset:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:31px 4.2vw}
+.launch-brand{color:#fff;text-decoration:none;font-size:14px;font-weight:400;letter-spacing:.42em}
+.launch-brand span{margin-left:2px;font:8px Arial,sans-serif;vertical-align:top;letter-spacing:0}
+.launch-runtime{display:flex;align-items:center;gap:9px;color:rgba(227,233,243,.65);font:9px "DM Mono",Consolas,monospace;letter-spacing:.16em}
+.launch-runtime i{width:6px;height:6px;border-radius:50%;background:#c8d5ff;box-shadow:0 0 12px rgba(186,205,255,.85)}
+.launch-copy{top:44%;left:50%;width:min(90vw,850px);transform:translate(-50%,-50%);text-align:center;text-shadow:0 0 30px rgba(0,0,0,.62)}
+.launch-eyebrow{color:rgba(208,218,239,.68);font:9px "DM Mono",Consolas,monospace;letter-spacing:.3em}
+.launch-copy h1{margin:24px 0 0;padding-left:.98em;font-size:clamp(39px,6.4vw,82px);font-weight:300;line-height:.95;letter-spacing:.98em;text-shadow:0 0 24px rgba(225,234,255,.19)}
+.launch-subtitle{margin:25px 0 0;padding-left:.42em;color:#e4eaf5;font-size:clamp(10px,1.1vw,14px);font-weight:400;letter-spacing:.42em}
+.launch-rule{display:block;width:1px;height:42px;margin:31px auto 19px;background:linear-gradient(transparent,rgba(218,227,246,.63),transparent)}
+.launch-tagline{margin:0;color:rgba(230,236,247,.78);font-size:clamp(11px,1.1vw,14px);font-weight:300;letter-spacing:.26em}
+.launch-bottom{inset:auto 0 0;min-height:104px;padding:0 4.2vw calc(26px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:1fr auto 1fr;align-items:end;gap:18px}
+.launch-caption,.launch-version{color:rgba(205,214,229,.48);font:8px "DM Mono",Consolas,monospace;letter-spacing:.16em}
+.launch-version{text-align:right}
+.launch-actions{display:flex;align-items:center;gap:22px}
+.launch-actions button{font:10px "DM Mono",Consolas,monospace;letter-spacing:.07em;cursor:pointer}
+.launch-enter{display:flex;align-items:center;gap:24px;padding:13px 16px;border:1px solid rgba(220,230,249,.52);border-radius:2px;background:rgba(7,9,14,.32);color:#f2f5fb;transition:background .2s,border-color .2s}
+.launch-enter:hover{border-color:#fff;background:rgba(227,236,255,.12)}
+.launch-enter span{font-size:14px}
+.launch-chat{padding:10px 0;border:0;background:transparent;color:rgba(228,234,245,.7);transition:color .2s}
+.launch-chat:hover{color:#fff}
+@media(max-width:760px){.launch-top{padding:24px 22px}.launch-runtime{font-size:8px;letter-spacing:.1em}.launch-copy{top:43%}.launch-copy h1{font-size:clamp(35px,10vw,65px);letter-spacing:.7em;padding-left:.7em}.launch-bottom{grid-template-columns:1fr;justify-items:center;gap:18px;padding:0 18px calc(24px + env(safe-area-inset-bottom,0px))}.launch-caption,.launch-version{display:none}.launch-actions{flex-direction:column;gap:8px}.launch-enter{justify-content:center;min-width:240px}.launch-rule{height:32px;margin:23px auto 16px}}
+@media(prefers-reduced-motion:reduce){.launch-enter,.launch-chat{transition:none}}
