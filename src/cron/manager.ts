@@ -11,7 +11,7 @@ export class CronManager {
   private jobs: CronJob[] = [];
   private nextId = 1;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private executor: ((prompt: string) => Promise<string>) | null = null;
+  private executor: ((prompt: string, job: CronJob) => Promise<string>) | null = null;
   private delivery: CronDelivery | null = null;
   private channelFilter: ((channel: string | undefined) => boolean) | null = null;
 
@@ -44,7 +44,7 @@ export class CronManager {
     }
   }
 
-  setExecutor(executor: (prompt: string) => Promise<string>): void {
+  setExecutor(executor: (prompt: string, job: CronJob) => Promise<string>): void {
     this.executor = executor;
   }
 
@@ -127,7 +127,7 @@ export class CronManager {
       if (!this.executor) continue;
 
       try {
-        const result = await this.executor(job.prompt);
+        const result = await this.executor(job.prompt, job);
         if (this.delivery && job.channel && job.chatId) {
           const msg = `[Scheduled: ${job.name}]\n${result}`;
           await this.delivery(job.channel, job.chatId, msg.slice(0, 4000));

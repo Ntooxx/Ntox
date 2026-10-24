@@ -1,5 +1,7 @@
-import { loadCachedModels, loadConfig } from "../core/config.js";
+import { loadCachedModels, loadConfig, loadCosts } from "../core/config.js";
 import { handleChannelCommand } from "../core/channel-commands.js";
+import { isDigestPrompt, renderDigest } from "../core/digest.js";
+import { loadPlan } from "../tools/plan.js";
 import { ProactiveThrottle, pushProactiveSuggestion } from "../core/proactive-delivery.js";
 import { AlivePusher, splitSessionId, type AlivePushTarget } from "./alive-push.js";
 import { renderChannelHelp } from "../cli/commands.js";
@@ -43,13 +45,20 @@ import { diffSkillByName, renderSkillStats } from "../skills/lifecycle.js";
 import { createRoutineRuntime, renderRoutineRun, runRoutine } from "../skills/routine.js";
 import { renderMcpStatus } from "../mcp/bridge.js";
 import { ConversationStore } from "./conversations.js";
-import { createTelegramImageSender, createWhatsAppImageSender, type ImageSender } from "./media-send.js";
+import {
+  createTelegramImageSender,
+  createTelegramVoiceSender,
+  createWhatsAppImageSender,
+  createWhatsAppVoiceSender,
+  type ImageSender,
+  type VoiceSender,
+} from "./media-send.js";
 import { createInspectServices, extractApprovalCommand, isApprovalRequired } from "./inspect.js";
 import { approvalStore } from "../tools/approval.js";
 import { createSettingsService } from "./settings.js";
 import { suggestWorkspacePaths } from "./paths.js";
 import { audioFilenameFor, clampTtsText } from "./voice.js";
-import { handleVoiceCommand } from "./voice-mode.js";
+import { handleVoiceCommand, resolveVoiceReply, voiceReplyText } from "./voice-mode.js";
 import type { WebVoiceHandlers } from "./web.js";
 import { processAtReferences } from "../cli/at-refs.js";
 import type { GatewayChannel } from "./types.js";
@@ -64,6 +73,7 @@ const sessionInfras = new Map<string, ReturnType<typeof createSessionInfra>>();
 const cron = new CronManager();
 const channelSenders = new Map<string, (chatId: string, message: string) => Promise<void>>();
 const channelImageSenders = new Map<string, ImageSender>();
+const channelVoiceSenders = new Map<string, VoiceSender>();
 const pendingApprovals = new Map<string, PendingApproval>();
 const pendingSkillProposals = new Map<string, SkillDefinition>();
 const proactiveThrottle = new ProactiveThrottle();
@@ -174,6 +184,7 @@ export async function runGateway(channel?: string): Promise<void> {
           agent,
           models: loadCachedModels() ?? [],
           sessionId: `${ctx}_${chatId}`,
+          alive: shared.alive,
         });
         if (unifiedCommand) {
           const body = stripAnsi(unifiedCommand.text);
@@ -444,6 +455,7 @@ export async function runGateway(channel?: string): Promise<void> {
     const sender = makeSender("telegram");
     if (sender) channelSenders.set("telegram", sender);
     channelImageSenders.set("telegram", createTelegramImageSender(config.telegramToken));
+    channelVoiceSenders.set("telegram", createTelegramVoiceSender(config.telegramToken));
   }
   if ((!channel || channel === "discord") && config.discordToken) {
     channels.push(createDiscordChannel({ token: config.discordToken, onMessage: makeHandler("discord") }));
@@ -466,6 +478,7 @@ export async function runGateway(channel?: string): Promise<void> {
     const sender = makeSender("whatsapp");
     if (sender) channelSenders.set("whatsapp", sender);
     channelImageSenders.set("whatsapp", createWhatsAppImageSender(config.whatsappToken, config.whatsappPhoneNumberId));
+    channelVoiceSenders.set("whatsapp", createWhatsAppVoiceSender(config.whatsappToken, config.whatsappPhoneNumberId));
   }
   if (!channel || channel === "web") {
     const inspect = createInspectServices({
@@ -541,10 +554,18 @@ export async function runGateway(channel?: string): Promise<void> {
   for (const ch of channels) await ch.start();
   shared.aliveHosts?.start();
 
-  cron.setExecutor(async (prompt) => {
+  cron.setExecutor(async (prompt, job) => {
     const routineParse = parseSkillLifecycleCommand(prompt);
     if (routineParse.kind === "run" && routineParse.name) {
       return executeRoutineByName(routineParse.name);
+    }
+    if (isDigestPrompt(prompt)) {
+      return renderDigest({
+        alive: shared.alive,
+        plan: loadPlan(job.channel && job.chatId ? `${job.channel}_${job.chatId}` : undefined),
+        costs: loadCosts(),
+        title: job.name,
+      });
     }
     const sid = `cron_${Date.now()}`;
     const sessionInfra = createSessionInfra(shared, config);
@@ -570,6 +591,15 @@ export async function runGateway(channel?: string): Promise<void> {
           console.error(`[cron] delivery to ${channel} failed again: ${e2 instanceof Error ? e2.message : e2}`);
         }
       }
+    }
+    if (!resolveVoiceReply(channel, chatId, false)) return;
+    const voiceSender = channelVoiceSenders.get(channel);
+    if (!voiceSender) return;
+    try {
+      const spoken = await synthesizeSpeech(voiceReplyText(message));
+      if (spoken) await voiceSender(chatId, spoken);
+    } catch (e) {
+      console.error(`[cron] voice delivery to ${channel} failed: ${e instanceof Error ? e.message : e}`);
     }
   });
 

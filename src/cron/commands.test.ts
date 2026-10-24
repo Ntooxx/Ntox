@@ -124,6 +124,29 @@ describe("CronManager channel filter", () => {
     }
   });
 
+  it("passes the job to the executor so job-aware prompts can use its target", async () => {
+    vi.useFakeTimers();
+    try {
+      const cron = freshCron();
+      const job = cron.addJob("morning brief", "every morning", "/digest", "repl", "sess_1")!;
+      const seen: string[] = [];
+      cron.setExecutor(async (prompt, received) => {
+        seen.push(`${prompt}|${received.name}|${received.channel}|${received.chatId}`);
+        return "ok";
+      });
+      job.nextRun = Date.now() - 1000;
+
+      cron.start();
+      await vi.advanceTimersByTimeAsync(50);
+      cron.stop();
+
+      expect(seen).toEqual(["/digest|morning brief|repl|sess_1"]);
+    } finally {
+      vi.useRealTimers();
+      freshCron();
+    }
+  });
+
   it("advances nextRun only for jobs it owns", async () => {
     vi.useFakeTimers();
     try {

@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { createTelegramImageSender, createWhatsAppImageSender } from "./media-send.js";
+import {
+  createTelegramImageSender,
+  createTelegramVoiceSender,
+  createWhatsAppImageSender,
+  createWhatsAppVoiceSender,
+} from "./media-send.js";
 
 const PNG_DATA_URL = `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`;
+const OGG_DATA_URL = `data:audio/ogg;base64,${Buffer.from("ogg-bytes").toString("base64")}`;
 
 interface RecordedCall {
   url: string;
@@ -106,6 +112,83 @@ describe("createWhatsAppImageSender", () => {
     stubFetch(() => new Response("denied", { status: 401 }));
     await expect(createWhatsAppImageSender("TOK", "PN1")("1555", PNG_DATA_URL, "")).rejects.toThrow(
       "WhatsApp media upload failed (401)",
+    );
+  });
+});
+
+describe("createTelegramVoiceSender", () => {
+  it("uploads the decoded voice note as multipart sendVoice", async () => {
+    const calls = stubFetch(() => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await createTelegramVoiceSender("TOK")("555", OGG_DATA_URL);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("https://api.telegram.org/botTOK/sendVoice");
+    const form = calls[0].init?.body as FormData;
+    expect(form.get("chat_id")).toBe("555");
+    const voice = form.get("voice") as Blob;
+    expect(voice.type).toBe("audio/ogg");
+    expect(await voice.text()).toBe("ogg-bytes");
+  });
+
+  it("surfaces HTTP failures as errors", async () => {
+    stubFetch(() => new Response("nope", { status: 400 }));
+    await expect(createTelegramVoiceSender("TOK")("555", OGG_DATA_URL)).rejects.toThrow(
+      "Telegram sendVoice failed (400)",
+    );
+  });
+
+  it("rejects payloads that are not audio", async () => {
+    stubFetch(() => new Response("{}", { status: 200 }));
+    await expect(createTelegramVoiceSender("TOK")("555", PNG_DATA_URL)).rejects.toThrow("unsupported audio payload");
+    await expect(createTelegramVoiceSender("TOK")("555", "not a data url")).rejects.toThrow(
+      "unsupported audio payload",
+    );
+  });
+});
+
+describe("createWhatsAppVoiceSender", () => {
+  it("uploads media first, then sends the audio message", async () => {
+    const calls = stubFetch((url) => {
+      if (url.endsWith("/PN1/media")) return new Response(JSON.stringify({ id: "AUD_UP" }), { status: 200 });
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    });
+
+    await createWhatsAppVoiceSender("TOK", "PN1")("15551234567", OGG_DATA_URL);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0].url).toBe("https://graph.facebook.com/v18.0/PN1/media");
+    const uploadForm = calls[0].init?.body as FormData;
+    expect(uploadForm.get("type")).toBe("audio/ogg");
+    expect(uploadForm.get("messaging_product")).toBe("whatsapp");
+    const audio = uploadForm.get("file") as Blob;
+    expect(audio.type).toBe("audio/ogg");
+    expect(await audio.text()).toBe("ogg-bytes");
+    const body = JSON.parse(String(calls[1].init?.body)) as { type: string; to: string; audio: { id: string } };
+    expect(body.type).toBe("audio");
+    expect(body.to).toBe("15551234567");
+    expect(body.audio.id).toBe("AUD_UP");
+  });
+
+  it("fails when the upload returns no media id", async () => {
+    stubFetch(() => new Response(JSON.stringify({}), { status: 200 }));
+    await expect(createWhatsAppVoiceSender("TOK", "PN1")("1555", OGG_DATA_URL)).rejects.toThrow("no id");
+  });
+
+  it("fails when the audio send HTTP status is bad", async () => {
+    stubFetch((url) => {
+      if (url.endsWith("/PN1/media")) return new Response(JSON.stringify({ id: "AUD_UP" }), { status: 200 });
+      return new Response("denied", { status: 403 });
+    });
+    await expect(createWhatsAppVoiceSender("TOK", "PN1")("1555", OGG_DATA_URL)).rejects.toThrow(
+      "WhatsApp audio send failed (403)",
+    );
+  });
+
+  it("rejects payloads that are not audio", async () => {
+    stubFetch(() => new Response("{}", { status: 200 }));
+    await expect(createWhatsAppVoiceSender("TOK", "PN1")("1555", PNG_DATA_URL)).rejects.toThrow(
+      "unsupported audio payload",
     );
   });
 });

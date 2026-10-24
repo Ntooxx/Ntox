@@ -35,6 +35,8 @@ import { createRoutineRuntime, renderRoutineRun, runRoutine } from "../skills/ro
 import { renderMcpStatus } from "../mcp/bridge.js";
 import { saveDataUrlImage } from "../core/media.js";
 import { handleChannelCommand, type ChannelCommandContext } from "../core/channel-commands.js";
+import { isDigestPrompt, renderDigest } from "../core/digest.js";
+import { loadPlan } from "../tools/plan.js";
 import { CronManager } from "../cron/index.js";
 import { handleCronCommand } from "../cron/commands.js";
 import {
@@ -189,6 +191,7 @@ export class Repl {
       agent: this.agent,
       models: this.models,
       sessionId: this.sessionId,
+      alive: this.infra.alive,
     };
   }
 
@@ -206,9 +209,17 @@ export class Repl {
 
   private startCron(): void {
     this.cron.setChannelFilter((channel) => channel === "repl");
-    this.cron.setExecutor(async (prompt) => {
+    this.cron.setExecutor(async (prompt, job) => {
       const parsed = parseSkillLifecycleCommand(prompt);
       if (parsed.kind === "run" && parsed.name) return (await this.runRoutineByName(parsed.name)).text;
+      if (isDigestPrompt(prompt)) {
+        return renderDigest({
+          alive: this.infra.alive,
+          plan: loadPlan(job.chatId),
+          costs: loadCosts(),
+          title: job.name,
+        });
+      }
       const cronConfig = createAgentConfig(this.infra, this.config, `cron_${Date.now()}`, { skipReflection: true });
       const output = new GatewayOutput();
       const result = await runAgentMessage(new Agent(cronConfig), prompt, output);

@@ -28,6 +28,7 @@ export const COMMANDS: CommandDef[] = [
   { name: "model", description: "switch or refresh OpenRouter models", group: "daily", channel: true },
   { name: "provider", description: "switch provider", group: "daily" },
   { name: "cost", description: "token usage", group: "daily", channel: true },
+  { name: "digest", description: "brief: plan, host events, costs", group: "daily", channel: true },
   { name: "tokens", description: "view / set the model output token limit", group: "daily" },
   { name: "clear", description: "clear conversation", group: "daily", aliases: ["new"] },
   { name: "exit", description: "quit", group: "daily", aliases: ["quit"] },

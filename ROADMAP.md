@@ -229,9 +229,34 @@ trigger and it activates on Telegram.*
   the web channel stays event-only (no sender), and running gateway + REPL
   together writes duplicate watch events into `~/.ntox/alive.json`.
 
-### 4.3 Scheduled digests · P1 · M
-- `/cron add daily 8am "morning brief"` → plan status, inbox-worthy alive
-  events, costs, open loops. Reuse `CronManager` + TTS for voice briefs.
+### 4.3 Scheduled digests · P1 · M · ✅ shipped
+- `/cron add morning brief | daily 8am | /digest` delivers plan status,
+  inbox-worthy alive events, costs, and open loops through `CronManager`,
+  with TTS voice briefs for chats in voice mode.
+- New `src/core/digest.ts`: `renderDigest()` assembles four sections — plan
+  (reuses the plan tool renderer), `Alive (last 1d)` events filtered to
+  inbox-worthy ones (significance ≥ 0.5 or requires-human, newest first,
+  max 6, relative ages like `2h ago`), open loops (active, max 5) and
+  lifetime cost — and every section degrades to a "nothing to report" line.
+  Unlike pushes, the brief does include in-turn tool failures: a morning
+  review should list what broke while the conversation had moved on.
+- `/digest` joined the unified command layer, so all channels and the REPL
+  answer it from one handler and the shared catalog keeps `/help` in sync.
+- A cron prompt equal to `/digest` renders directly — no LLM turn, no tokens:
+  `CronManager.setExecutor` now passes the job, so the gateway builds the
+  digest from `shared.alive` plus the chat's plan (`<channel>_<chatId>`) and
+  the REPL from its own infra plus the session plan; the job name becomes
+  the brief title.
+- Voice briefs: cron delivery speaks the message when that chat's voice mode
+  is `on`, through new `createTelegramVoiceSender` (multipart `sendVoice`) and
+  `createWhatsAppVoiceSender` (media upload → audio message) in
+  `media-send.ts`, both tested against mocked APIs. Text still lands first,
+  matching per-turn voice replies.
+- Declared limits: digest data comes from the alive store shared by every
+  process, the window is fixed at 24h (`renderDigest({ windowMs })` exists
+  but there is no config knob), costs are lifetime totals rather than a
+  per-day breakdown, and `/digest` never consults the LLM — it reports
+  structured state instead of summarizing it.
 
 ### 4.4 Open-loop reminders · P2 · M
 - "You asked me to finish X yesterday — shall I continue?" driven by
@@ -284,7 +309,7 @@ trigger and it activates on Telegram.*
 |---|---|---|---|
 | **1** | Voice & talk | 1.1–1.5 ✅, 3.2 ✅, 3.4 ✅ | Voice notes in/out on TG + WA ✅, tap-to-approve ✅ |
 | **2** | Skills & commands | 2.1 ✅, 2.2, 2.4, 3.1, 3.3 | Self-learning skills ✅ (propose + `/skill save`), installable skills, command parity |
-| **3** | Proactive & email | 4.1–4.2 ✅, 4.3, 5.1, 5.2 | He messages first; email send/read; Slack |
+| **3** | Proactive & email | 4.1–4.3 ✅, 5.1, 5.2 | He messages first; email send/read; Slack |
 | **4** | Deep platform | 2.3, 2.5, 2.7, 4.4, 5.3–5.5, 6 | Marketplace, routines, MCP, calendar |
 | **5** | Realtime | 1.6 | Spoken calls, wake word, hands-free |
 

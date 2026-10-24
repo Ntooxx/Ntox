@@ -8,6 +8,7 @@ import { formatCost, formatTokenCount, getProviderNames } from "./llm.js";
 import { loadCosts, patchConfig } from "./config.js";
 import { renderSkillStats } from "../skills/lifecycle.js";
 import { loadPlan, renderPlan as renderPlanState } from "../tools/plan.js";
+import { renderDigest, type DigestAliveSource } from "./digest.js";
 import { renderCosts, renderMemoryStats } from "../cli/render.js";
 
 export interface ChannelAgent {
@@ -26,6 +27,7 @@ export interface ChannelCommandContext {
   agent?: ChannelAgent;
   models?: ModelInfo[];
   sessionId?: string;
+  alive?: DigestAliveSource;
 }
 
 export interface ChannelCommandOutcome {
@@ -36,6 +38,7 @@ export interface ChannelCommandOutcome {
 export const UNIFIED_COMMANDS = [
   "status",
   "cost",
+  "digest",
   "memory",
   "remember",
   "forget",
@@ -305,6 +308,11 @@ export async function handleChannelCommand(
   if (name === "tools") return { text: renderToolsCommand(ctx) };
   if (name === "skills") return { text: renderSkills(ctx) };
   if (name === "cost") return { text: renderCost(ctx, arg) };
+  if (name === "digest") {
+    return {
+      text: renderDigest({ alive: ctx.alive, plan: loadPlan(ctx.sessionId), costs: loadCosts() }),
+    };
+  }
   if (name === "plan") return { text: renderPlanCommand(ctx) };
   if (name === "undo") return { text: renderUndo(ctx) };
   return null;

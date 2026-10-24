@@ -169,6 +169,40 @@ describe("handleChannelCommand", () => {
     expect(text).toContain("$0.00");
   });
 
+  it("answers /digest with plan, alive, and cost sections", async () => {
+    const alive = {
+      inspect: () => ({
+        events: [
+          {
+            id: "e1",
+            type: "git_commit",
+            source: "git-watcher",
+            timestamp: Date.now() - 60 * 60 * 1000,
+            significance: 0.8,
+            payload: { head: "abcdef1", changedFiles: 2 },
+            requiresHuman: false,
+          },
+        ],
+        openLoops: [
+          { id: "l1", goal: "Ship the digest", status: "waiting_evidence" as const, createdAt: 1, updatedAt: 1 },
+        ],
+        pendingActions: [],
+      }),
+    };
+
+    const outcome = await handleChannelCommand("/digest", makeContext({ alive }));
+
+    expect(outcome).not.toBeNull();
+    expect(outcome!.record).toBeFalsy();
+    const text = plain(outcome!.text);
+    expect(text).toContain("Digest — ");
+    expect(text).toContain("Plan");
+    expect(text).toContain("Alive (last 1d)");
+    expect(text).toContain("Git: new commit abcdef1 (2 files)");
+    expect(text).toContain("[waiting_evidence] Ship the digest");
+    expect(text).toContain("Costs");
+  });
+
   it("runs memory read commands without recording them", async () => {
     const ctx = makeContext({ memory: new MemoryStore() });
 
