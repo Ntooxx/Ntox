@@ -21,6 +21,7 @@ import { CronManager } from "../cron/index.js";
 import { handleCronCommand } from "../cron/commands.js";
 import { createTelegramChannel } from "./telegram.js";
 import { createDiscordChannel } from "./discord.js";
+import { createSlackChannel, resolveSlackConfig } from "./slack.js";
 import { createWebChannel } from "./web.js";
 import { createWhatsAppChannel } from "./whatsapp.js";
 import {
@@ -68,6 +69,7 @@ import type { SkillDefinition } from "../types/index.js";
 
 const config = loadConfig();
 const PROACTIVE_PUSH_DELAY_MS = 1500;
+const slackConfig = resolveSlackConfig(config as unknown as Record<string, unknown>);
 const shared = createSharedInfra(config);
 const marketplace = createMarketplace({ indexSource: config.skillMarketplaceIndex });
 const sessionInfras = new Map<string, ReturnType<typeof createSessionInfra>>();
@@ -148,7 +150,13 @@ export async function runGateway(channel?: string): Promise<void> {
       mode?: "normal" | "regenerate",
     ): Promise<string> => {
       const allowed =
-        ctx === "telegram" ? config.telegramAllowedUsers : ctx === "discord" ? config.discordAllowedUsers : [];
+        ctx === "telegram"
+          ? config.telegramAllowedUsers
+          : ctx === "discord"
+            ? config.discordAllowedUsers
+            : ctx === "slack"
+              ? (slackConfig?.allowedUsers ?? [])
+              : [];
       if (allowed.length > 0 && !allowed.includes(username) && !allowed.includes(chatId)) {
         return "Access denied.";
       }
@@ -436,6 +444,17 @@ export async function runGateway(channel?: string): Promise<void> {
         });
       };
     }
+    if (ctx === "slack" && slackConfig) {
+      return async (chatId, message) => {
+        const res = await fetch("https://slack.com/api/chat.postMessage", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${slackConfig.botToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ channel: chatId, text: message }),
+        });
+        const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+        if (!res.ok || !data?.ok) console.error(`[slack] send failed: ${data?.error ?? res.status}`);
+      };
+    }
     return null;
   };
 
@@ -491,6 +510,18 @@ export async function runGateway(channel?: string): Promise<void> {
     if (sender) channelSenders.set("whatsapp", sender);
     channelImageSenders.set("whatsapp", createWhatsAppImageSender(config.whatsappToken, config.whatsappPhoneNumberId));
     channelVoiceSenders.set("whatsapp", createWhatsAppVoiceSender(config.whatsappToken, config.whatsappPhoneNumberId));
+  }
+  if ((!channel || channel === "slack") && slackConfig) {
+    channels.push(
+      createSlackChannel({
+        botToken: slackConfig.botToken,
+        appToken: slackConfig.appToken,
+        allowedUsers: slackConfig.allowedUsers,
+        onMessage: makeHandler("slack"),
+      }),
+    );
+    const sender = makeSender("slack");
+    if (sender) channelSenders.set("slack", sender);
   }
   if (!channel || channel === "web") {
     const inspect = createInspectServices({

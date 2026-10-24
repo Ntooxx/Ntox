@@ -315,7 +315,40 @@ trigger and it activates on Telegram.*
   round-trip, header decoding, limits, and the approval gate end-to-end —
   plus the `/mail` command path.
 
-### 5.2 Slack · P1 · M — Good first issue
+### 5.2 Slack · P1 · M · ✅ shipped
+- New `src/gateway/slack.ts`: a Socket Mode channel on the existing `ws`
+  dependency — `auth.test` validates the bot token, `apps.connection.open`
+  mints the websocket URL, every `events_api` envelope is acked immediately,
+  `message` / `app_mention` events are handled (DMs answered outright,
+  channel messages only when @-mentioned, bot echoes, subtypes and foreign
+  events ignored), replies go through `chat.postMessage`, and a `disconnect`
+  envelope triggers the same exponential-backoff reconnect Discord uses.
+- Gateway wiring: `ntox gateway slack` (or a plain gateway run) registers the
+  channel, `makeSender` gained a Slack branch so cron digests, proactive
+  pushes and alive reminders reach Slack too, and the shared access check
+  accepts Slack user ids from the allowlist.
+- No config-schema edits needed: `resolveSlackConfig` reads
+  `slack { botToken, appToken, allowedUsers }` (or the flat
+  `slackToken` / `slackAppToken` keys) from `~/.ntox/config.json` with
+  `NTOX_SLACK_BOT_TOKEN`, `NTOX_SLACK_APP_TOKEN` and
+  `NTOX_SLACK_ALLOWED_USERS` overrides; without both tokens the channel is
+  simply not started.
+- Setup: create a Slack app → enable Socket Mode → install to the workspace
+  → subscribe to bot events `message.channels`, `message.im`, `app_mention`
+  → grant scopes `chat:write`, `im:history`, `channels:history`,
+  `app_mentions:read` → take the Bot User OAuth token (xoxb-) and an
+  App-Level token with `connections:write` (xapp-).
+- Declared limits: text only (no voice, no image delivery — same as
+  Discord), approvals arrive as plain-text `/approve …` requests (no Block
+  Kit buttons yet), replies are flat rather than threaded, Slack has no bot
+  typing indicator so `notifyTyping` is a no-op, and no run against a real
+  workspace yet — behaviour is proven against a local Socket Mode websocket
+  server plus stubbed Slack HTTP in tests and a dist smoke.
+- Tests: 11 in `src/gateway/slack.test.ts` — config resolution (block,
+  legacy keys, env, allowlist forms), token-validation failure, DM and
+  mention routing with envelope acks, echo/subtype/irrelevant filtering,
+  allowlist refusal, handler-error replies, and disconnect-driven
+  reconnect.
 ### 5.3 Matrix · P2 · M — Good first issue
 ### 5.4 Calendar & contacts · P2 · M
 - Read/create events (Google Calendar / Outlook Graph), wired to natural
@@ -352,7 +385,7 @@ trigger and it activates on Telegram.*
 |---|---|---|---|
 | **1** | Voice & talk | 1.1–1.5 ✅, 3.2 ✅, 3.4 ✅ | Voice notes in/out on TG + WA ✅, tap-to-approve ✅ |
 | **2** | Skills & commands | 2.1 ✅, 2.2, 2.4, 3.1, 3.3 | Self-learning skills ✅ (propose + `/skill save`), installable skills, command parity |
-| **3** | Proactive & email | 4.1–4.3 ✅, 5.1 ✅, 5.2 | He messages first; email send/read; Slack |
+| **3** | Proactive & email | 4.1–4.3 ✅, 5.1 ✅, 5.2 ✅ | He messages first; email send/read; Slack |
 | **4** | Deep platform | 2.3, 2.5, 2.7, 4.4 ✅, 5.3–5.5, 6 | Marketplace, routines, MCP, calendar |
 | **5** | Realtime | 1.6 | Spoken calls, wake word, hands-free |
 
