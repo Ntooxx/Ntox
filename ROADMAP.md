@@ -146,8 +146,20 @@ trigger and it activates on Telegram.*
 - Fixed: `channelsByName` was never populated, so per-channel typing
   indicators and interactive sends from the gateway handler never fired.
 
-### 3.3 `/cron` parity in REPL · P1 · S
+### 3.3 `/cron` parity in REPL · P1 · S · ✅ shipped
 - Cron is gateway-only today; expose the same manager in the REPL.
+- `/cron` command handler extracted to `src/cron/commands.ts` so gateway and
+  REPL share one implementation (add/list/toggle/remove/help, same usage
+  text); REPL jobs are stored with `channel: "repl"` + session id.
+- REPL starts its own `CronManager` at boot: `/skill run` jobs execute
+  through the routine runner, other prompts through a fresh skip-reflection
+  agent (never the live conversation), and results print to the terminal via
+  delivery.
+- `CronManager.setChannelFilter` gives each process ownership of its jobs, so
+  a gateway service and an open REPL on the same `cron.json` never run the
+  same job twice; filtered jobs keep their `nextRun` for their real owner.
+- First tests for the cron module: command roundtrip + ownership/nextRun
+  behavior under fake timers.
 
 ### 3.4 WhatsApp niceties · P1 · S · ✅ shipped (typing)
 - Typing indicator via read-receipt + `typing_indicator` (refreshed at most

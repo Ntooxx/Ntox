@@ -20,6 +20,7 @@ export const COMMAND_GROUPS: { id: CommandGroupId; title: string }[] = [
 
 export const COMMANDS: CommandDef[] = [
   { name: "help", description: "list commands", group: "daily", aliases: ["ask"], channel: true },
+  { name: "cron", description: "scheduled automations", group: "daily", channel: true },
   { name: "status", description: "compact agent dashboard", group: "daily", channel: true },
   { name: "last", description: "what just happened", group: "daily" },
   { name: "tips", description: "practical usage guide", group: "daily" },

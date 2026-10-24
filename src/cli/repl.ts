@@ -2,7 +2,7 @@ import * as readline from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { randomUUID } from "node:crypto";
 import chalk from "chalk";
-import { createAgentInfra, createAgentConfig } from "../core/dispatcher.js";
+import { createAgentInfra, createAgentConfig, GatewayOutput, runAgentMessage } from "../core/dispatcher.js";
 import { runAgentStream, computeTurnTimeoutMs } from "../core/message-handler.js";
 import { BriefingEngine } from "../meta/briefing.js";
 import {
@@ -34,6 +34,8 @@ import { diffSkillByName, renderSkillStats } from "../skills/lifecycle.js";
 import { createRoutineRuntime, renderRoutineRun, runRoutine } from "../skills/routine.js";
 import { renderMcpStatus } from "../mcp/bridge.js";
 import { handleChannelCommand, type ChannelCommandContext } from "../core/channel-commands.js";
+import { CronManager } from "../cron/index.js";
+import { handleCronCommand } from "../cron/commands.js";
 import {
   parseSkillInstallCommand,
   parseSkillLifecycleCommand,
@@ -146,6 +148,7 @@ export class Repl {
   private infra: ReturnType<typeof createAgentInfra>;
   private briefingEngine: BriefingEngine;
   private resumeSessionId?: string;
+  private cron = new CronManager();
 
   constructor(options: { resumeSessionId?: string } = {}) {
     this.resumeSessionId = options.resumeSessionId;
@@ -186,6 +189,36 @@ export class Repl {
       models: this.models,
       sessionId: this.sessionId,
     };
+  }
+
+  private async runRoutineByName(name: string): Promise<{ ok: boolean; text: string }> {
+    const skill = this.skillRegistry.get(name);
+    if (!skill) return { ok: false, text: `Skill "${name}" not found.` };
+    if (!skill.steps || skill.steps.length === 0) {
+      return { ok: false, text: `Skill "${name}" has no routine steps.` };
+    }
+    const runtime = createRoutineRuntime({ llm: this.llm, tools: this.tools, skillRegistry: this.skillRegistry });
+    const result = await runRoutine(skill, runtime);
+    this.skillRegistry.incrementUsage(name);
+    return { ok: result.ok, text: renderRoutineRun(skill, result) };
+  }
+
+  private startCron(): void {
+    this.cron.setChannelFilter((channel) => channel === "repl");
+    this.cron.setExecutor(async (prompt) => {
+      const parsed = parseSkillLifecycleCommand(prompt);
+      if (parsed.kind === "run" && parsed.name) return (await this.runRoutineByName(parsed.name)).text;
+      const cronConfig = createAgentConfig(this.infra, this.config, `cron_${Date.now()}`, { skipReflection: true });
+      const output = new GatewayOutput();
+      const result = await runAgentMessage(new Agent(cronConfig), prompt, output);
+      if (result.error) return `Error: ${result.error.slice(0, 400)}`;
+      return result.response || "(no response)";
+    });
+    this.cron.setDelivery(async (_channel, _chatId, message) => {
+      process.stdout.write("\n");
+      console.log(chalk.cyan(message));
+    });
+    this.cron.start();
   }
 
   async start(): Promise<void> {
@@ -235,6 +268,7 @@ export class Repl {
     await runFirstTimeOnboarding(this.userModel);
     this.loadModelsCached();
     this.infra.aliveHosts?.start();
+    this.startCron();
     if (this.config.idleEnabled === true) {
       try {
         this.wireIdleJobs();
@@ -694,6 +728,11 @@ export class Repl {
       case "mcp":
         console.log(renderMcpStatus(this.infra.mcp.statuses()));
         break;
+      case "cron": {
+        const response = handleCronCommand(input, this.cron, { channel: "repl", chatId: this.sessionId });
+        if (response) console.log(response);
+        break;
+      }
       case "analytics":
         this.printAnalytics();
         break;
@@ -1185,11 +1224,8 @@ export class Repl {
           return;
         }
         console.log(chalk.dim(`Running routine ${skill.name} (${skill.steps.length} steps)...`));
-        const runtime = createRoutineRuntime({ llm: this.llm, tools: this.tools, skillRegistry: this.skillRegistry });
-        const result = await runRoutine(skill, runtime);
-        this.skillRegistry.incrementUsage(skill.name);
-        const message = renderRoutineRun(skill, result);
-        console.log(result.ok ? chalk.green(message) : chalk.yellow(message));
+        const run = await this.runRoutineByName(parsed.name);
+        console.log(run.ok ? chalk.green(run.text) : chalk.yellow(run.text));
         break;
       }
       case "diff": {
@@ -2965,6 +3001,7 @@ export class Repl {
     }
     try {
       this.infra.aliveHosts?.stop();
+      this.cron.stop();
       const awarenessSummary = this.agent.recordSessionEnd(this.sessionId);
       this.userModel.endSession();
       this.userModel.flush();

@@ -13,9 +13,14 @@ export class CronManager {
   private timer: ReturnType<typeof setInterval> | null = null;
   private executor: ((prompt: string) => Promise<string>) | null = null;
   private delivery: CronDelivery | null = null;
+  private channelFilter: ((channel: string | undefined) => boolean) | null = null;
 
   constructor() {
     this.load();
+  }
+
+  setChannelFilter(filter: (channel: string | undefined) => boolean): void {
+    this.channelFilter = filter;
   }
 
   private load(): void {
@@ -112,6 +117,7 @@ export class CronManager {
     for (const job of this.jobs) {
       if (!job.enabled) continue;
       if (now < job.nextRun) continue;
+      if (this.channelFilter && !this.channelFilter(job.channel)) continue;
 
       job.lastRun = now;
       job.nextRun = getNextRun(job.schedule);
