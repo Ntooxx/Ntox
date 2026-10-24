@@ -45,6 +45,7 @@ import {
   parseSkillMarketplaceCommand,
 } from "../gateway/commands.js";
 import { Analytics } from "../meta/analytics.js";
+import { LoopReminderLedger, collectOpenLoopReminders } from "../alive/reminders.js";
 import { ProactiveEngine } from "../meta/proactive.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
 import {
@@ -120,6 +121,7 @@ export class Repl {
   private lastBrowsedSkills: { name: string; importance: number; description: string; voices: string[] }[] = [];
   private analytics: Analytics;
   private proactive: ProactiveEngine;
+  private loopReminderLedger = new LoopReminderLedger();
   private cognitiveKernel: CognitiveKernel;
   private sessionId: string;
   private models: ModelInfo[] = [];
@@ -281,6 +283,7 @@ export class Repl {
     this.loadModelsCached();
     this.infra.aliveHosts?.start();
     this.startCron();
+    this.printOpenLoopReminders();
     if (this.config.idleEnabled === true) {
       try {
         this.wireIdleJobs();
@@ -1904,6 +1907,25 @@ export class Repl {
   private printMistakes(): void {
     const all = this.mistakes.getAll();
     console.log(renderMistakeList(all));
+  }
+
+  private printOpenLoopReminders(): void {
+    const alive = this.infra.alive;
+    if (!alive) return;
+    try {
+      const now = Date.now();
+      const reminders = collectOpenLoopReminders(alive.engine.getState().openLoops, {
+        now,
+        scope: "repl",
+        ledger: this.loopReminderLedger,
+      });
+      for (const reminder of reminders) {
+        console.log(chalk.cyan(`\n${reminder.text}`));
+        this.loopReminderLedger.remember("repl", reminder.loop);
+      }
+    } catch (error) {
+      console.error("[alive] open loop reminders failed:", error);
+    }
   }
 
   private wireIdleJobs(): void {

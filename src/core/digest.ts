@@ -3,6 +3,7 @@ import { describeAliveEvent } from "../alive/describe.js";
 import { renderPlan } from "../tools/plan.js";
 import type { PlanState } from "../tools/plan.js";
 import { formatCost, formatTokenCount } from "./llm.js";
+import { relativeAge } from "../utils/time.js";
 
 export const DIGEST_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -37,15 +38,6 @@ export interface DigestOptions {
 
 export function isDigestPrompt(prompt: string): boolean {
   return prompt.trim().toLowerCase() === "/digest";
-}
-
-function ago(timestamp: number, now: number): string {
-  const minutes = Math.max(0, Math.floor((now - timestamp) / 60_000));
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function windowLabel(windowMs: number): string {
@@ -89,7 +81,7 @@ export function renderDigest(options: DigestOptions = {}): string {
     lines.push("  Nothing notable.");
   } else {
     for (const event of events) {
-      lines.push(`  - ${ago(event.timestamp, now)} · ${describeAliveEvent(event) ?? event.type}`);
+      lines.push(`  - ${relativeAge(event.timestamp, now)} · ${describeAliveEvent(event) ?? event.type}`);
     }
   }
   lines.push("");

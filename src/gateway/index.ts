@@ -3,6 +3,7 @@ import { handleChannelCommand } from "../core/channel-commands.js";
 import { isDigestPrompt, renderDigest } from "../core/digest.js";
 import { loadPlan } from "../tools/plan.js";
 import { ProactiveThrottle, pushProactiveSuggestion } from "../core/proactive-delivery.js";
+import { LoopReminderLedger, OPEN_LOOP_REMINDER_INTERVAL_MS, collectOpenLoopReminders } from "../alive/reminders.js";
 import { AlivePusher, splitSessionId, type AlivePushTarget } from "./alive-push.js";
 import { renderChannelHelp } from "../cli/commands.js";
 import { stripAnsi } from "../cli/theme.js";
@@ -77,6 +78,7 @@ const channelVoiceSenders = new Map<string, VoiceSender>();
 const pendingApprovals = new Map<string, PendingApproval>();
 const pendingSkillProposals = new Map<string, SkillDefinition>();
 const proactiveThrottle = new ProactiveThrottle();
+const loopReminderLedger = new LoopReminderLedger();
 const conversations = new ConversationStore();
 
 function getOrCreateSessionInfra(chatId: string, sharedInfra: SharedInfra) {
@@ -123,6 +125,16 @@ export async function runGateway(channel?: string): Promise<void> {
     },
   });
   const unsubscribeAlive = shared.alive.subscribe((action, event) => alivePusher.handle(action, event));
+  const sweepOpenLoopReminders = (): void => {
+    const now = Date.now();
+    const loops = shared.alive.engine.getState().openLoops;
+    for (const reminder of collectOpenLoopReminders(loops, { now, scope: "gateway", ledger: loopReminderLedger })) {
+      if (alivePusher.handle({ kind: "notify", reason: reminder.text }) > 0) {
+        loopReminderLedger.remember("gateway", reminder.loop);
+      }
+    }
+  };
+  const loopReminderTimer = setInterval(sweepOpenLoopReminders, OPEN_LOOP_REMINDER_INTERVAL_MS);
   const channelsByName = new Map<string, GatewayChannel>();
   const makeHandler =
     (ctx: string) =>
@@ -609,6 +621,7 @@ export async function runGateway(channel?: string): Promise<void> {
 
   process.on("SIGINT", async () => {
     unsubscribeAlive();
+    clearInterval(loopReminderTimer);
     shared.aliveHosts?.stop();
     cron.stop();
     for (const ch of channels) await ch.stop();

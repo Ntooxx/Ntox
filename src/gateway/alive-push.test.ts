@@ -97,6 +97,26 @@ describe("AlivePusher", () => {
     expect(send).toHaveBeenCalledWith("whatsapp", "43", "Alive · Git: new commit abcdef1 (3 files)");
   });
 
+  it("reports how many chats it actually pushed to", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    let targets = [
+      { channel: "telegram", chatId: "42" },
+      { channel: "whatsapp", chatId: "43" },
+    ];
+    const pusher = new AlivePusher({
+      targets: () => targets,
+      send,
+      now: () => 1_000_000,
+    });
+
+    expect(pusher.handle(action("wake"), gitEvent())).toBe(2);
+    expect(pusher.handle(action("notify", "Human decision requested"))).toBe(0);
+
+    targets = [];
+    expect(pusher.handle(action("wake"), gitEvent())).toBe(0);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  });
+
   it("throttles each chat independently for the cooldown window", async () => {
     let now = 1_000_000;
     const send = vi.fn().mockResolvedValue(undefined);

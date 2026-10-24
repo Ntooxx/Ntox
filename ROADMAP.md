@@ -258,9 +258,24 @@ trigger and it activates on Telegram.*
   per-day breakdown, and `/digest` never consults the LLM — it reports
   structured state instead of summarizing it.
 
-### 4.4 Open-loop reminders · P2 · M
+### 4.4 Open-loop reminders · P2 · M · ✅ shipped
 - "You asked me to finish X yesterday — shall I continue?" driven by
   `alive` open loops.
+- New `src/alive/reminders.ts`: `findReminderLoops` picks unfinished loops
+  idle for ≥ 24h (oldest first, max 3), `renderOpenLoopReminder` phrases them
+  with their age and next step, and `LoopReminderLedger`
+  (`~/.ntox/loop-reminders.json`) remembers `scope|loopId` so each surface
+  reminds once — until the loop's `updatedAt` moves, which makes it eligible
+  again; ledger entries expire after 30 days and unreadable files reset.
+- Gateway: a 15-minute sweep pushes reminders through the 4.2 `AlivePusher`
+  (same per-chat 60s cooldown, same active-session targets), and the ledger
+  is only marked when at least one chat was really pushed to, so a gateway
+  starting with nobody online never burns a reminder.
+- REPL: reminders print in the terminal at startup, ledger-gated the same way.
+- Declared limits: gateway reminders reach only chats active at sweep time
+  (30 min session TTL), the sweep is per-process (two gateways would each
+  remind once per loop), and the REPL speaks only at boot — there is no
+  in-session nudge.
 
 ---
 
@@ -310,7 +325,7 @@ trigger and it activates on Telegram.*
 | **1** | Voice & talk | 1.1–1.5 ✅, 3.2 ✅, 3.4 ✅ | Voice notes in/out on TG + WA ✅, tap-to-approve ✅ |
 | **2** | Skills & commands | 2.1 ✅, 2.2, 2.4, 3.1, 3.3 | Self-learning skills ✅ (propose + `/skill save`), installable skills, command parity |
 | **3** | Proactive & email | 4.1–4.3 ✅, 5.1, 5.2 | He messages first; email send/read; Slack |
-| **4** | Deep platform | 2.3, 2.5, 2.7, 4.4, 5.3–5.5, 6 | Marketplace, routines, MCP, calendar |
+| **4** | Deep platform | 2.3, 2.5, 2.7, 4.4 ✅, 5.3–5.5, 6 | Marketplace, routines, MCP, calendar |
 | **5** | Realtime | 1.6 | Spoken calls, wake word, hands-free |
 
 Each phase ends with one demo-able acceptance scenario (see pillar footers).

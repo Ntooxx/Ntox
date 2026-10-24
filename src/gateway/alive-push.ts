@@ -48,15 +48,17 @@ export class AlivePusher {
     this.minIntervalMs = options.minIntervalMs ?? ALIVE_PUSH_MIN_INTERVAL_MS;
   }
 
-  handle(action: AliveAction, event?: AliveEvent): void {
+  handle(action: AliveAction, event?: AliveEvent): number {
     const message = renderAlivePush(action, event);
-    if (!message) return;
+    if (!message) return 0;
     const now = this.now();
+    let pushed = 0;
     for (const target of this.targets()) {
       const key = `${target.channel}:${target.chatId}`;
       const last = this.lastPushedAt.get(key);
       if (last !== undefined && now - last < this.minIntervalMs) continue;
       this.lastPushedAt.set(key, now);
+      pushed++;
       try {
         void Promise.resolve(this.send(target.channel, target.chatId, message)).catch((error: unknown) => {
           console.error(
@@ -69,5 +71,6 @@ export class AlivePusher {
         );
       }
     }
+    return pushed;
   }
 }
