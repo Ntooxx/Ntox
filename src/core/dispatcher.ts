@@ -31,7 +31,7 @@ import { SkillExecutor } from "../skills/executor.js";
 import { SkillRegistry } from "../skills/registry.js";
 import { SkillLibrary } from "../skills/library.js";
 import { Analytics } from "../meta/analytics.js";
-import { ProactiveEngine } from "../meta/proactive.js";
+import { ProactiveEngine, type ProactiveSuggestion } from "../meta/proactive.js";
 import { ObservationEngine } from "../meta/observation.js";
 import { MentalModel } from "../meta/mental-model.js";
 import { Executive } from "../meta/executive.js";
@@ -359,6 +359,7 @@ export interface MessageOutput {
   onCorrectionDetected?(topicKey: string, correction: string): void;
   onSkillTriggered?(skillName: string, confidence: number): void;
   onSkillProposal?(skill: SkillDefinition): void;
+  onProactiveSuggestion?(suggestion: ProactiveSuggestion): void;
   onAliveAction?(action: Parameters<NonNullable<AgentCallbacks["onAliveAction"]>>[0]): void;
   onEnd?(): void;
   flush(): string;
@@ -410,6 +411,7 @@ export async function runAgentMessage(
       onCorrectionDetected: (topicKey, correction) => output.onCorrectionDetected?.(topicKey, correction),
       onSkillTriggered: (name, confidence) => output.onSkillTriggered?.(name, confidence),
       onSkillProposal: (skill) => output.onSkillProposal?.(skill),
+      onProactiveSuggestion: (suggestion) => output.onProactiveSuggestion?.(suggestion),
       onAliveAction: (action) => output.onAliveAction?.(action),
     };
 
@@ -515,6 +517,9 @@ export class GatewayOutput implements MessageOutput {
   }
   onSkillProposal(skill: SkillDefinition): void {
     this.externalOnEvent?.({ type: "skill_proposal", skill });
+  }
+  onProactiveSuggestion(suggestion: ProactiveSuggestion): void {
+    this.externalOnEvent?.({ type: "proactive", suggestion });
   }
   onAliveAction(action: Parameters<NonNullable<AgentCallbacks["onAliveAction"]>>[0]): void {
     this.externalOnEvent?.({ type: "alive", action });

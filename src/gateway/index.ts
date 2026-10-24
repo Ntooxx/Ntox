@@ -1,5 +1,6 @@
 import { loadCachedModels, loadConfig } from "../core/config.js";
 import { handleChannelCommand } from "../core/channel-commands.js";
+import { ProactiveThrottle, pushProactiveSuggestion } from "../core/proactive-delivery.js";
 import { renderChannelHelp } from "../cli/commands.js";
 import { stripAnsi } from "../cli/theme.js";
 import {
@@ -51,9 +52,11 @@ import { handleVoiceCommand } from "./voice-mode.js";
 import type { WebVoiceHandlers } from "./web.js";
 import { processAtReferences } from "../cli/at-refs.js";
 import type { GatewayChannel } from "./types.js";
+import type { ProactiveSuggestion } from "../meta/proactive.js";
 import type { SkillDefinition } from "../types/index.js";
 
 const config = loadConfig();
+const PROACTIVE_PUSH_DELAY_MS = 1500;
 const shared = createSharedInfra(config);
 const marketplace = createMarketplace({ indexSource: config.skillMarketplaceIndex });
 const sessionInfras = new Map<string, ReturnType<typeof createSessionInfra>>();
@@ -62,6 +65,7 @@ const channelSenders = new Map<string, (chatId: string, message: string) => Prom
 const channelImageSenders = new Map<string, ImageSender>();
 const pendingApprovals = new Map<string, PendingApproval>();
 const pendingSkillProposals = new Map<string, SkillDefinition>();
+const proactiveThrottle = new ProactiveThrottle();
 const conversations = new ConversationStore();
 
 function getOrCreateSessionInfra(chatId: string, sharedInfra: SharedInfra) {
@@ -201,6 +205,16 @@ export async function runGateway(channel?: string): Promise<void> {
               const sender = channelSenders.get(ctx);
               if (sender) void sender(chatId, renderSkillProposal(skill)).catch(() => {});
             }
+          }
+          if (event.type === "proactive" && event.suggestion) {
+            pushProactiveSuggestion({
+              throttle: proactiveThrottle,
+              key: `${ctx}:${chatId}`,
+              chatId,
+              suggestion: event.suggestion as ProactiveSuggestion,
+              sender: channelSenders.get(ctx),
+              delayMs: PROACTIVE_PUSH_DELAY_MS,
+            });
           }
           onEvent?.(event);
         };

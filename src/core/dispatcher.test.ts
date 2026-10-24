@@ -46,6 +46,16 @@ describe("GatewayOutput", () => {
     out.onToken("  hello  ");
     expect(out.flush()).toBe("hello");
   });
+
+  it("emits proactive suggestions as structured events", () => {
+    const onEvent = vi.fn();
+    const out = new GatewayOutput(undefined, undefined, onEvent);
+    const suggestion = { message: "You have 1 active goal: ship it.", type: "goal-reminder", priority: 3 } as const;
+    out.onProactiveSuggestion(suggestion);
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith({ type: "proactive", suggestion });
+    expect(onEvent.mock.calls[0][0]).not.toHaveProperty("message");
+  });
 });
 
 describe("GatewayOutput generated images", () => {
@@ -199,6 +209,25 @@ describe("runAgentMessage", () => {
     expect(result.response).toBe("hello  world");
     expect(result.response).not.toContain("system-reminder");
     expect(result.response).not.toContain("internal");
+  });
+
+  it("forwards proactive suggestions from the agent to the output", async () => {
+    const suggestion = { message: "100 memories stored!", type: "milestone", priority: 6 } as const;
+    const agent = {
+      run: vi.fn().mockImplementation((_text: string, callbacks: { onProactiveSuggestion?: (s: unknown) => void }) => {
+        return (async function* () {
+          callbacks.onProactiveSuggestion?.(suggestion);
+          yield "done";
+        })();
+      }),
+    } as unknown as Agent;
+    const onEvent = vi.fn();
+    const output = new GatewayOutput(undefined, undefined, onEvent);
+
+    const result = await runAgentMessage(agent, "hello", output);
+
+    expect(result.error).toBeNull();
+    expect(onEvent).toHaveBeenCalledWith({ type: "proactive", suggestion });
   });
 });
 

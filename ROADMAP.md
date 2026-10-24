@@ -187,10 +187,26 @@ trigger and it activates on Telegram.*
 
 ## Pillar 4 — Proactivity & scheduling (P1) "he makes the first move"
 
-### 4.1 Push proactive suggestions to channels · P1 · S
-- `onProactiveSuggestion` is never wired in `runAgentMessage`
-  (`core/dispatcher.ts`) — one of the highest-value one-line-ish gaps.
-  Throttle to 1/day/chat.
+### 4.1 Push proactive suggestions to channels · P1 · S · ✅ shipped
+- `onProactiveSuggestion` was never wired in `runAgentMessage`
+  (`core/dispatcher.ts`), so the engine only ever reached the REPL. It is now
+  part of `MessageOutput`, forwarded like every other callback, and
+  `GatewayOutput` emits `{ type: "proactive", suggestion }` alongside the
+  existing structured events.
+- The gateway event bridge turns that event into a push through the channel
+  sender (`makeSender` → TG / Discord / WA), rendered per type as
+  `Goal: …`, `Milestone: …`, `Tip: …`, `Insight: …`, `Suggestion: …`,
+  `Habit: …`, `Question: …`.
+- Throttled to one suggestion per chat per 24h by
+  `src/core/proactive-delivery.ts`, persisted to `~/.ntox/proactive.json` so a
+  restarted gateway keeps the cap; chats are tracked independently and expired
+  entries are pruned on write.
+- The push is delayed 1.5s after the turn so the answer lands first, failed
+  sends are logged instead of thrown, and the daily claim is only spent when
+  the chat actually has a sender.
+- Declared limits: the web channel has no sender, so suggestions there arrive
+  only as a socket event (the desktop client does not render them yet), and
+  the REPL keeps its existing inline verbose tag instead of a push.
 
 ### 4.2 `alive` events → push notifications · P1 · M
 - `src/alive/` already detects file changes, git updates, open loops —
@@ -251,7 +267,7 @@ trigger and it activates on Telegram.*
 |---|---|---|---|
 | **1** | Voice & talk | 1.1–1.5 ✅, 3.2 ✅, 3.4 ✅ | Voice notes in/out on TG + WA ✅, tap-to-approve ✅ |
 | **2** | Skills & commands | 2.1 ✅, 2.2, 2.4, 3.1, 3.3 | Self-learning skills ✅ (propose + `/skill save`), installable skills, command parity |
-| **3** | Proactive & email | 4.1–4.3, 5.1, 5.2 | He messages first; email send/read; Slack |
+| **3** | Proactive & email | 4.1 ✅, 4.2–4.3, 5.1, 5.2 | He messages first; email send/read; Slack |
 | **4** | Deep platform | 2.3, 2.5, 2.7, 4.4, 5.3–5.5, 6 | Marketplace, routines, MCP, calendar |
 | **5** | Realtime | 1.6 | Spoken calls, wake word, hands-free |
 
@@ -261,7 +277,7 @@ Each phase ends with one demo-able acceptance scenario (see pillar footers).
 
 ## Quick wins (< half a day each)
 
-1. Wire `onProactiveSuggestion` → gateway sender (4.1)
+1. Wire `onProactiveSuggestion` → gateway sender (4.1) ✅
 2. Discord voice input (1.3)
 3. WhatsApp typing indicator (3.4)
 4. REPL `/cron` parity (3.3)
