@@ -281,11 +281,39 @@ trigger and it activates on Telegram.*
 
 ## Pillar 5 — Channels & integrations (P1–P2)
 
-### 5.1 Email tool (send + read) · P1 · M
-- New `src/tools/email.ts`: SMTP or Resend/Sendgrid for sending; IMAP or
-  provider API for reading. Approval-gated (`send email` in destructive
-  patterns). Commands: `/mail unread`, "email this to…".
-- Nothing exists today — this is a greenfield pillar.
+### 5.1 Email tool (send + read) · P1 · M · ✅ shipped
+- Zero new dependencies: `src/tools/email.ts` hand-rolls both transports over
+  `node:net`/`node:tls` — an SMTP client (EHLO → STARTTLS when offered →
+  AUTH PLAIN with AUTH LOGIN fallback → MAIL/RCPT/DATA → QUIT, RFC 2047
+  subjects, base64 UTF-8 body) and a minimal IMAP4rev1 client (STARTTLS when
+  offered, LOGIN, SELECT, `UID SEARCH UNSEEN`, one `UID FETCH` per message
+  reading header fields plus a 400-byte body preview through `{n}` literals).
+- Two tools: `email_send` (approval-gated) and `email_read`. Configuration
+  comes from `email.smtp` / `email.imap` in `~/.ntox/config.json` or from
+  `NTOX_EMAIL_SMTP_*` / `NTOX_EMAIL_IMAP_*` env vars (host, port, secure,
+  user, pass, from); ports default to 587/465 and 993/143 by `secure`.
+- Approval plumbing fix: the generic `/approve` surfaces (gateway buttons,
+  web UI, REPL) hard-coded the `shell` namespace, so a non-shell tool would
+  be re-asked forever. `recordApprovalRequest` + `storeApprovalDecision`
+  attribute a decision to the tool that asked (30 min window, `shell`
+  fallback), and `email_send` records its request before answering
+  `APPROVAL_REQUIRED`.
+- `/mail` joined the unified command layer on every channel and the REPL:
+  `/mail` shows transport status, `/mail unread [n]` runs `email_read`,
+  `/mail help` documents it; sending stays natural language ("email this
+  to alice@…") so the model goes through the gated tool.
+- Both email tools joined `NETWORK_TOOLS` (a profile with
+  `networkPolicy: disabled` denies them) and `DEFAULT_ALLOWED_TOOLS`.
+- Declared limits: basic auth only (no OAuth2/XOAUTH2 — use an app password),
+  send is text-only with no attachments, inbound mail is read as a preview,
+  the TLS branches ride the platform `tls` module while the protocol tests
+  run against certificate-less local fakes (implicit-TLS/STARTTLS handshakes
+  are not covered by tests), only UNSEEN mail is listed, and credentials sit
+  in `config.json`/env like the rest of the gateway config.
+- Tests: 22 in `src/tools/email.test.ts` against real local fake SMTP and
+  IMAP servers — dialogue capture, auth and RCPT failures, RFC 2047
+  round-trip, header decoding, limits, and the approval gate end-to-end —
+  plus the `/mail` command path.
 
 ### 5.2 Slack · P1 · M — Good first issue
 ### 5.3 Matrix · P2 · M — Good first issue
@@ -324,7 +352,7 @@ trigger and it activates on Telegram.*
 |---|---|---|---|
 | **1** | Voice & talk | 1.1–1.5 ✅, 3.2 ✅, 3.4 ✅ | Voice notes in/out on TG + WA ✅, tap-to-approve ✅ |
 | **2** | Skills & commands | 2.1 ✅, 2.2, 2.4, 3.1, 3.3 | Self-learning skills ✅ (propose + `/skill save`), installable skills, command parity |
-| **3** | Proactive & email | 4.1–4.3 ✅, 5.1, 5.2 | He messages first; email send/read; Slack |
+| **3** | Proactive & email | 4.1–4.3 ✅, 5.1 ✅, 5.2 | He messages first; email send/read; Slack |
 | **4** | Deep platform | 2.3, 2.5, 2.7, 4.4 ✅, 5.3–5.5, 6 | Marketplace, routines, MCP, calendar |
 | **5** | Realtime | 1.6 | Spoken calls, wake word, hands-free |
 

@@ -8,6 +8,7 @@ import { formatCost, formatTokenCount, getProviderNames } from "./llm.js";
 import { loadCosts, patchConfig } from "./config.js";
 import { renderSkillStats } from "../skills/lifecycle.js";
 import { loadPlan, renderPlan as renderPlanState } from "../tools/plan.js";
+import { resolveEmailConfig, type UnreadEmail } from "../tools/email.js";
 import { renderDigest, type DigestAliveSource } from "./digest.js";
 import { renderCosts, renderMemoryStats } from "../cli/render.js";
 
@@ -39,6 +40,7 @@ export const UNIFIED_COMMANDS = [
   "status",
   "cost",
   "digest",
+  "mail",
   "memory",
   "remember",
   "forget",
@@ -264,6 +266,46 @@ function renderToolsCommand(ctx: ChannelCommandContext): string {
   return renderTools(ctx);
 }
 
+async function renderMailCommand(ctx: ChannelCommandContext, arg: string): Promise<string> {
+  const [sub = "", ...rest] = arg.trim().split(/\s+/);
+  const config = resolveEmailConfig(ctx.config as unknown as Record<string, unknown>);
+  if (sub === "" || sub === "help") {
+    const smtp = config.smtp
+      ? `${config.smtp.host}:${config.smtp.port}${config.smtp.secure ? " TLS" : ""}`
+      : "not configured";
+    const imap = config.imap
+      ? `${config.imap.host}:${config.imap.port}${config.imap.secure ? " TLS" : ""}`
+      : "not configured";
+    return [
+      chalk.bold("Email:"),
+      `  ${chalk.dim("smtp")}    ${smtp}`,
+      `  ${chalk.dim("imap")}    ${imap}`,
+      "",
+      chalk.dim("/mail unread [n] — list unread mail · /mail help — this message"),
+      chalk.dim('Send by asking: "email this to alice@example.com"'),
+    ].join("\n");
+  }
+  if (sub === "unread") {
+    if (!ctx.tools) return chalk.yellow("Tool registry unavailable.");
+    const tool = ctx.tools.get("email_read");
+    if (!tool) return chalk.yellow("email_read tool is not registered.");
+    const requested = rest[0] === undefined ? 5 : Number(rest[0]);
+    const result = await tool.execute({ limit: Number.isFinite(requested) ? requested : 5 });
+    if (!result.success) return chalk.yellow(String(result.error ?? "Mail read failed."));
+    const data = (result.data ?? {}) as { count?: number; unread?: UnreadEmail[] };
+    const unread = data.unread ?? [];
+    if (unread.length === 0) return chalk.dim("No unread mail.");
+    return [
+      chalk.bold(`Unread (${unread.length}):`),
+      ...unread.map((mail) => {
+        const preview = mail.preview ? `\n    ${chalk.dim(mail.preview.slice(0, 160))}` : "";
+        return `  ${chalk.cyan(`#${mail.uid}`)} ${chalk.dim(mail.from)} · ${mail.subject}${preview}`;
+      }),
+    ].join("\n");
+  }
+  return chalk.yellow("Usage: /mail [unread [n] | help]");
+}
+
 function renderPlanCommand(ctx: ChannelCommandContext): string {
   const plan = loadPlan(ctx.sessionId);
   if (!plan) {
@@ -314,6 +356,7 @@ export async function handleChannelCommand(
     };
   }
   if (name === "plan") return { text: renderPlanCommand(ctx) };
+  if (name === "mail") return { text: await renderMailCommand(ctx, arg) };
   if (name === "undo") return { text: renderUndo(ctx) };
   return null;
 }

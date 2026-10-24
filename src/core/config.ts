@@ -109,6 +109,8 @@ const DEFAULT_ALLOWED_TOOLS = [
   "browse",
   "job_tracker",
   "profile_eval",
+  "email_send",
+  "email_read",
 ];
 
 export function validateConfig(config: NtoxConfig): { valid: boolean; errors: string[] } {

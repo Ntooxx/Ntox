@@ -55,7 +55,7 @@ import {
   type VoiceSender,
 } from "./media-send.js";
 import { createInspectServices, extractApprovalCommand, isApprovalRequired } from "./inspect.js";
-import { approvalStore } from "../tools/approval.js";
+import { storeApprovalDecision } from "../tools/approval.js";
 import { createSettingsService } from "./settings.js";
 import { suggestWorkspacePaths } from "./paths.js";
 import { audioFilenameFor, clampTtsText } from "./voice.js";
@@ -327,7 +327,7 @@ export async function runGateway(channel?: string): Promise<void> {
           const pending = pendingApprovals.get(pendingKey);
           const resolved = resolveApproval(approveParse.scope, approveParse.command, pending);
           if (!resolved.ok) return direct(resolved.message);
-          approvalStore.store("shell", `shell:${resolved.command}`, resolved.decision);
+          storeApprovalDecision(resolved.command, resolved.decision);
           if (pending && pending.command === resolved.command) pendingApprovals.delete(pendingKey);
           if (!resolved.retryPrompt) return direct(renderApprovalOutcome(resolved));
           agent.removeLastTurn();

@@ -203,6 +203,42 @@ describe("handleChannelCommand", () => {
     expect(text).toContain("Costs");
   });
 
+  it("answers /mail help and routes /mail unread through the email tool", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "email_read",
+      description: "list unread mail",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({
+        success: true,
+        data: {
+          count: 1,
+          unread: [
+            { uid: 7, from: "ana@example.com", subject: "Café résumé", date: "Fri", preview: "First message body" },
+          ],
+        },
+      }),
+    });
+    const ctx = makeContext({ tools: registry });
+
+    const help = plain((await handleChannelCommand("/mail", ctx))!.text);
+    expect(help).toContain("Email:");
+    expect(help).toContain("not configured");
+    expect(help).toContain("/mail unread");
+
+    const unread = plain((await handleChannelCommand("/mail unread", ctx))!.text);
+    expect(unread).toContain("Unread (1):");
+    expect(unread).toContain("#7");
+    expect(unread).toContain("Café résumé");
+    expect(unread).toContain("First message body");
+
+    const unknown = plain((await handleChannelCommand("/mail send hi", ctx))!.text);
+    expect(unknown).toContain("Usage: /mail");
+
+    const noTools = plain((await handleChannelCommand("/mail unread", makeContext()))!.text);
+    expect(noTools).toContain("Tool registry unavailable");
+  });
+
   it("runs memory read commands without recording them", async () => {
     const ctx = makeContext({ memory: new MemoryStore() });
 

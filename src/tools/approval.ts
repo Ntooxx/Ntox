@@ -155,6 +155,26 @@ export function buildApprovalKey(toolName: string, command: string): string {
   return `${toolName}:${command}`;
 }
 
+const APPROVAL_REQUEST_TTL_MS = 30 * 60 * 1000;
+
+let lastApprovalRequest: { toolName: string; command: string; at: number } | null = null;
+
+export function recordApprovalRequest(toolName: string, command: string): void {
+  lastApprovalRequest = { toolName, command, at: Date.now() };
+}
+
+export function toolNameForCommand(command: string): string {
+  if (lastApprovalRequest && lastApprovalRequest.command === command) {
+    if (Date.now() - lastApprovalRequest.at <= APPROVAL_REQUEST_TTL_MS) return lastApprovalRequest.toolName;
+  }
+  return "shell";
+}
+
+export function storeApprovalDecision(command: string, decision: ApprovalDecision): void {
+  const toolName = toolNameForCommand(command);
+  approvalStore.store(toolName, buildApprovalKey(toolName, command), decision);
+}
+
 export type InteractiveApprovalHandler = (toolName: string, command: string) => Promise<ApprovalDecision | null>;
 
 let interactiveHandler: InteractiveApprovalHandler | null = null;

@@ -67,7 +67,7 @@ import {
   formatTheoryEvidence,
   formatTheoryOverview,
 } from "./inspect.js";
-import { approvalStore, setInteractiveApproval } from "../tools/approval.js";
+import { storeApprovalDecision, setInteractiveApproval } from "../tools/approval.js";
 import { Spinner, animateExit } from "./animation.js";
 import { BlockBuffer } from "./block-buffer.js";
 import { ChatRenderer } from "./chat-renderer.js";
@@ -1546,7 +1546,7 @@ export class Repl {
           : scope === "always"
             ? "allow-always"
             : "deny";
-    approvalStore.store("shell", `shell:${command}`, decision);
+    storeApprovalDecision(command, decision);
     console.log(chalk.green(`approval ${scope}: ${command}`));
   }
 

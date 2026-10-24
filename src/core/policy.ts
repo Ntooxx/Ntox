@@ -13,7 +13,7 @@ export interface PolicyRuntime {
 
 const READ_TOOLS = new Set(["read", "ls", "glob", "grep", "checkpoint", "open"]);
 const WRITE_TOOLS = new Set(["write", "edit"]);
-const NETWORK_TOOLS = new Set(["web_fetch", "web_read", "search", "browse"]);
+const NETWORK_TOOLS = new Set(["web_fetch", "web_read", "search", "browse", "email_send", "email_read"]);
 const URL_VALUE_PATTERN = /^https?:\/\//i;
 const IMAGE_PATH_PATTERN = /\.(png|jpe?g|gif|webp|bmp)$/i;
 const IMAGE_PATH_MAX = 1024;

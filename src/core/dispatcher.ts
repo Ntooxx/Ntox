@@ -21,6 +21,7 @@ import { planTool } from "../tools/plan.js";
 import { processTool } from "../tools/process.js";
 import { browseTool } from "../tools/browse.js";
 import { openTool } from "../tools/open.js";
+import { emailReadTool, emailSendTool } from "../tools/email.js";
 import { jobTrackerTool } from "../tools/job-tracker.js";
 import { createProfileEvalTool } from "../tools/profile-eval.js";
 import { MemoryStore } from "../memory/episodic.js";
@@ -150,6 +151,8 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
     browseTool,
     openTool,
     jobTrackerTool,
+    emailSendTool,
+    emailReadTool,
     createProfileEvalTool(llm),
   ]) {
     tools.register(enforceToolPolicy(tool, policy));

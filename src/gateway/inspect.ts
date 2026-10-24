@@ -1,7 +1,7 @@
 import type { Agent } from "../core/agent.js";
 import type { AgentTurnTrace, CognitivePattern, DurableMemory, MemoryStats } from "../types/index.js";
 import type { MemoryStore } from "../memory/episodic.js";
-import { approvalStore, SCOPE_TO_DECISION, type ApprovalScope } from "../tools/approval.js";
+import { storeApprovalDecision, SCOPE_TO_DECISION, type ApprovalScope } from "../tools/approval.js";
 import { getStructuredFileChanges, type StructuredFileChange } from "../tools/change-tracker.js";
 import {
   confirmTheory,
@@ -183,7 +183,7 @@ export function createInspectServices(deps: {
 
     approveCommand(command, scope) {
       if (!command) return false;
-      approvalStore.store("shell", `shell:${command}`, SCOPE_TO_DECISION[scope]);
+      storeApprovalDecision(command, SCOPE_TO_DECISION[scope]);
       return true;
     },
 
