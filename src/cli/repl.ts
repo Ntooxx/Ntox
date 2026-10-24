@@ -33,6 +33,7 @@ import { createMarketplace, renderMarketplaceList, type SkillMarketplace } from 
 import { diffSkillByName, renderSkillStats } from "../skills/lifecycle.js";
 import { createRoutineRuntime, renderRoutineRun, runRoutine } from "../skills/routine.js";
 import { renderMcpStatus } from "../mcp/bridge.js";
+import { saveDataUrlImage } from "../core/media.js";
 import { handleChannelCommand, type ChannelCommandContext } from "../core/channel-commands.js";
 import { CronManager } from "../cron/index.js";
 import { handleCronCommand } from "../cron/commands.js";
@@ -2783,6 +2784,11 @@ export class Repl {
           }
         },
         onToolResult: (name, result, args) => {
+          const payload = result.data as { image?: unknown } | undefined;
+          if (result.success && typeof payload?.image === "string" && payload.image.startsWith("data:image")) {
+            const saved = saveDataUrlImage(payload.image);
+            if (saved) writer.writeTag(renderInlineTag(`image saved: ${saved}`, chalk.cyan));
+          }
           const key = `${name}:${JSON.stringify(args)}`;
           const startedAt = toolStarts.get(key);
           const elapsed = startedAt ? Date.now() - startedAt : undefined;

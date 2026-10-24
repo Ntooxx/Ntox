@@ -41,3 +41,23 @@ export function imageAttachmentNote(path: string, caption?: string): string {
   const clean = caption?.trim();
   return clean ? `${clean}\n\n${note}` : note;
 }
+
+export function decodeDataUrl(dataUrl: string): { bytes: Buffer; mimeType: string } | null {
+  const match = /^data:([^;,]+)([^,]*),([\s\S]*)$/.exec(dataUrl.trim());
+  if (!match) return null;
+  const mimeType = match[1] || "image/png";
+  const isBase64 = /;base64/i.test(match[2]);
+  const payload = match[3];
+  try {
+    const bytes = isBase64 ? Buffer.from(payload, "base64") : Buffer.from(decodeURIComponent(payload), "utf-8");
+    return { bytes, mimeType };
+  } catch {
+    return null;
+  }
+}
+
+export function saveDataUrlImage(dataUrl: string): string | null {
+  const decoded = decodeDataUrl(dataUrl);
+  if (!decoded || !decoded.mimeType.startsWith("image/")) return null;
+  return saveMediaFile(decoded.bytes, decoded.mimeType);
+}

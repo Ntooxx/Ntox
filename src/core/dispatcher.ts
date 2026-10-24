@@ -447,16 +447,19 @@ export class GatewayOutput implements MessageOutput {
   private notifyTyping?: () => void;
   private externalOnToken?: (token: string) => void;
   private externalOnEvent?: (event: Record<string, unknown>) => void;
+  private externalOnImage?: (name: string, dataUrl: string) => void;
   private tokenCount = 0;
 
   constructor(
     notifyTyping?: () => void,
     externalOnToken?: (token: string) => void,
     externalOnEvent?: (event: Record<string, unknown>) => void,
+    externalOnImage?: (name: string, dataUrl: string) => void,
   ) {
     this.notifyTyping = notifyTyping;
     this.externalOnToken = externalOnToken;
     this.externalOnEvent = externalOnEvent;
+    this.externalOnImage = externalOnImage;
   }
 
   onToken(token: string): void {
@@ -473,6 +476,10 @@ export class GatewayOutput implements MessageOutput {
     this.notifyTyping?.();
   }
   onToolResult(name: string, result: import("../types/index.js").ToolResult): void {
+    const data = result.data as { image?: unknown } | undefined;
+    if (result.success && typeof data?.image === "string" && data.image.startsWith("data:image")) {
+      this.externalOnImage?.(name, data.image);
+    }
     this.externalOnEvent?.({
       type: "tool_result",
       name,

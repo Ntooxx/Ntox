@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { MEDIA_DIR, imageAttachmentNote, saveMediaFile } from "./media.js";
+import { MEDIA_DIR, decodeDataUrl, imageAttachmentNote, saveDataUrlImage, saveMediaFile } from "./media.js";
 
 beforeEach(() => {
   mkdirSync(MEDIA_DIR, { recursive: true });
@@ -28,6 +28,41 @@ describe("saveMediaFile", () => {
     const count = readdirSync(MEDIA_DIR).filter((name) => name.startsWith("media_")).length;
     expect(count).toBeLessThanOrEqual(50);
     expect(count).toBeGreaterThanOrEqual(49);
+  });
+});
+
+describe("decodeDataUrl", () => {
+  it("decodes base64 payloads with their mime type", () => {
+    const decoded = decodeDataUrl(`data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`);
+    expect(decoded).toEqual({ bytes: Buffer.from("png-bytes"), mimeType: "image/png" });
+  });
+
+  it("decodes percent-encoded payloads as utf-8", () => {
+    const decoded = decodeDataUrl("data:text/plain;charset=utf-8,hello%20world");
+    expect(decoded?.mimeType).toBe("text/plain");
+    expect(decoded?.bytes.toString("utf-8")).toBe("hello world");
+  });
+
+  it("returns null for input that is not a data URL", () => {
+    expect(decodeDataUrl("https://example.com/x.png")).toBeNull();
+    expect(decodeDataUrl("just text")).toBeNull();
+    expect(decodeDataUrl("")).toBeNull();
+  });
+});
+
+describe("saveDataUrlImage", () => {
+  it("persists an image data URL into the media directory", () => {
+    const path = saveDataUrlImage(`data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`);
+    expect(path).toBeTruthy();
+    expect(path!.startsWith(MEDIA_DIR)).toBe(true);
+    expect(path!.endsWith(".png")).toBe(true);
+    expect(readFileSync(path!, "utf-8")).toBe("png-bytes");
+    rmSync(path!, { force: true });
+  });
+
+  it("refuses non-image payloads and garbage", () => {
+    expect(saveDataUrlImage("data:text/plain;base64,aGk=")).toBeNull();
+    expect(saveDataUrlImage("not a data url")).toBeNull();
   });
 });
 

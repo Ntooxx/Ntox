@@ -166,9 +166,22 @@ trigger and it activates on Telegram.*
   every 8s during long generations), outbound formatting, status replies to
   forwarded media.
 
-### 3.5 Rich media everywhere · P1 · M
+### 3.5 Rich media everywhere · P1 · M · ✅ shipped
 - Inbound images/files on TG/WA (already partially: captions) feed the
   `image` tool; outbound: send screenshots/plots from tools as images.
+- Inbound (3.5a): photos, image documents and WA images save into
+  `~/.ntox/media` (pruned to 50 files) and reach the model as a captioned
+  `[Attached image: <path>]` note; the image tool reads local paths and
+  policy checks them against readRoots with a media-dir carve-out.
+- Outbound (3.5b): `GatewayOutput` fires an image callback whenever a tool
+  returns a `data:image/...` payload; the gateway routes it to a per-channel
+  sender — Telegram `sendPhoto`, WhatsApp media upload + image message
+  (`src/gateway/media-send.ts`, both tested against mocked APIs) — and the
+  REPL saves the file and prints its path. Any future tool that returns an
+  image payload is picked up with no wiring.
+- Declared limits: Discord/web send no images yet, non-image documents stay
+  placeholders (text files are not parsed), and images produced during
+  scheduled cron runs are not delivered (text-only delivery).
 
 ---
 

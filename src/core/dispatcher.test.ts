@@ -48,6 +48,31 @@ describe("GatewayOutput", () => {
   });
 });
 
+describe("GatewayOutput generated images", () => {
+  it("forwards successful image results to the image callback only", () => {
+    const onImage = vi.fn();
+    const onEvent = vi.fn();
+    const out = new GatewayOutput(undefined, undefined, onEvent, onImage);
+
+    out.onToolResult("image", { success: true, data: { image: "data:image/png;base64,AAAA" } });
+
+    expect(onImage).toHaveBeenCalledWith("image", "data:image/png;base64,AAAA");
+    expect(onEvent).toHaveBeenCalledWith({ type: "tool_result", name: "image", success: true, error: undefined });
+    expect(onEvent.mock.calls[0][0]).not.toHaveProperty("image");
+  });
+
+  it("ignores failed results, non-image data, and non-data-url values", () => {
+    const onImage = vi.fn();
+    const out = new GatewayOutput(undefined, undefined, undefined, onImage);
+
+    out.onToolResult("image", { success: false, data: { image: "data:image/png;base64,AAAA" }, error: "boom" });
+    out.onToolResult("read", { success: true, data: { content: "text" } });
+    out.onToolResult("image", { success: true, data: { image: "https://example.com/x.png" } });
+
+    expect(onImage).not.toHaveBeenCalled();
+  });
+});
+
 describe("SessionManager", () => {
   it("creates and returns the same agent for same id", () => {
     const sm = new SessionManager();
