@@ -1,13 +1,19 @@
-﻿# NTOX - Cognitive CLI Agent
+﻿<div align="center">
+  <img src="screenshots/logo.png" alt="NTOX Eclipse Logo" width="280">
 
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](package.json)
-[![CI](https://github.com/Ntooxx/Ntox/actions/workflows/ci.yml/badge.svg)](https://github.com/Ntooxx/Ntox/actions)
-[![npm](https://img.shields.io/badge/npm-0.1.0-red)](package.json)
-[![tests](https://img.shields.io/badge/tests-957%20passing-44cc11)](https://github.com/Ntooxx/Ntox/actions)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
+  # NTOX - Cognitive CLI Agent
 
-A self-improving CLI agent that predicts, remembers, and corrects itself. Closed learning loop, cognitive kernel, pattern compilation, theory distillation, and 80+ reasoning skills. Includes a runtime-neutral cognition API and DeepSeek Harness adapter. Multi-channel gateway (Telegram, Discord, WhatsApp, Web UI). Docker sandboxing. Runs locally.
+  [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+  [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](package.json)
+  [![CI](https://github.com/Ntooxx/Ntox/actions/workflows/ci.yml/badge.svg)](https://github.com/Ntooxx/Ntox/actions)
+  [![npm](https://img.shields.io/badge/npm-0.1.0-red)](package.json)
+  [![tests](https://img.shields.io/badge/tests-957%20passing-44cc11)](https://github.com/Ntooxx/Ntox/actions)
+  [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
+
+  <p>A self-improving CLI agent that predicts, remembers, and corrects itself. Closed learning loop, cognitive kernel, pattern compilation, theory distillation, and 80+ reasoning skills. Includes a runtime-neutral cognition API and DeepSeek Harness adapter. Multi-channel gateway (Telegram, Discord, WhatsApp, Web UI). Docker sandboxing. Runs locally.</p>
+</div>
+
+---
 
 ## Why NTOX?
 
@@ -24,7 +30,34 @@ NTOX is built around a **cognitive kernel**: it doesn't just call tools, it comp
 
 The full evidence-backed tour is in [HIGHLIGHTS.md](HIGHLIGHTS.md).
 
-There is also a motion-design showcase of the whole system in [`site/`](site/) — open `site/index.html` in a browser.
+There is also a motion-design showcase of the whole system in [`site/`](site/) - open `site/index.html` in a browser.
+
+## Screenshots
+
+<div align="center">
+
+### Dashboard Overview
+
+![Dashboard Overview](screenshots/01-dashboard-overview.png)
+
+*The NTOX Desktop command center - runtime health, active agents, workflow progress, and recent activity at a glance.*
+
+### Desktop Chat
+
+![Desktop Chat](screenshots/02-chat-interface.png)
+
+*The desktop chat interface - a dedicated conversation surface with streaming responses, conversation history, and agent context.*
+
+<br>
+
+| | | |
+|:---:|:---:|:---:|
+| ![Agents](screenshots/03-agents.png) | ![Tasks](screenshots/04-tasks.png) | ![Memory](screenshots/05-memory.png) |
+| **Agents** | **Tasks** | **Memory** |
+| ![Settings](screenshots/06-settings.png) | ![Tools](screenshots/07-tools.png) | ![Evaluations](screenshots/08-evaluations.png) |
+| **Settings** | **Tools** | **Evaluations** |
+
+</div>
 
 ## Features
 
