@@ -208,9 +208,26 @@ trigger and it activates on Telegram.*
   only as a socket event (the desktop client does not render them yet), and
   the REPL keeps its existing inline verbose tag instead of a push.
 
-### 4.2 `alive` events → push notifications · P1 · M
+### 4.2 `alive` events → push notifications · P1 · M · ✅ shipped
 - `src/alive/` already detects file changes, git updates, open loops —
-  currently viewable only via `/alive`. Push them through `makeSender`.
+  previously viewable only via `/alive`. Push them through `makeSender`.
+- `NtoxAliveBridge.subscribe()` now fans every `wake`/`notify` action out to
+  listeners together with the event that caused it (`learn`/`ignore` stay
+  internal), and a throwing listener can never break recording.
+- New `src/gateway/alive-push.ts`: `renderAlivePush` turns an action into one
+  line (`Alive · Git: new commit abcdef1 (3 files)`, `Alive · Workspace:
+  src/core/agent.ts (rename)`, `Alive · shell: failed — exit 1`, action-only
+  text for open-loop deadlines), and `AlivePusher` routes it to the session's
+  chat with a 60s per-chat cooldown.
+- Gateway wiring: subscribes at startup, targets come from live sessions
+  (session id split into channel + chat id) filtered to channels that own a
+  sender, and the host adapters now start with the gateway — before this,
+  the file watcher and git poller only ever ran inside the REPL.
+- Declared limits: only chats with an active session in this gateway process
+  get pushes (sessions purge after 30 min idle), in-turn tool events
+  (`source: "ntox-tool"`) never push because the reply already shows them,
+  the web channel stays event-only (no sender), and running gateway + REPL
+  together writes duplicate watch events into `~/.ntox/alive.json`.
 
 ### 4.3 Scheduled digests · P1 · M
 - `/cron add daily 8am "morning brief"` → plan status, inbox-worthy alive
@@ -267,7 +284,7 @@ trigger and it activates on Telegram.*
 |---|---|---|---|
 | **1** | Voice & talk | 1.1–1.5 ✅, 3.2 ✅, 3.4 ✅ | Voice notes in/out on TG + WA ✅, tap-to-approve ✅ |
 | **2** | Skills & commands | 2.1 ✅, 2.2, 2.4, 3.1, 3.3 | Self-learning skills ✅ (propose + `/skill save`), installable skills, command parity |
-| **3** | Proactive & email | 4.1 ✅, 4.2–4.3, 5.1, 5.2 | He messages first; email send/read; Slack |
+| **3** | Proactive & email | 4.1–4.2 ✅, 4.3, 5.1, 5.2 | He messages first; email send/read; Slack |
 | **4** | Deep platform | 2.3, 2.5, 2.7, 4.4, 5.3–5.5, 6 | Marketplace, routines, MCP, calendar |
 | **5** | Realtime | 1.6 | Spoken calls, wake word, hands-free |
 

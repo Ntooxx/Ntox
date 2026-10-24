@@ -1,6 +1,7 @@
 import { loadCachedModels, loadConfig } from "../core/config.js";
 import { handleChannelCommand } from "../core/channel-commands.js";
 import { ProactiveThrottle, pushProactiveSuggestion } from "../core/proactive-delivery.js";
+import { AlivePusher, splitSessionId, type AlivePushTarget } from "./alive-push.js";
 import { renderChannelHelp } from "../cli/commands.js";
 import { stripAnsi } from "../cli/theme.js";
 import {
@@ -100,6 +101,18 @@ export async function runGateway(channel?: string): Promise<void> {
     }
   }
   const sessions = new SessionManager();
+  const alivePusher = new AlivePusher({
+    targets: () =>
+      sessions
+        .getActiveChats()
+        .map(splitSessionId)
+        .filter((target): target is AlivePushTarget => target !== null && channelSenders.has(target.channel)),
+    send: async (channel, chatId, message) => {
+      const sender = channelSenders.get(channel);
+      if (sender) await sender(chatId, message);
+    },
+  });
+  const unsubscribeAlive = shared.alive.subscribe((action, event) => alivePusher.handle(action, event));
   const channelsByName = new Map<string, GatewayChannel>();
   const makeHandler =
     (ctx: string) =>
@@ -526,6 +539,7 @@ export async function runGateway(channel?: string): Promise<void> {
   );
 
   for (const ch of channels) await ch.start();
+  shared.aliveHosts?.start();
 
   cron.setExecutor(async (prompt) => {
     const routineParse = parseSkillLifecycleCommand(prompt);
@@ -564,6 +578,8 @@ export async function runGateway(channel?: string): Promise<void> {
   console.log("[gateway] running. Ctrl+C to stop.");
 
   process.on("SIGINT", async () => {
+    unsubscribeAlive();
+    shared.aliveHosts?.stop();
     cron.stop();
     for (const ch of channels) await ch.stop();
     await shared.mcp.disconnect().catch(() => {});

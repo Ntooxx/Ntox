@@ -1,7 +1,14 @@
 import type { CognitiveToolResult } from "../cognition/layer.js";
 import { makeTheoryPrediction, resolvePrediction } from "../research/theory-store.js";
 import { AliveEngine } from "./engine.js";
-import type { AliveAction, AliveEventInput, AliveExpectation, AlivePulse, CreateOpenLoopInput } from "./engine.js";
+import type {
+  AliveAction,
+  AliveEvent,
+  AliveEventInput,
+  AliveExpectation,
+  AlivePulse,
+  CreateOpenLoopInput,
+} from "./engine.js";
 
 function isTestCommand(args?: Record<string, unknown>): boolean {
   const command = typeof args?.command === "string" ? args.command : "";
@@ -53,10 +60,20 @@ export function toolOutcomeToAliveEvent(result: CognitiveToolResult, args?: Reco
   };
 }
 
+export type AliveActionListener = (action: AliveAction, event?: AliveEvent) => void;
+
 export class NtoxAliveBridge {
   private readonly pendingActions: AliveAction[] = [];
+  private readonly listeners = new Set<AliveActionListener>();
 
   constructor(readonly engine: AliveEngine) {}
+
+  subscribe(listener: AliveActionListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
 
   recordToolOutcome(result: CognitiveToolResult, args?: Record<string, unknown>): AlivePulse {
     return this.handlePulse(this.engine.recordEvent(toolOutcomeToAliveEvent(result, args)));
@@ -125,7 +142,21 @@ export class NtoxAliveBridge {
         );
       }
     }
-    this.pendingActions.push(...pulse.actions.filter((action) => action.kind === "wake" || action.kind === "notify"));
+    const actionable = pulse.actions.filter((action) => action.kind === "wake" || action.kind === "notify");
+    this.pendingActions.push(...actionable);
+    if (this.listeners.size > 0 && actionable.length > 0) {
+      const events = this.engine.getState().events;
+      for (const action of actionable) {
+        const event = action.eventId ? events.find((item) => item.id === action.eventId) : undefined;
+        for (const listener of this.listeners) {
+          try {
+            listener(action, event);
+          } catch (error) {
+            console.error("[alive] action listener failed:", error);
+          }
+        }
+      }
+    }
     return pulse;
   }
 }
