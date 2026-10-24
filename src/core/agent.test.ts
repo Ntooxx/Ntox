@@ -29,6 +29,7 @@ import { AliveEngine } from "../alive/engine.js";
 import { NtoxAliveBridge } from "../alive/ntox.js";
 import { searchTool } from "../tools/search.js";
 import { webFetchTool } from "../tools/web.js";
+import { ApiError, NetworkError, StreamError } from "./errors.js";
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   const llm = {
@@ -899,6 +900,50 @@ describe("Agent — run() integration", () => {
     };
     const agent = new Agent(cfg);
     await expect(drainRun(agent, "hi")).rejects.toThrow("simulated stream failure");
+  });
+
+  it("retries transient LLM stream errors and keeps the partial reply", async () => {
+    const cfg = makeConfig();
+    let calls = 0;
+    (cfg.llm as unknown as { stream: () => AsyncGenerator<{ delta: string }> }).stream = async function* () {
+      calls++;
+      if (calls === 1) {
+        yield { delta: "partial " };
+        throw new NetworkError("Network error reaching https://openrouter.ai: connection reset");
+      }
+      yield { delta: "continuation" };
+    };
+    const agent = new Agent(cfg);
+    const result = await drainRun(agent, "hi");
+    expect(calls).toBe(2);
+    expect(result.response).toContain("partial");
+    expect(result.response).toContain("continuation");
+  });
+
+  it("retries a transient stream error only twice before failing the turn", async () => {
+    const cfg = makeConfig();
+    let calls = 0;
+    (cfg.llm as unknown as { stream: () => AsyncGenerator<{ delta: string }> }).stream = async function* () {
+      calls++;
+      yield { delta: "" };
+      throw new StreamError("Stream error 502 upstream reset");
+    };
+    const agent = new Agent(cfg);
+    await expect(drainRun(agent, "hi")).rejects.toThrow("upstream reset");
+    expect(calls).toBe(3);
+  });
+
+  it("does not retry non-retryable provider errors", async () => {
+    const cfg = makeConfig();
+    let calls = 0;
+    (cfg.llm as unknown as { stream: () => AsyncGenerator<{ delta: string }> }).stream = async function* () {
+      calls++;
+      yield { delta: "x" };
+      throw new ApiError("API error 401 — Check your API key", 401, "openai");
+    };
+    const agent = new Agent(cfg);
+    await expect(drainRun(agent, "hi")).rejects.toThrow("401");
+    expect(calls).toBe(1);
   });
 
   it("feeds failed tools into the cognitive layer recovery context on the next turn", async () => {

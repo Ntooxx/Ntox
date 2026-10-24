@@ -12,68 +12,69 @@ import {
   validateConfig,
 } from "./config.js";
 import type { NtoxConfig } from "../types/index.js";
+import { loadCredentials } from "./credentials.js";
+
+const valid: NtoxConfig = {
+  apiKey: "sk-test",
+  model: "openai/gpt-4o",
+  provider: "openai",
+  apiBaseUrl: "",
+  maxTokens: 4096,
+  temperature: 0.7,
+  systemPrompt: "You are helpful.",
+  embeddingModel: "openai/text-embedding-3-small",
+  memoryEnabled: true,
+  memoryRetrievalCount: 5,
+  systemContextBudget: 6000,
+  contextCompilerEnabled: true,
+  predictionLlmEnabled: true,
+  modelCritiqueEnabled: true,
+  idleEnabled: true,
+  idleSelfPlay: false,
+  metaStrategyEnabled: true,
+  metaReflectionEnabled: false,
+  metaMistakesEnabled: true,
+  metaMinConfidence: 0.5,
+  skillAutoLearnEnabled: true,
+  skillMarketplaceIndex: "https://example.com/index.json",
+  cognitiveEnabled: true,
+  theoryEnabled: true,
+  animationLevel: "minimal",
+  uiMode: "normal",
+  telegramToken: "",
+  telegramAllowedUsers: [],
+  discordToken: "",
+  discordAllowedUsers: [],
+  whatsappToken: "",
+  whatsappPhoneNumberId: "",
+  whatsappVerifyToken: "",
+  whatsappAppSecret: "",
+  whatsappPort: 3001,
+  dockerEnabled: false,
+  webPort: 3000,
+  webHost: "127.0.0.1",
+  webAuthToken: "",
+  apiPort: 3100,
+  apiAuthToken: "",
+  introEnabled: true,
+  verboseCallbacks: false,
+  defaultProfileId: "default",
+  profiles: [
+    {
+      id: "default",
+      name: "Default Workspace",
+      workspaceRoot: process.cwd(),
+      readRoots: [process.cwd()],
+      writeRoots: [process.cwd()],
+      allowedTools: ["read", "write", "shell"],
+      shellPolicy: "approval-required",
+      networkPolicy: "browser-allowed",
+      autoCheckpoint: true,
+    },
+  ],
+};
 
 describe("validateConfig", () => {
-  const valid: NtoxConfig = {
-    apiKey: "sk-test",
-    model: "openai/gpt-4o",
-    provider: "openai",
-    apiBaseUrl: "",
-    maxTokens: 4096,
-    temperature: 0.7,
-    systemPrompt: "You are helpful.",
-    embeddingModel: "openai/text-embedding-3-small",
-    memoryEnabled: true,
-    memoryRetrievalCount: 5,
-    systemContextBudget: 6000,
-    contextCompilerEnabled: true,
-    predictionLlmEnabled: true,
-    modelCritiqueEnabled: true,
-    idleEnabled: true,
-    idleSelfPlay: false,
-    metaStrategyEnabled: true,
-    metaReflectionEnabled: false,
-    metaMistakesEnabled: true,
-    metaMinConfidence: 0.5,
-    skillAutoLearnEnabled: true,
-    skillMarketplaceIndex: "https://example.com/index.json",
-    cognitiveEnabled: true,
-    theoryEnabled: true,
-    animationLevel: "minimal",
-    uiMode: "normal",
-    telegramToken: "",
-    telegramAllowedUsers: [],
-    discordToken: "",
-    discordAllowedUsers: [],
-    whatsappToken: "",
-    whatsappPhoneNumberId: "",
-    whatsappVerifyToken: "",
-    whatsappAppSecret: "",
-    whatsappPort: 3001,
-    dockerEnabled: false,
-    webPort: 3000,
-    webHost: "127.0.0.1",
-    webAuthToken: "",
-    apiPort: 3100,
-    apiAuthToken: "",
-    introEnabled: true,
-    verboseCallbacks: false,
-    defaultProfileId: "default",
-    profiles: [
-      {
-        id: "default",
-        name: "Default Workspace",
-        workspaceRoot: process.cwd(),
-        readRoots: [process.cwd()],
-        writeRoots: [process.cwd()],
-        allowedTools: ["read", "write", "shell"],
-        shellPolicy: "approval-required",
-        networkPolicy: "browser-allowed",
-        autoCheckpoint: true,
-      },
-    ],
-  };
-
   it("passes valid config", () => {
     expect(validateConfig(valid).valid).toBe(true);
   });
@@ -130,8 +131,9 @@ describe("validateConfig", () => {
 
 describe("config", () => {
   afterEach(() => {
-    const configPath = NTOX_DIR + "/config.json";
-    if (existsSync(configPath)) unlinkSync(configPath);
+    for (const path of [NTOX_DIR + "/config.json", NTOX_DIR + "/credentials.json"]) {
+      if (existsSync(path)) unlinkSync(path);
+    }
   });
 
   const cfgPath = () => NTOX_DIR + "/config.json";
@@ -250,8 +252,48 @@ describe("config", () => {
 
     const onDisk = JSON.parse(readFileSync(cfgPath(), "utf-8")) as NtoxConfig;
     expect(onDisk.model).toBe("openai/gpt-4o");
-    expect(onDisk.apiKey).toBe("sk-rotated-key");
+    expect(onDisk.apiKey).toBe("");
     expect(result.apiKey).toBe("sk-rotated-key");
+    expect(loadCredentials().providers.openrouter?.apiKey).toBe("sk-rotated-key");
+  });
+
+  it("keeps secrets out of config.json and in the restricted credential store", () => {
+    saveConfig({
+      model: "xiaomi/mimo-v2.6-flash",
+      provider: "openrouter",
+      apiKey: "sk-or-v1-restricted",
+      telegramToken: "8598712471:AAsecretsecretsecretsecretsecret",
+    } as NtoxConfig);
+
+    const raw = readFileSync(cfgPath(), "utf-8");
+    expect(raw).not.toContain("sk-or-v1-restricted");
+    expect(raw).not.toContain("AAsecretsecretsecretsecretsecret");
+
+    const onDisk = JSON.parse(raw) as NtoxConfig;
+    expect(onDisk.apiKey).toBe("");
+    expect(onDisk.telegramToken).toBe("");
+    expect(onDisk.schemaVersion).toBe(1);
+
+    const credentials = loadCredentials();
+    expect(credentials.providers.openrouter?.apiKey).toBe("sk-or-v1-restricted");
+    expect(credentials.channels.telegramToken).toBe("8598712471:AAsecretsecretsecretsecretsecret");
+
+    const loaded = loadConfig();
+    expect(loaded.apiKey).toBe("sk-or-v1-restricted");
+    expect(loaded.telegramToken).toBe("8598712471:AAsecretsecretsecretsecretsecret");
+  });
+
+  it("migrates a legacy plaintext config into the credential store once", () => {
+    writeFileSync(
+      cfgPath(),
+      JSON.stringify({ model: "xiaomi/mimo-v2.6-flash", provider: "deepseek", apiKey: "sk-legacy-migrate" }),
+      "utf-8",
+    );
+
+    const loaded = loadConfig();
+    expect(loaded.apiKey).toBe("sk-legacy-migrate");
+    expect(loadCredentials().providers.deepseek?.apiKey).toBe("sk-legacy-migrate");
+    expect(JSON.parse(readFileSync(cfgPath(), "utf-8")).apiKey).toBe("");
   });
 
   it("saveConfig writes no BOM so loadConfig can read it back", () => {

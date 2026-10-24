@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { loadConfig } from "../core/config.js";
+import { loadCachedModels, loadConfig } from "../core/config.js";
+import { redactError } from "../core/redact.js";
+import { stripAnsi } from "../cli/theme.js";
 import {
   createSharedInfra,
   createSessionInfra,
@@ -9,13 +11,22 @@ import {
   type SharedInfra,
 } from "../core/dispatcher.js";
 import { runAgentStream } from "../core/message-handler.js";
+import { handleChannelCommand, UNIFIED_COMMANDS, type ChannelCommandContext } from "../core/channel-commands.js";
 import type { Agent } from "../core/agent.js";
+import type { NtoxConfig } from "../types/index.js";
+import { createDesktopApi } from "./desktop.js";
+import { recordUsage } from "./spend.js";
+import { approvalBridge, APPROVAL_DECISIONS } from "./approvals.js";
+import type { ApprovalDecision } from "../tools/approval.js";
+import { getCron } from "../cron/index.js";
+import { createGpuWatchdog, type GpuWatchdog } from "../alive/gpu.js";
 
 export interface ApiServerOptions {
   port?: number;
   host?: string;
   authToken?: string;
   agentFactory?: (sessionId: string) => Agent;
+  commandContext?: (sessionId: string) => ChannelCommandContext | null;
 }
 
 export interface RunningApiServer {
@@ -29,7 +40,7 @@ const MAX_BODY_BYTES = 1_000_000;
 function corsHeaders(): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
 }
@@ -45,6 +56,7 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 }
 
 function sse(res: ServerResponse, event: string, data: unknown): void {
+  if (res.destroyed || res.writableEnded) return;
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
@@ -72,18 +84,86 @@ function authorized(req: IncomingMessage, authToken: string): boolean {
   return header === `Bearer ${authToken}`;
 }
 
-function createDefaultAgentFactory(): (sessionId: string) => Agent {
+const COMMAND_HELP: Record<string, string> = {
+  cost: "lifetime token spend and cost",
+  status: "runtime status",
+  digest: "plan, host events and costs",
+  memory: "search and inspect memory",
+  remember: "store a fact",
+  forget: "delete a memory record",
+  model: "show or switch the model",
+  skills: "installed skills",
+  tools: "registered tools",
+  plan: "current plan",
+  undo: "undo the last exchange",
+  mail: "read and send mail",
+};
+
+function helpText(): string {
+  const lines = ["NTOX commands:"];
+  for (const name of UNIFIED_COMMANDS) lines.push(`  /${name} — ${COMMAND_HELP[name] ?? ""}`);
+  lines.push("  /new — start a fresh conversation", "  /reset — forget this conversation", "  /help — this list");
+  return lines.join("\n");
+}
+
+interface ApiRuntime {
+  config: NtoxConfig;
+  shared: SharedInfra;
+  watchdog: GpuWatchdog | null;
+  agent(sessionId: string): Agent;
+  commandContext(sessionId: string): ChannelCommandContext;
+}
+
+function createDefaultRuntime(): ApiRuntime {
   const config = loadConfig();
   const shared: SharedInfra = createSharedInfra(config);
   const sessionInfras = new Map<string, ReturnType<typeof createSessionInfra>>();
   const sessions = new SessionManager();
 
-  return (sessionId: string): Agent => {
-    if (!sessionInfras.has(sessionId)) {
-      sessionInfras.set(sessionId, createSessionInfra(shared, config));
+  const infraFor = (sessionId: string): ReturnType<typeof createSessionInfra> => {
+    if (!sessionInfras.has(sessionId)) sessionInfras.set(sessionId, createSessionInfra(shared, config));
+    return sessionInfras.get(sessionId)!;
+  };
+
+  const cron = getCron();
+  cron.setChannelFilter((channel) => !channel);
+  cron.setExecutor(async (prompt, job) => {
+    const id = `cron_${job.id}`;
+    const agent = sessions.getOrCreate(id, createAgentConfig({ ...shared, ...infraFor(id) }, config, `api_${id}`));
+    let output = "";
+    try {
+      await runAgentStream(agent, prompt, { onToken: (token) => { output += token; } }, AbortSignal.timeout(120_000));
+    } catch (error) {
+      const reason = `Scheduled "${job.name}" failed: ${redactError(error)}`;
+      shared.alive.notify(reason);
+      return reason;
     }
-    const infra = sessionInfras.get(sessionId)!;
-    return sessions.getOrCreate(sessionId, createAgentConfig({ ...shared, ...infra }, config, `api_${sessionId}`));
+    const summary = output.trim() || "(scheduled run produced no output)";
+    shared.alive.notify(`Scheduled "${job.name}": ${summary.slice(0, 500)}`);
+    return summary;
+  });
+  cron.start();
+  const watchdog = createGpuWatchdog(shared.alive);
+  watchdog?.start();
+
+  return {
+    config,
+    shared,
+    watchdog,
+    agent: (sessionId: string): Agent =>
+      sessions.getOrCreate(sessionId, createAgentConfig({ ...shared, ...infraFor(sessionId) }, config, `api_${sessionId}`)),
+    commandContext: (sessionId: string): ChannelCommandContext => ({
+      config,
+      llm: shared.llm,
+      tools: shared.tools,
+      skills: shared.skillRegistry,
+      memory: infraFor(sessionId).memory,
+      policy: shared.policy,
+      agent: sessions.getOrCreate(sessionId, createAgentConfig({ ...shared, ...infraFor(sessionId) }, config, `api_${sessionId}`)),
+      models: loadCachedModels() ?? [],
+      sessionId,
+      alive: shared.alive,
+    }),
   };
 }
 
@@ -94,14 +174,44 @@ export function createApiServer(options: ApiServerOptions = {}): {
   const authToken = options.authToken ?? "";
   const configuredPort = options.port ?? 3100;
   let server: ReturnType<typeof createServer> | null = null;
-  let agentFactory = options.agentFactory;
+  let runtime: ApiRuntime | null = null;
   const sessions = new SessionManager();
+  let desktopApi: ReturnType<typeof createDesktopApi> | null = null;
 
-  const getFactory = (): ((sessionId: string) => Agent) => {
-    if (!agentFactory) {
-      agentFactory = createDefaultAgentFactory();
+  const getRuntime = (): ApiRuntime => (runtime ??= createDefaultRuntime());
+
+  const getFactory = (): ((sessionId: string) => Agent) =>
+    options.agentFactory ?? ((sessionId) => getRuntime().agent(sessionId));
+
+  const commandContextFor = (sessionId: string): ChannelCommandContext | null => {
+    if (options.commandContext) return options.commandContext(sessionId);
+    if (options.agentFactory) return null;
+    try {
+      return getRuntime().commandContext(sessionId);
+    } catch (error) {
+      console.error(`[api] command context unavailable: ${redactError(error)}`);
+      return null;
     }
-    return agentFactory;
+  };
+
+  const runSlashCommand = async (message: string, sessionId: string): Promise<string | null> => {
+    const text = message.trim();
+    if (!text.startsWith("/")) return null;
+    const head = text.split(/\s+/)[0].toLowerCase();
+    if (head === "/help") return helpText();
+    if (head === "/new" || head === "/reset") {
+      getFactory()(sessionId).resetConversation();
+      return "Fresh start. Go ahead.";
+    }
+    const ctx = commandContextFor(sessionId);
+    if (!ctx) return null;
+    try {
+      const outcome = await handleChannelCommand(text, ctx);
+      return outcome ? stripAnsi(outcome.text) : null;
+    } catch (error) {
+      console.error(`[api] slash command failed: ${redactError(error)}`);
+      return null;
+    }
   };
 
   const handleHealth = (res: ServerResponse): void => {
@@ -150,32 +260,57 @@ export function createApiServer(options: ApiServerOptions = {}): {
       ...corsHeaders(),
     });
 
+    const unsubscribeApprovals = approvalBridge.subscribe((payload) => sse(res, "approval", payload));
+    const controller = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) controller.abort();
+    });
     let fullResponse = "";
     try {
+      const slashCommand = await runSlashCommand(message, sessionId);
+      if (slashCommand !== null) {
+        sse(res, "event", { type: "command", command: message.split(/\s+/)[0] });
+        sse(res, "token", { text: slashCommand });
+        sse(res, "done", { response: slashCommand, sessionId, command: true });
+        return;
+      }
+
       const agent = factory(sessionId);
-      const result = await runAgentStream(agent, message, {
-        onToken: (token) => {
-          fullResponse += token;
-          sse(res, "token", { text: token });
+      const spendSource = options.agentFactory
+        ? { model: loadConfig().model }
+        : { model: getRuntime().config.model, fetchModels: () => getRuntime().shared.llm.fetchModels() };
+      const result = await runAgentStream(
+        agent,
+        message,
+        {
+          onToken: (token) => {
+            fullResponse += token;
+            sse(res, "token", { text: token });
+          },
+          onToolCall: (name, args) => sse(res, "event", { type: "tool_call", name, args }),
+          onToolResult: (name, toolResult) =>
+            sse(res, "event", { type: "tool_result", name, success: toolResult.success, error: toolResult.error }),
+          onPhase: (phase) => sse(res, "event", { type: "phase", phase }),
+          onMemoryRecall: (count) => sse(res, "event", { type: "memory", action: "recalled", count }),
+          onMemoryStore: () => sse(res, "event", { type: "memory", action: "stored", count: 1 }),
+          onStrategy: (strategy) => sse(res, "event", { type: "strategy", strategy }),
+          onUsage: (usage) => {
+            recordUsage(usage, spendSource);
+            sse(res, "event", {
+              type: "usage",
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              cost: usage.cost,
+            });
+          },
         },
-        onToolCall: (name, args) => sse(res, "event", { type: "tool_call", name, args }),
-        onToolResult: (name, toolResult) =>
-          sse(res, "event", { type: "tool_result", name, success: toolResult.success, error: toolResult.error }),
-        onPhase: (phase) => sse(res, "event", { type: "phase", phase }),
-        onMemoryRecall: (count) => sse(res, "event", { type: "memory", action: "recalled", count }),
-        onMemoryStore: () => sse(res, "event", { type: "memory", action: "stored", count: 1 }),
-        onStrategy: (strategy) => sse(res, "event", { type: "strategy", strategy }),
-        onUsage: (usage) =>
-          sse(res, "event", {
-            type: "usage",
-            inputTokens: usage.inputTokens,
-            outputTokens: usage.outputTokens,
-            cost: usage.cost,
-          }),
-      });
+        controller.signal,
+      );
 
       if (result.error) {
-        sse(res, "error", { error: result.error.message, sessionId });
+        const message = redactError(result.error.message);
+        console.error(`[api] chat stream failed (${sessionId}): ${message}`);
+        sse(res, "error", { error: message, sessionId });
       } else {
         sse(res, "done", {
           response: fullResponse,
@@ -187,11 +322,13 @@ export function createApiServer(options: ApiServerOptions = {}): {
         });
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = redactError(e);
+      console.error(`[api] chat request failed (${sessionId}): ${msg}`);
       sse(res, "error", { error: msg, sessionId });
     } finally {
+      unsubscribeApprovals();
       sessions.unlock(sessionId);
-      res.end();
+      if (!res.destroyed && !res.writableEnded) res.end();
     }
   };
 
@@ -214,6 +351,7 @@ export function createApiServer(options: ApiServerOptions = {}): {
 
   return {
     async start(): Promise<RunningApiServer> {
+      approvalBridge.install();
       server = createServer((req, res) => {
         const path = (req.url || "/").split("?")[0];
 
@@ -243,7 +381,77 @@ export function createApiServer(options: ApiServerOptions = {}): {
           return;
         }
 
-        json(res, 404, { error: "Not found", endpoints: ["/api/health", "/api/chat", "/api/session/reset"] });
+        if (path === "/api/approvals" && req.method === "GET") {
+          json(res, 200, { approvals: approvalBridge.list() });
+          return;
+        }
+
+        if (path === "/api/approvals" && req.method === "POST") {
+          void (async () => {
+            let payload: { id?: unknown; decision?: unknown } = {};
+            try {
+              payload = JSON.parse(await readBody(req)) as typeof payload;
+            } catch {
+              json(res, 400, { error: "Invalid JSON body" });
+              return;
+            }
+            const id = typeof payload.id === "string" ? payload.id : "";
+            const decision = typeof payload.decision === "string" ? payload.decision : "";
+            if (!id || !APPROVAL_DECISIONS.includes(decision as ApprovalDecision)) {
+              json(res, 400, { error: "A pending approval id and a valid decision are required." });
+              return;
+            }
+            if (!approvalBridge.resolve(id, decision as ApprovalDecision)) {
+              json(res, 404, { error: "That approval request has already expired." });
+              return;
+            }
+            json(res, 200, { resolved: true, id });
+          })();
+          return;
+        }
+
+        if (
+          path.startsWith("/api/desktop") ||
+          path.startsWith("/api/agents") ||
+          path.startsWith("/api/tasks") ||
+          path.startsWith("/api/memory") ||
+          path.startsWith("/api/tools") ||
+          path.startsWith("/api/evaluations") ||
+          path.startsWith("/api/settings")
+        ) {
+          desktopApi ??= createDesktopApi({
+            onReload: () => {
+              runtime?.watchdog?.stop();
+              runtime = null;
+            },
+            onBootstrap: () => {
+              try {
+                getRuntime();
+              } catch (error) {
+                console.error(`[api] runtime warm-up failed: ${redactError(error)}`);
+              }
+            },
+          });
+          void desktopApi(req, res, path, req.method || "GET");
+          return;
+        }
+
+        json(res, 404, {
+          error: "Not found",
+          endpoints: [
+            "/api/health",
+            "/api/chat",
+            "/api/session/reset",
+            "/api/desktop/bootstrap",
+            "/api/agents",
+            "/api/tasks",
+            "/api/memory",
+            "/api/memory/graph",
+            "/api/tools",
+            "/api/evaluations",
+            "/api/settings",
+          ],
+        });
       });
 
       const port = await new Promise<number>((resolve, reject) => {
@@ -273,15 +481,19 @@ export function createApiServer(options: ApiServerOptions = {}): {
 
 export async function runApi(): Promise<void> {
   const config = loadConfig();
+  const authToken = process.env.NTOX_API_AUTH_TOKEN || config.apiAuthToken;
   const api = createApiServer({
     port: config.apiPort,
     host: "127.0.0.1",
-    authToken: config.apiAuthToken,
+    authToken,
   });
   const running = await api.start();
-  const authNote = config.apiAuthToken ? "bearer auth enabled" : "no auth (local only)";
+  const authNote = authToken ? "bearer auth enabled" : "no auth (local only)";
   console.log(`[api] http://${running.host}:${running.port}/api/chat (${authNote})`);
   console.log("[api] endpoints: POST /api/chat, POST /api/session/reset, GET /api/health");
+  console.log(
+    "[api] desktop endpoints: /api/desktop/bootstrap, /api/agents, /api/tasks, /api/memory, /api/tools, /api/evaluations, /api/settings",
+  );
   console.log("[api] Ctrl+C to stop.");
 
   process.on("SIGINT", async () => {

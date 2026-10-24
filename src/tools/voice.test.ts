@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { join } from "node:path";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { ttsTool } from "./voice.js";
 
 function writeConfig(apiKey: string): void {
   const dir = process.env.NTOX_DIR!;
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "config.json"), JSON.stringify({ apiKey }));
+  const credentialsPath = join(dir, "credentials.json");
+  if (existsSync(credentialsPath)) unlinkSync(credentialsPath);
 }
 
 afterEach(() => {

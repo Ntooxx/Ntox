@@ -55,6 +55,7 @@ import {
   ExecuteAction,
 } from "../kernel/index.js";
 import { detectPromptInjection } from "./guard.js";
+import { isTransientStreamError } from "./errors.js";
 import { buildNarrative } from "../memory/narrative.js";
 import { existsSync, appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -110,6 +111,8 @@ const MAX_WEB_TOOL_CALLS_PER_TURN = 8;
 const WEB_TOOL_NAMES = new Set(["search", "web_fetch", "web_read", "browse"]);
 const MAX_ACTION_NUDGES = 2;
 const MAX_TURN_ATTEMPTS = 30;
+const MAX_STREAM_RETRIES = 2;
+const STREAM_RETRY_BACKOFF_MS = 400;
 const MAX_PLAN_CONTINUES = 8;
 const MAX_FAILURE_EXPLAINS = 1;
 
@@ -1894,6 +1897,7 @@ export class Agent {
     let done = false;
     let fullResponse = "";
     let attempts = 0;
+    let streamRetries = 0;
     let actionNudges = 0;
     let planContinues = 0;
     let failureExplains = 0;
@@ -1943,6 +1947,23 @@ export class Agent {
         if (options.signal?.aborted || errMsg.includes("cancelled")) {
           this.finishTrace(fullResponse + responseBuffer, "cancelled");
           throw new Error("cancelled", { cause: e });
+        }
+        if (streamRetries < MAX_STREAM_RETRIES && isTransientStreamError(e)) {
+          streamRetries++;
+          if (responseBuffer) {
+            fullResponse += responseBuffer;
+            this.pushMessage({ role: "assistant", content: responseBuffer });
+            this.pushMessage({
+              role: "user",
+              content:
+                "[STREAM INTERRUPTED] The provider dropped the connection partway through your reply. " +
+                "Continue from the exact point where you stopped: do not repeat text you already produced, do not restart the answer.",
+            });
+          }
+          if (this.currentTrace) this.currentTrace.error = errMsg;
+          callbacks.onPhase?.("retrying");
+          await new Promise((resolve) => setTimeout(resolve, STREAM_RETRY_BACKOFF_MS * streamRetries));
+          continue;
         }
         this.pushMessage({ role: "assistant", content: `[Stream error: ${errMsg}]` });
         this.finishTrace(fullResponse + responseBuffer, errMsg);

@@ -12,4 +12,10 @@ contextBridge.exposeInMainWorld("ntoxDesktop", {
   loadConversations: () => ipcRenderer.invoke("ntox:load-conversations"),
   saveConversations: conversations => ipcRenderer.invoke("ntox:save-conversations", conversations),
   getRuntimeStatus: () => ipcRenderer.invoke("ntox:runtime-status"),
+  getSecretStoreStatus: () => ipcRenderer.invoke("ntox:secret-store-status"),
+  saveCredential: input => ipcRenderer.invoke("ntox:save-credential", input),
+  deleteCredential: input => ipcRenderer.invoke("ntox:delete-credential", input),
+  testCredential: input => ipcRenderer.invoke("ntox:test-credential", input),
+  reloadRuntime: () => ipcRenderer.invoke("ntox:reload-runtime"),
+  approve: input => ipcRenderer.invoke("ntox:approve", input),
 });

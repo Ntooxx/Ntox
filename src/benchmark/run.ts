@@ -45,7 +45,7 @@ async function main() {
   console.log(`\n  NTOX Cognitive Kernel — Multi-Model Benchmark`);
   console.log(`  Rounds: 5 | Queries per round: 5 | Total queries: 25`);
   console.log(`  Models: ${MODELS.map((m) => m.label).join(", ")}`);
-  console.log(`  Agent API key: ${config.apiKey.slice(0, 12)}...`);
+  console.log(`  Agent API key: ${config.apiKey ? "configured" : "missing"}`);
 
   const results: { model: string; overall: number; round1: number; round5: number }[] = [];
 

@@ -37,7 +37,7 @@ import { saveDataUrlImage } from "../core/media.js";
 import { handleChannelCommand, type ChannelCommandContext } from "../core/channel-commands.js";
 import { isDigestPrompt, renderDigest } from "../core/digest.js";
 import { loadPlan } from "../tools/plan.js";
-import { CronManager } from "../cron/index.js";
+import { getCron } from "../cron/index.js";
 import { handleCronCommand } from "../cron/commands.js";
 import {
   parseSkillInstallCommand,
@@ -153,7 +153,7 @@ export class Repl {
   private infra: ReturnType<typeof createAgentInfra>;
   private briefingEngine: BriefingEngine;
   private resumeSessionId?: string;
-  private cron = new CronManager();
+  private cron = getCron();
 
   constructor(options: { resumeSessionId?: string } = {}) {
     this.resumeSessionId = options.resumeSessionId;
@@ -210,7 +210,7 @@ export class Repl {
   }
 
   private startCron(): void {
-    this.cron.setChannelFilter((channel) => channel === "repl");
+    this.cron.setChannelFilter((channel) => !channel || channel === "repl");
     this.cron.setExecutor(async (prompt, job) => {
       const parsed = parseSkillLifecycleCommand(prompt);
       if (parsed.kind === "run" && parsed.name) return (await this.runRoutineByName(parsed.name)).text;

@@ -17,7 +17,7 @@ import {
 } from "../core/dispatcher.js";
 import type { SharedInfra } from "../core/dispatcher.js";
 import { sanitizeOutput } from "../core/guard.js";
-import { CronManager } from "../cron/index.js";
+import { getCron } from "../cron/index.js";
 import { handleCronCommand } from "../cron/commands.js";
 import { createTelegramChannel } from "./telegram.js";
 import { createDiscordChannel } from "./discord.js";
@@ -73,7 +73,7 @@ const slackConfig = resolveSlackConfig(config as unknown as Record<string, unkno
 const shared = createSharedInfra(config);
 const marketplace = createMarketplace({ indexSource: config.skillMarketplaceIndex });
 const sessionInfras = new Map<string, ReturnType<typeof createSessionInfra>>();
-const cron = new CronManager();
+const cron = getCron();
 const channelSenders = new Map<string, (chatId: string, message: string) => Promise<void>>();
 const channelImageSenders = new Map<string, ImageSender>();
 const channelVoiceSenders = new Map<string, VoiceSender>();
@@ -646,7 +646,7 @@ export async function runGateway(channel?: string): Promise<void> {
     }
   });
 
-  cron.setChannelFilter((channel) => channel !== "repl");
+  cron.setChannelFilter((channel) => Boolean(channel) && channel !== "repl");
   cron.start();
   console.log("[gateway] running. Ctrl+C to stop.");
 

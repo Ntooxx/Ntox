@@ -23,6 +23,24 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
+function isCronField(value: string, max: number): boolean {
+  for (const entry of value.split(",")) {
+    const step = entry.split("/");
+    if (step.length > 2) return false;
+    if (step.length === 2 && !/^\d+$/.test(step[1])) return false;
+    const base = step[0];
+    if (base === "*") continue;
+    const range = base.split("-");
+    if (range.length > 2) return false;
+    for (const bound of range) {
+      if (!/^\d+$/.test(bound)) return false;
+      if (Number(bound) > max) return false;
+    }
+    if (range.length === 2 && Number(range[0]) > Number(range[1])) return false;
+  }
+  return true;
+}
+
 export function parseSchedule(input: string): { cron: string; interval: number } | null {
   const lower = input.trim().toLowerCase();
 
@@ -30,6 +48,7 @@ export function parseSchedule(input: string): { cron: string; interval: number }
   if (everyMatch) {
     const n = parseInt(everyMatch[1]);
     const unit = everyMatch[2];
+    if (n < 1) return null;
     if (unit.startsWith("m")) return { cron: `*/${n} * * * *`, interval: n * MINUTE };
     if (unit.startsWith("h")) return { cron: `0 */${n} * * *`, interval: n * HOUR };
     if (unit.startsWith("d")) return { cron: `0 0 */${n} * *`, interval: n * DAY };
@@ -55,7 +74,17 @@ export function parseSchedule(input: string): { cron: string; interval: number }
 
   const cronParts = input.trim().match(/^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)$/);
   if (cronParts) {
-    return { cron: input.trim(), interval: estimateInterval(cronParts.slice(1)) };
+    const [minute, hour, dom, month, dow] = cronParts.slice(1);
+    if (
+      isCronField(minute, 59) &&
+      isCronField(hour, 23) &&
+      isCronField(dom, 31) &&
+      isCronField(month, 12) &&
+      isCronField(dow, 7)
+    ) {
+      return { cron: input.trim(), interval: estimateInterval(cronParts.slice(1)) };
+    }
+    return null;
   }
 
   return null;

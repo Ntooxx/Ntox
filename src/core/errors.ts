@@ -69,6 +69,37 @@ export function isRetryableError(e: unknown): boolean {
   return e instanceof NtoxError && e.retryable;
 }
 
+const TRANSIENT_STREAM_PATTERNS = [
+  "terminated",
+  "fetch failed",
+  "premature close",
+  "socket hang up",
+  "connection reset",
+  "connection closed",
+  "connection refused",
+  "other side closed",
+  "econnreset",
+  "econnrefused",
+  "etimedout",
+  "epipe",
+  "undici",
+  "network error",
+  "rate limit",
+  "too many requests",
+  "overloaded",
+  "service unavailable",
+  "bad gateway",
+  "internal server error",
+];
+
+export function isTransientStreamError(e: unknown): boolean {
+  if (e instanceof ApiError) return e.retryable;
+  if (isRetryableError(e)) return true;
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  if (msg.includes("cancelled")) return false;
+  return TRANSIENT_STREAM_PATTERNS.some((pattern) => msg.includes(pattern));
+}
+
 export function describeError(e: unknown): {
   message: string;
   hint: string | null;

@@ -1,6 +1,7 @@
 import type { CognitiveToolResult } from "../cognition/layer.js";
 import { makeTheoryPrediction, resolvePrediction } from "../research/theory-store.js";
 import { AliveEngine } from "./engine.js";
+import { pushNotification } from "./notifications.js";
 import type {
   AliveAction,
   AliveEvent,
@@ -81,6 +82,20 @@ export class NtoxAliveBridge {
 
   recordEvent(event: AliveEventInput): AlivePulse {
     return this.handlePulse(this.engine.recordEvent(event));
+  }
+
+  notify(reason: string, detail?: Record<string, unknown>): AliveAction {
+    const action: AliveAction = { kind: "notify", reason };
+    this.pendingActions.push(action);
+    pushNotification({ kind: "agent", reason, detail });
+    for (const listener of this.listeners) {
+      try {
+        listener(action);
+      } catch (error) {
+        console.error("[alive] notify listener failed:", error);
+      }
+    }
+    return action;
   }
 
   pulse(now?: number): AlivePulse {

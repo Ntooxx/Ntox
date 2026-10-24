@@ -23,6 +23,8 @@ import { browseTool } from "../tools/browse.js";
 import { openTool } from "../tools/open.js";
 import { emailReadTool, emailSendTool } from "../tools/email.js";
 import { jobTrackerTool } from "../tools/job-tracker.js";
+import { scheduleTool } from "../tools/schedule.js";
+import { createNotifyTool } from "../tools/notify.js";
 import { createProfileEvalTool } from "../tools/profile-eval.js";
 import { MemoryStore } from "../memory/episodic.js";
 import { UserModel } from "../memory/user-model.js";
@@ -129,6 +131,11 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
         }
       : selectedProfile;
   const policy = createPolicyRuntime(runtimeProfile);
+  const alive = new NtoxAliveBridge(
+    new AliveEngine({
+      store: new JsonFileAliveStore(join(getNtoxDir(), "alive.json")),
+    }),
+  );
   const tools = new ToolRegistry();
   for (const tool of [
     readTool,
@@ -151,6 +158,8 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
     browseTool,
     openTool,
     jobTrackerTool,
+    scheduleTool,
+    createNotifyTool(alive),
     emailSendTool,
     emailReadTool,
     createProfileEvalTool(llm),
@@ -161,11 +170,6 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
   const skillRegistry = new SkillRegistry();
   const skillLibrary = new SkillLibrary();
   const skillExecutor = new SkillExecutor(skillRegistry, skillLibrary, true);
-  const alive = new NtoxAliveBridge(
-    new AliveEngine({
-      store: new JsonFileAliveStore(join(getNtoxDir(), "alive.json")),
-    }),
-  );
   const aliveHosts = new NtoxAliveHostAdapters({
     bridge: alive,
     workspaceRoot: runtimeProfile.workspaceRoot,

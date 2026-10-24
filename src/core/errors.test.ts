@@ -8,6 +8,7 @@ import {
   EmptyResponseError,
   ConfigError,
   isRetryableError,
+  isTransientStreamError,
   describeError,
 } from "./errors.js";
 
@@ -83,6 +84,41 @@ describe("isRetryableError", () => {
     expect(isRetryableError(new ConfigError("x"))).toBe(false);
     expect(isRetryableError(new Error("x"))).toBe(false);
     expect(isRetryableError("string")).toBe(false);
+  });
+});
+
+describe("isTransientStreamError", () => {
+  it("is true for retryable NTOX errors", () => {
+    expect(isTransientStreamError(new StreamError("stream reset"))).toBe(true);
+    expect(isTransientStreamError(new NetworkError("x"))).toBe(true);
+    expect(isTransientStreamError(new TimeoutError("x"))).toBe(true);
+    expect(isTransientStreamError(new ApiError("rate limited", 429, "openrouter"))).toBe(true);
+    expect(isTransientStreamError(new ApiError("bad gateway", 502, "openrouter"))).toBe(true);
+  });
+
+  it("is false for non-retryable provider errors", () => {
+    expect(isTransientStreamError(new ApiError("Check your API key", 401, "openrouter"))).toBe(false);
+    expect(isTransientStreamError(new ApiError("bad request", 400, "openrouter"))).toBe(false);
+    expect(isTransientStreamError(new ConfigError("no model"))).toBe(false);
+    expect(isTransientStreamError(new EmptyResponseError("empty"))).toBe(false);
+  });
+
+  it("classifies raw transport failures from undici as transient", () => {
+    expect(isTransientStreamError(new TypeError("terminated"))).toBe(true);
+    expect(isTransientStreamError(new TypeError("fetch failed"))).toBe(true);
+    expect(isTransientStreamError(new Error("read ECONNRESET"))).toBe(true);
+    expect(isTransientStreamError(new Error("other side closed"))).toBe(true);
+    expect(isTransientStreamError(new Error("Premature close"))).toBe(true);
+  });
+
+  it("never retries a cancellation", () => {
+    expect(isTransientStreamError(new Error("cancelled"))).toBe(false);
+    expect(isTransientStreamError("cancelled")).toBe(false);
+  });
+
+  it("does not retry unrelated errors", () => {
+    expect(isTransientStreamError(new Error("simulated stream failure"))).toBe(false);
+    expect(isTransientStreamError(new Error("ENOENT: no such file"))).toBe(false);
   });
 });
 

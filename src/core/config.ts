@@ -1,9 +1,53 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { NtoxConfig, ModelInfo } from "../types/index.js";
+import {
+  COGNITION_DIR,
+  CONFIG_PATH,
+  COST_PATH,
+  CREDENTIALS_ENC_PATH,
+  CREDENTIALS_PATH,
+  DURABLE_MEMORY_PATH,
+  EPISODES_JSONL_PATH,
+  EPISODES_PATH,
+  MEMORY_DIR,
+  MISTAKES_PATH,
+  MODELS_CACHE_PATH,
+  NTOX_DIR,
+  SKILLS_DIR,
+  getBaseDir,
+  getMemoryDir,
+} from "./paths.js";
+import {
+  CONFIG_SECRET_FIELDS,
+  extractSecretsFromConfig,
+  hydrateSecrets,
+  saveCredentials,
+  stripSecrets,
+} from "./credentials.js";
+import { registerSecrets } from "./redact.js";
+
+export {
+  COGNITION_DIR,
+  CONFIG_PATH,
+  COST_PATH,
+  CREDENTIALS_ENC_PATH,
+  CREDENTIALS_PATH,
+  DURABLE_MEMORY_PATH,
+  EPISODES_JSONL_PATH,
+  EPISODES_PATH,
+  MEMORY_DIR,
+  MISTAKES_PATH,
+  MODELS_CACHE_PATH,
+  NTOX_DIR,
+  SKILLS_DIR,
+  getBaseDir,
+  getMemoryDir,
+};
+
+export const CONFIG_SCHEMA_VERSION = 1;
 
 export const BUNDLED_MARKETPLACE_INDEX = join(
   resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."),
@@ -121,22 +165,6 @@ export function validateConfig(config: NtoxConfig): { valid: boolean; errors: st
     errors: result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
   };
 }
-
-export function getBaseDir(): string {
-  return process.env.NTOX_DIR || join(homedir(), ".ntox");
-}
-
-export const NTOX_DIR = getBaseDir();
-export const CONFIG_PATH = join(NTOX_DIR, "config.json");
-export const COST_PATH = join(NTOX_DIR, "costs.json");
-export const MODELS_CACHE_PATH = join(NTOX_DIR, "models-cache.json");
-export const MEMORY_DIR = join(NTOX_DIR, "memory");
-export const EPISODES_PATH = join(MEMORY_DIR, "episodes.json");
-export const EPISODES_JSONL_PATH = join(MEMORY_DIR, "episodes.jsonl");
-export const DURABLE_MEMORY_PATH = join(MEMORY_DIR, "durable.json");
-export const MISTAKES_PATH = join(MEMORY_DIR, "mistakes.json");
-export const SKILLS_DIR = join(NTOX_DIR, "skills");
-export const COGNITION_DIR = join(NTOX_DIR, "cognition");
 
 const DEFAULT_CONFIG: NtoxConfig = {
   apiKey: "",
@@ -327,16 +355,24 @@ function loadConfigRaw(): NtoxConfig {
   }
   try {
     const raw = stripBom(readFileSync(CONFIG_PATH, "utf-8"));
-    const parsed = JSON.parse(raw) as Partial<NtoxConfig>;
+    const parsed = JSON.parse(raw) as Partial<NtoxConfig> & Record<string, unknown>;
     const merged = normalizeConfig({ ...DEFAULT_CONFIG, ...parsed });
-    if (typeof parsed.systemPrompt === "string" && hasLegacyToolPrompt(parsed.systemPrompt)) {
-      merged.systemPrompt = DEFAULT_CONFIG.systemPrompt;
+    const legacyPrompt = typeof parsed.systemPrompt === "string" && hasLegacyToolPrompt(parsed.systemPrompt);
+    if (legacyPrompt) merged.systemPrompt = DEFAULT_CONFIG.systemPrompt;
+
+    const { credentials, changed } = extractSecretsFromConfig(parsed);
+    if (changed.length) saveCredentials(credentials);
+    hydrateSecrets(merged as unknown as Record<string, unknown>, credentials);
+    registerSecrets(secretValues(merged));
+
+    if (legacyPrompt || changed.length) {
       try {
         saveConfig(merged);
       } catch {
         /* in-memory repair is enough */
       }
     }
+
     const validation = validateConfig(merged);
     if (!validation.valid) {
       console.error("[config] validation warnings:", validation.errors.join("; "));
@@ -352,6 +388,12 @@ function loadConfigRaw(): NtoxConfig {
     );
     return { ...DEFAULT_CONFIG };
   }
+}
+
+function secretValues(config: NtoxConfig): string[] {
+  return CONFIG_SECRET_FIELDS.map((field) => config[field]).filter(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
 }
 
 export function normalizeConfig(config: NtoxConfig): NtoxConfig {
@@ -381,10 +423,18 @@ export function normalizeConfig(config: NtoxConfig): NtoxConfig {
 
 export function saveConfig(config: NtoxConfig): void {
   getNtoxDir();
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  persistSecrets(config);
+  const stored = stripSecrets({ ...config, schemaVersion: CONFIG_SCHEMA_VERSION });
+  writeFileSync(CONFIG_PATH, JSON.stringify(stored, null, 2));
   try {
     chmodSync(CONFIG_PATH, 0o600);
   } catch {}
+  registerSecrets(secretValues(config));
+}
+
+function persistSecrets(config: NtoxConfig): void {
+  const { credentials, changed } = extractSecretsFromConfig(config as unknown as Record<string, unknown>);
+  if (changed.length) saveCredentials(credentials);
 }
 
 export function patchConfig(patch: Partial<NtoxConfig>): NtoxConfig {
@@ -408,6 +458,15 @@ export function saveCosts(costs: { totalInputTokens: number; totalOutputTokens: 
   writeFileSync(COST_PATH, JSON.stringify(costs, null, 2));
 }
 
+export function recordCosts(delta: { inputTokens: number; outputTokens: number; cost: number }): void {
+  const current = loadCosts();
+  saveCosts({
+    totalInputTokens: current.totalInputTokens + Math.max(0, delta.inputTokens),
+    totalOutputTokens: current.totalOutputTokens + Math.max(0, delta.outputTokens),
+    totalCost: current.totalCost + Math.max(0, delta.cost),
+  });
+}
+
 export function loadCachedModels(): ModelInfo[] | null {
   if (!existsSync(MODELS_CACHE_PATH)) return null;
   try {
@@ -427,11 +486,4 @@ export function loadCachedModels(): ModelInfo[] | null {
 
 export function saveCachedModels(models: ModelInfo[]): void {
   writeFileSync(MODELS_CACHE_PATH, JSON.stringify(models, null, 2));
-}
-
-export function getMemoryDir(): string {
-  if (!existsSync(MEMORY_DIR)) {
-    mkdirSync(MEMORY_DIR, { recursive: true });
-  }
-  return MEMORY_DIR;
 }

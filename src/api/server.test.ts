@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createApiServer } from "./server.js";
+import { loadConfig, loadCosts, saveCosts } from "../core/config.js";
 import type { Agent } from "../core/agent.js";
 
 function mockAgent(tokens: string[]): Agent {
@@ -163,6 +164,122 @@ describe("createApiServer", () => {
     try {
       const res = await fetch(`http://${running.host}:${running.port}/api/nope`);
       expect(res.status).toBe(404);
+    } finally {
+      await running.stop();
+    }
+  });
+
+  it("answers slash commands without waking the agent", async () => {
+    let agentCalled = false;
+    const api = createApiServer({
+      port: 3997,
+      host: "127.0.0.1",
+      agentFactory: () => {
+        agentCalled = true;
+        return mockAgent(["should not stream"]);
+      },
+      commandContext: () => ({ config: loadConfig(), llm: { updateModel: () => {} } }),
+    });
+    const running = await api.start();
+    try {
+      const res = await fetch(`http://${running.host}:${running.port}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "/cost", sessionId: "desktop_commands" }),
+      });
+      expect(res.status).toBe(200);
+      const { events } = await readSse(res);
+      const done = events.find((event) => event.event === "done");
+      expect(done).toBeDefined();
+      const doneData = done!.data as { response: string; command?: boolean; sessionId: string };
+      expect(doneData.command).toBe(true);
+      expect(doneData.response).toContain("lifetime");
+      expect(doneData.response).not.toContain(String.fromCharCode(27));
+
+      expect(agentCalled).toBe(false);
+      expect(events.filter((event) => event.event === "token")).toHaveLength(1);
+    } finally {
+      await running.stop();
+    }
+  });
+
+  it("lists commands on /help and resets conversations on /new", async () => {
+    let resetCalled = false;
+    const agent = {
+      ...mockAgent(["nope"]),
+      resetConversation: () => {
+        resetCalled = true;
+      },
+    };
+    const api = createApiServer({
+      port: 3998,
+      host: "127.0.0.1",
+      agentFactory: () => agent as unknown as Agent,
+      commandContext: () => null,
+    });
+    const running = await api.start();
+    const ask = async (message: string) => {
+      const res = await fetch(`http://${running.host}:${running.port}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, sessionId: "desktop_help" }),
+      });
+      const { events } = await readSse(res);
+      return (events.find((event) => event.event === "done")?.data as { response: string }).response;
+    };
+    try {
+      const help = await ask("/help");
+      expect(help).toContain("/cost");
+      expect(help).toContain("/new");
+      expect(resetCalled).toBe(false);
+
+      expect(await ask("/new")).toContain("Fresh start");
+      expect(resetCalled).toBe(true);
+    } finally {
+      await running.stop();
+    }
+  });
+
+  it("serves the approval queue and validates decisions", async () => {
+    const api = createApiServer({ port: 4000, host: "127.0.0.1", agentFactory: () => mockAgent(["x"]) });
+    const running = await api.start();
+    const post = (body: unknown) =>
+      fetch(`http://${running.host}:${running.port}/api/approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    try {
+      const list = await fetch(`http://${running.host}:${running.port}/api/approvals`);
+      expect(list.status).toBe(200);
+      expect(((await list.json()) as { approvals: unknown[] }).approvals).toEqual([]);
+
+      expect((await post({ id: "apr_missing", decision: "allow-once" })).status).toBe(404);
+      expect((await post({ id: "apr_1", decision: "whenever" })).status).toBe(400);
+      expect((await post({})).status).toBe(400);
+    } finally {
+      await running.stop();
+    }
+  });
+
+  it("records desktop token usage in the lifetime cost file", async () => {
+    saveCosts({ totalInputTokens: 0, totalOutputTokens: 0, totalCost: 0 });
+    const api = createApiServer({
+      port: 3999,
+      host: "127.0.0.1",
+      agentFactory: () => mockAgent(["ok"]),
+    });
+    const running = await api.start();
+    try {
+      const res = await fetch(`http://${running.host}:${running.port}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "hi", sessionId: "desktop_spend" }),
+      });
+      const { events } = await readSse(res);
+      const usage = events.find((event) => event.event === "event" && (event.data as { type?: string }).type === "usage");
+      expect(usage).toBeDefined();
+      expect(loadCosts()).toMatchObject({ totalInputTokens: 10, totalOutputTokens: 5 });
     } finally {
       await running.stop();
     }

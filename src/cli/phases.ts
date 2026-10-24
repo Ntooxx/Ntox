@@ -40,6 +40,12 @@ const INDICATORS: Record<ThinkPhase, PhaseIndicator> = {
     color: (s: string) => accents.title(s),
     frames: ["▸", "▹", "▸", "▹", "▸", "▹"],
   },
+  retrying: {
+    char: "↻",
+    label: "retrying",
+    color: (s: string) => accents.warn(s),
+    frames: ["↻", "⟳", "↻", "⟳"],
+  },
 };
 
 export function getPhaseIndicator(phase: ThinkPhase): PhaseIndicator {

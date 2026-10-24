@@ -77,7 +77,7 @@ Desktop chat requirements:
 - Support keyboard send (`Enter`), line breaks (`Shift+Enter`), and a new-chat shortcut (`Ctrl/Cmd+N`).
 - Make the current conversation visibly private to the local desktop session.
 
-The current renderer stores its conversation list and displayed messages in browser `localStorage` as an initial UI implementation. This is acceptable for a prototype, but the finished app should migrate conversation metadata and message history to a versioned local store managed by the main process. The agent's canonical conversation state remains in the NTOX runtime; renderer storage is a presentation/history cache, not a second agent memory database.
+The renderer stores conversation metadata and message history through a narrow Electron IPC bridge in `app.getPath("userData")/desktop-conversations.json`. The store is bounded to 80 conversations and 200 messages per conversation. Agent session state remains in the NTOX runtime; this file is a desktop transcript/history store, separate from browser chat and NTOX memory.
 
 ### Dashboard sections
 
@@ -95,11 +95,13 @@ The current renderer stores its conversation list and displayed messages in brow
 
 **Settings** configures workspace behavior, default model/provider, concurrency, memory retention, approvals, local API port, startup behavior, and privacy. Secrets stay in the NTOX config or operating-system credential storage; they are never returned to the renderer.
 
-### Current preview behavior
+### Current implementation status
 
-The dashboard page is a visual implementation of the supplied reference images. Fleet metrics, task rows, graphs, evaluation scores, and activity in the dashboard are **sample preview data** until connected to backend endpoints. Deploy/add-tool buttons must be treated as preview controls and must not imply that an agent was actually deployed or a tool installed.
+The Electron renderer now reads runtime-backed data through the local API: health and process resources, actual subagent runs, persisted desktop workflows, NTOX episodic and durable memory, registered tools, longitudinal evaluation reports under `experiments/meta-eval`, and allowlisted non-secret settings. The dashboard refreshes runtime data every five seconds while visible. It does not synthesize sample evaluation scores or pretend that unavailable agent controls are live.
 
-The desktop chat UI is separate and its composer calls the local API through Electron IPC. It requires a built NTOX runtime (`dist/index.js`) and the desktop Electron dependency to run as an app.
+Task workflows are stored in `desktop-workflows.json` under the NTOX data directory. A user can submit one goal and up to three explicit subtask prompts. Each is launched through NTOX's existing isolated subagent runner with a bounded read/research tool set; the current runtime's subagent concurrency cap is three and each subagent has its existing timeout. Workflow/task state is reconciled against persisted subagent runs when the desktop API is read. Cancel and retry operations are available. This first pass does not yet perform LLM planning, dependency scheduling, isolated writable workspaces, artifact storage, verification, or a replayable workflow SSE stream. Do not assign concurrent subagents conflicting write access.
+
+The desktop chat is a separate conversation surface. It streams API token events to the Electron renderer over IPC, supports cancellation, persists its transcript through the main process, and uses `desktop_<conversation-id>` session IDs. The desktop API starts on demand if one is not already listening. Run `npm run build`, install Electron from `desktop/package.json`, then start the app from `desktop/` with `npm start`.
 
 ## Backend architecture
 
@@ -132,7 +134,7 @@ sequenceDiagram
 
 The API already has `GET /api/health`, `POST /api/chat`, and `POST /api/session/reset`. Chat requests carry a unique `desktop_<conversation-id>` session ID, so browser chat sessions and desktop sessions do not share transcript state. Both clients can still use the same configured agent factory and durable memory infrastructure.
 
-The first desktop bridge returns a complete assistant response after parsing the API stream. The next chat implementation step is to forward `token`, `event`, `phase`, `memory`, `usage`, `error`, and `done` records over IPC as they arrive, so the desktop chat can render tokens and tool activity live and cancel a request cleanly.
+The Electron main process forwards API SSE records over IPC as they arrive. The renderer appends token records live; tool, phase, memory, and usage events remain available to the bridge and can be added to the conversation activity display. Canceling a request aborts the main-process fetch, closes the API response, and propagates an `AbortSignal` into `runAgentStream`.
 
 ### IPC contract
 
@@ -141,22 +143,68 @@ Only the following narrow API is exposed by `preload.cjs`:
 ```ts
 interface NtoxDesktopApi {
   sendMessage(input: {
+    requestId: string;
     sessionId: `desktop_${string}`;
     message: string;
   }): Promise<string>;
+
+  cancelMessage(requestId: string): Promise<boolean>;
+
+  onChatEvent(callback: (event: { requestId: string; event: string; data: unknown }) => void): () => void;
+
+  request(input: { route: string; method?: string; body?: unknown }): Promise<unknown>;
+
+  loadConversations(): Promise<unknown[]>;
+
+  saveConversations(conversations: unknown[]): Promise<boolean>;
 
   getRuntimeStatus(): Promise<{
     connected: boolean;
     port: number;
   }>;
+
+  getSecretStoreStatus(): Promise<{
+    encrypted: boolean;
+    activeProvider: string;
+    storedProviders: string[];
+  }>;
+
+  saveCredential(input: { provider: string; apiKey: string; baseUrl?: string }): Promise<{
+    stored: boolean;
+    encrypted: boolean;
+  }>;
+
+  deleteCredential(input: { provider: string }): Promise<{ deleted: boolean }>;
+
+  testCredential(input: { provider: string; apiKey: string; baseUrl?: string }): Promise<{
+    ok: boolean;
+    provider: string;
+    modelCount?: number;
+    error?: string;
+  }>;
+
+  reloadRuntime(): Promise<unknown>;
 }
 ```
 
 The main process checks that each IPC request came from the app's own renderer, limits message and session lengths, verifies the desktop session ID format, and adds the API bearer token when one is configured. Do not expose raw `ipcRenderer`, Node APIs, the shell, arbitrary file access, or arbitrary HTTP requests to renderer code.
 
+### Secret handling
+
+Secrets are never part of the renderer's data model. The desktop keeps them write-only and encrypted at rest:
+
+- **Storage.** Provider keys live in `~/.ntox/credentials.enc.json`, an OS-keystore blob (`safeStorage`: DPAPI on Windows, Keychain on macOS, libsecret on Linux). When the keystore is unavailable, the fallback is `~/.ntox/credentials.json` with permissions restricted to the current user (`icacls /inheritance:r` on Windows, `chmod 0600` otherwise). `~/.ntox/config.json` holds no secret values at all.
+- **Delivery to the runtime.** The Electron main process decrypts the blob and passes the active provider's key to the API child process through its environment (`NTOX_API_KEY`, `NTOX_API_KEY_PROVIDER`), never through `argv`. Nothing encrypted on disk is readable by another account.
+- **Write-only contract.** `GET /api/settings` returns `{ configured, masked, source }` per provider and never a key. A `PATCH /api/settings` carrying any secret field is rejected with `400`. `PUT /api/settings/credentials/:provider` stores a key and returns only masked status. `POST …/:provider/test` validates a candidate key without persisting it.
+- **Redaction.** `src/core/redact.ts` registers every known secret on config load and scrubs registered values plus key-shaped patterns from API error bodies, SSE error events, and desktop `console.error` output.
+- **Auth.** When the desktop owns the API process it generates a per-launch bearer token and requires it on every route except `/api/health`. Reusing an externally started API falls back to the configured token.
+- **Migration.** A legacy plaintext `apiKey` or channel token in `config.json` is moved into the credential store on first load and blanked in place; the desktop repeats the move into the encrypted blob on next launch.
+
+See `DESKTOP_SETTINGS_PLAN.md` for the full design and phased rollout.
+
 ### Multi-agent orchestration target
 
-The desktop interface is designed for NTOX-owned agents working concurrently. The coordination service belongs in the NTOX backend, not in the renderer. The target flow is:
+The desktop interface is designed for NTOX-owned agents working concurrently. The coordination service belongs in the NTOX backend, not in the renderer. The current workflow action accepts a user goal plus up to three explicit subtask prompts and starts isolated NTOX subagent runs. The remaining target flow is:
 
 1. Receive a user goal and create a durable workflow record.
 2. Use the planner/coordinator to split the goal into bounded subtasks with acceptance criteria and dependencies.
@@ -172,31 +220,34 @@ Agents should communicate through task records and structured result messages. S
 
 ### Target desktop API surface
 
-The existing chat API remains compatible. Add versioned endpoints for dashboard data and control operations as the runtime services are implemented:
+The existing chat API remains compatible. The local desktop API currently implements the following routes; the rows labeled planned remain follow-up work:
 
 | Endpoint | Method | Responsibility |
 |---|---|---|
 | `/api/desktop/bootstrap` | GET | Version, health, configured capabilities, local workspace label, and safe settings |
 | `/api/agents` | GET | Agent catalog and current lifecycle states |
-| `/api/agents` | POST | Validate and create an NTOX agent definition |
-| `/api/agents/:id` | GET | Agent configuration, current task, and recent activity |
-| `/api/agents/:id` | PATCH | Change validated configuration or lifecycle state |
-| `/api/tasks` | GET | Filterable, paginated task and workflow records |
-| `/api/tasks` | POST | Create a workflow from a user goal and options |
-| `/api/tasks/:id` | GET | Task state, progress, dependencies, and artifact metadata |
-| `/api/tasks/:id/cancel` | POST | Request cooperative cancellation |
-| `/api/tasks/:id/retry` | POST | Retry a failed task after policy and dependency checks |
-| `/api/tasks/:id/events` | GET | Server-sent progress, agent, tool, verifier, and completion events |
-| `/api/memory` | GET | Searchable and paginated memory records with provenance |
-| `/api/memory/graph` | GET | Graph nodes/links for a bounded query or selected neighborhood |
-| `/api/memory/:id` | GET/PATCH/DELETE | Inspect, edit, or remove an authorized memory record |
-| `/api/tools` | GET | Registered tools, health, permissions, and usage information |
-| `/api/evaluations` | GET | Evaluation suites, trends, and run history |
-| `/api/evaluations` | POST | Start a bounded evaluation run |
-| `/api/evaluations/:id` | GET | Results, dataset/agent versions, evidence, and failures |
-| `/api/settings` | GET/PATCH | Read and update allowlisted non-secret settings |
+| `/api/agents` | GET | Implemented: coordinator identity and persisted subagent run catalog |
+| `/api/agents` | POST | Planned: validate and create an NTOX agent definition |
+| `/api/agents/:id` | GET/PATCH | Planned: inspect and change agent configuration or lifecycle |
+| `/api/tasks` | GET | Implemented: persisted workflows and task records reconciled with subagent status |
+| `/api/tasks` | POST | Implemented: create a goal workflow with up to three user-supplied subtasks |
+| `/api/tasks/:id` | GET | Implemented: read workflow and task states |
+| `/api/tasks/:id/cancel` | POST | Implemented: cooperative cancellation through the subagent runner |
+| `/api/tasks/:id/retry` | POST | Implemented: restart failed/cancelled subagent tasks |
+| `/api/tasks/:id/events` | GET | Planned: replayable versioned workflow events; current UI refreshes by polling |
+| `/api/memory` | GET | Implemented: searchable episodic and durable memory records |
+| `/api/memory/graph` | GET | Implemented: bounded recent memory nodes and same-source links |
+| `/api/memory/:id` | GET/PATCH/DELETE | Implemented for durable records only |
+| `/api/tools` | GET | Implemented: registered tool metadata and coarse approval classification |
+| `/api/evaluations` | GET | Implemented: reads longitudinal reports under `experiments/meta-eval`; returns an empty state when none are present |
+| `/api/evaluations` | POST and `/api/evaluations/:id` | Planned |
+| `/api/settings` | GET/PATCH | Implemented: allowlisted provider, model, base URL, temperature, token limit, and memory setting. Returns the provider catalog and masked credential status. Any secret field in a `PATCH` is rejected |
+| `/api/settings/providers` | GET | Implemented: provider catalog plus masked credential status per provider |
+| `/api/settings/credentials/:provider` | PUT/DELETE | Implemented: write-only credential store. Stores or removes a provider key and never returns it |
+| `/api/settings/credentials/:provider/test` | POST | Implemented: validates a candidate key against the provider without persisting it |
+| `/api/settings/reload` | POST | Implemented: rebuilds the agent factory, tool registry, and session map so model/provider changes apply without a restart |
 
-These dashboard endpoints do not exist yet except for the current chat and health routes. Do not make the UI imply that task, agent, evaluation, or memory metrics are live until these services return authoritative data.
+The UI only displays data received from these endpoints. Evaluation scores, execution metrics, and agent profiles are not fabricated. Non-secret settings are persisted to NTOX configuration and applied by calling `/api/settings/reload`; secrets go to the credential store described under [Secret handling](#secret-handling).
 
 ### Event format
 

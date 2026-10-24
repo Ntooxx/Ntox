@@ -1139,6 +1139,67 @@ export function providerRequiresKey(provider: string): boolean {
   return config ? config.apiKeyRequired : true;
 }
 
+export function resolveEffectiveProvider(configuredProvider: string, modelId: string): string {
+  return resolveProvider(configuredProvider, modelId);
+}
+
+export interface ProviderProbeResult {
+  ok: boolean;
+  status?: number;
+  modelCount?: number;
+  error?: string;
+}
+
+export async function probeProvider(provider: string, apiKey: string, baseUrl?: string): Promise<ProviderProbeResult> {
+  const info = PROVIDERS[provider];
+  if (!info) return { ok: false, error: `Unknown provider: ${provider}` };
+  if (info.apiKeyRequired && !apiKey && provider !== "openai-compatible") {
+    return { ok: false, error: "An API key is required for this provider." };
+  }
+  const trimBase = (value: string) => value.replace(/\/+$/, "");
+  const modelsUrl = provider === "openai-compatible" && baseUrl ? `${trimBase(baseUrl)}/models` : info.modelsUrl;
+  const chatUrl = provider === "openai-compatible" && baseUrl ? `${trimBase(baseUrl)}/chat/completions` : info.chatUrl;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    if (modelsUrl) {
+      const res = await fetch(modelsUrl, { headers: info.headers(apiKey), signal: controller.signal });
+      if (!res.ok) {
+        return {
+          ok: false,
+          status: res.status,
+          error:
+            res.status === 401 || res.status === 403
+              ? "The provider rejected this API key."
+              : `The provider returned ${res.status}.`,
+        };
+      }
+      const parsed = (await res.json().catch(() => null)) as { data?: unknown[] } | unknown[] | null;
+      const list = Array.isArray(parsed) ? parsed : parsed?.data;
+      return { ok: true, status: res.status, modelCount: Array.isArray(list) ? list.length : undefined };
+    }
+    if (!chatUrl) return { ok: false, error: "This provider has no endpoint that can be tested." };
+    const res = await fetch(chatUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...info.headers(apiKey) },
+      body: JSON.stringify({ model: "probe-model", messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
+      signal: controller.signal,
+    });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, status: res.status, error: "The provider rejected this API key." };
+    }
+    return { ok: true, status: res.status };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      error: message.includes("abort") ? "The provider did not respond in time." : "Could not reach the provider.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export const LOCAL_PROVIDERS = ["ollama", "lmstudio"];
 
 export function estimateCost(modelId: string, inputTokens: number, outputTokens: number, models: ModelInfo[]): number {

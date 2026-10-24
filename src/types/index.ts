@@ -94,6 +94,7 @@ export interface StreamChunk {
 }
 
 export interface NtoxConfig {
+  schemaVersion?: number;
   apiKey: string;
   model: string;
   provider: string;
@@ -479,7 +480,7 @@ export interface CritiqueResult {
   strengthened: boolean;
 }
 
-export type ThinkPhase = "thinking" | "analyzing" | "reasoning" | "recalling" | "responding";
+export type ThinkPhase = "thinking" | "analyzing" | "reasoning" | "recalling" | "responding" | "retrying";
 
 export interface CognitiveTrace {
   problemRepresentation: string;

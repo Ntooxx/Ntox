@@ -205,7 +205,13 @@ export const shellTool: Tool = {
       const stored = approvalStore.check("shell", args);
       let decision = stored;
       if (!decision) decision = await requestInteractiveApproval("shell", command);
-      if (!decision || decision === "deny") {
+      if (decision === "deny") {
+        return {
+          success: false,
+          error: `APPROVAL_REQUIRED: The user denied "${command}". Do not retry it — explain the blocker and ask how they would like to proceed instead.`,
+        };
+      }
+      if (!decision) {
         return {
           success: false,
           error: `APPROVAL_REQUIRED: Command "${command}" requires approval. Use approval system to allow or deny.`,
