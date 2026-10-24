@@ -3,6 +3,7 @@ import { resolve, relative, isAbsolute, join } from "node:path";
 import type { PolicyDecision, Tool, ToolContext, ToolResult, WorkspaceProfile } from "../types/index.js";
 import { checkpointTool } from "../tools/checkpoint.js";
 import { NTOX_DIR } from "./config.js";
+import { MEDIA_DIR } from "./media.js";
 
 export interface PolicyRuntime {
   profile: WorkspaceProfile;
@@ -14,6 +15,8 @@ const READ_TOOLS = new Set(["read", "ls", "glob", "grep", "checkpoint", "open"])
 const WRITE_TOOLS = new Set(["write", "edit"]);
 const NETWORK_TOOLS = new Set(["web_fetch", "web_read", "search", "browse"]);
 const URL_VALUE_PATTERN = /^https?:\/\//i;
+const IMAGE_PATH_PATTERN = /\.(png|jpe?g|gif|webp|bmp)$/i;
+const IMAGE_PATH_MAX = 1024;
 const PATH_KEYS: Record<string, string[]> = {
   read: ["path"],
   write: ["path"],
@@ -186,6 +189,35 @@ function attachCheckpoint(result: ToolResult, checkpointId: string | null): Tool
   return { ...result, data };
 }
 
+function checkImageArg(runtime: PolicyRuntime, args: Record<string, unknown>): ToolResult | null {
+  const raw = typeof args.image === "string" ? args.image.trim() : "";
+  if (!raw) return null;
+  if (raw.startsWith("data:")) {
+    record(runtime, "image", true, "Inline image data allowed");
+    return null;
+  }
+  if (URL_VALUE_PATTERN.test(raw)) {
+    if (runtime.profile.networkPolicy === "disabled") {
+      return deny(runtime, "image", `Network disabled for profile ${runtime.profile.id}`, raw);
+    }
+    record(runtime, "image", true, "image url allowed", raw);
+    return null;
+  }
+  const looksLikePath =
+    raw.length < IMAGE_PATH_MAX && (isAbsolute(raw) || existsSync(raw) || IMAGE_PATH_PATTERN.test(raw));
+  if (!looksLikePath) {
+    record(runtime, "image", true, "Inline image data allowed");
+    return null;
+  }
+  const path = resolve(raw);
+  if (isWithinRoot(path, runtime.profile.readRoots) || isWithinRoot(path, [MEDIA_DIR])) {
+    record(runtime, "image", true, "image path allowed", path);
+    args.image = path;
+    return null;
+  }
+  return deny(runtime, "image", "image path outside allowed roots", path);
+}
+
 export function enforceToolPolicy(tool: Tool, runtime: PolicyRuntime): Tool {
   return {
     ...tool,
@@ -197,7 +229,15 @@ export function enforceToolPolicy(tool: Tool, runtime: PolicyRuntime): Tool {
         const networkDecision = checkNetwork(runtime, tool.name, args);
         if (networkDecision) return networkDecision;
       }
-      if (READ_TOOLS.has(tool.name) || WRITE_TOOLS.has(tool.name) || tool.name === "shell" || tool.name === "process") {
+      if (tool.name === "image") {
+        const imageDecision = checkImageArg(runtime, args);
+        if (imageDecision) return imageDecision;
+      } else if (
+        READ_TOOLS.has(tool.name) ||
+        WRITE_TOOLS.has(tool.name) ||
+        tool.name === "shell" ||
+        tool.name === "process"
+      ) {
         const pathDecision = checkPaths(runtime, tool.name, args);
         if (pathDecision) return pathDecision;
       } else {

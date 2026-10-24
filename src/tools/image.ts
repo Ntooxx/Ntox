@@ -1,17 +1,50 @@
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { extname, isAbsolute } from "node:path";
 import type { Tool, ToolResult } from "../types/index.js";
 import { loadConfig } from "../core/config.js";
 
-async function analyzeImage(apiKey: string, image: string, prompt: string): Promise<ToolResult> {
-  let imageUrl: string;
+const IMAGE_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+};
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const PATH_CANDIDATE_MAX = 1024;
 
-  if (image.startsWith("http://") || image.startsWith("https://")) {
-    imageUrl = image;
-  } else if (image.startsWith("data:")) {
-    imageUrl = image;
-  } else {
-    const base64Data = image.includes(",") ? image.split(",").pop()! : image;
-    imageUrl = `data:image/png;base64,${base64Data}`;
+export function resolveImageUrl(image: string): { url: string } | { error: string } {
+  const raw = image.trim();
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return { url: raw };
+  if (raw.startsWith("data:")) return { url: raw };
+
+  const looksLikePath =
+    raw.length < PATH_CANDIDATE_MAX &&
+    (isAbsolute(raw) || existsSync(raw) || Boolean(IMAGE_MIME[extname(raw).toLowerCase()]));
+
+  if (looksLikePath) {
+    try {
+      const size = statSync(raw).size;
+      if (size > MAX_IMAGE_BYTES) {
+        return { error: `Image file too large (${Math.round(size / (1024 * 1024))}MB, max 20MB): ${raw}` };
+      }
+      const mime = IMAGE_MIME[extname(raw).toLowerCase()] || "image/png";
+      return { url: `data:${mime};base64,${readFileSync(raw).toString("base64")}` };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return { error: `Cannot read image file: ${reason}` };
+    }
   }
+
+  const base64Data = raw.includes(",") ? raw.split(",").pop()! : raw;
+  return { url: `data:image/png;base64,${base64Data}` };
+}
+
+async function analyzeImage(apiKey: string, image: string, prompt: string): Promise<ToolResult> {
+  const resolved = resolveImageUrl(image);
+  if ("error" in resolved) return { success: false, error: resolved.error };
+  const imageUrl = resolved.url;
 
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -78,11 +111,14 @@ async function generateImage(apiKey: string, prompt: string, size: string): Prom
 export const imageTool: Tool = {
   name: "image",
   description:
-    "Analyze an image with GPT-4o Vision or generate an image with DALL-E 3. For analysis, provide image (base64/URL) and optional prompt. For generation, set mode to 'generate'.",
+    "Analyze an image with GPT-4o Vision or generate an image with DALL-E 3. For analysis, provide image (local file path, base64, data URL, or HTTP URL) and optional prompt. For generation, set mode to 'generate'.",
   parameters: {
     type: "object",
     properties: {
-      image: { type: "string", description: "Image as base64 string, data URL, or HTTP URL (for analysis)" },
+      image: {
+        type: "string",
+        description: "Image as a local file path, base64 string, data URL, or HTTP URL (for analysis)",
+      },
       prompt: { type: "string", description: "Question about the image (analysis) or description (generation)" },
       mode: { type: "string", enum: ["analyze", "generate"], description: "Mode: analyze (default) or generate" },
       size: {

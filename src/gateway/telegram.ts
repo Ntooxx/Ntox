@@ -2,6 +2,7 @@ import type { GatewayChannel } from "./types.js";
 import { parseApprovalCallbackData, renderApprovalRequestInteractive } from "./commands.js";
 import { resolveVoiceReply, voiceReplyText } from "./voice-mode.js";
 import { voiceAudioError, dataUrlToVoice } from "./voice.js";
+import { imageAttachmentNote, saveMediaFile } from "../core/media.js";
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
 const TELEGRAM_FILE_API = "https://api.telegram.org/file/bot";
@@ -16,6 +17,12 @@ const EXT_MIME: Record<string, string> = {
   aac: "audio/aac",
   wav: "audio/wav",
   webm: "audio/webm",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
 };
 
 interface TelegramAudio {
@@ -33,6 +40,13 @@ interface TelegramCallbackQuery {
   data?: string;
 }
 
+interface TelegramPhoto {
+  file_id: string;
+  file_unique_id?: string;
+  width?: number;
+  height?: number;
+}
+
 interface TelegramUpdate {
   update_id: number;
   message?: {
@@ -40,6 +54,9 @@ interface TelegramUpdate {
     chat: { id: number; type: string; username?: string };
     from?: { id: number; username?: string };
     text?: string;
+    caption?: string;
+    photo?: TelegramPhoto[];
+    document?: { file_id: string; mime_type?: string; file_name?: string };
     voice?: TelegramAudio;
     audio?: TelegramAudio;
   };
@@ -108,10 +125,10 @@ async function clearReplyKeyboard(token: string, chatId: number, messageId: numb
   }
 }
 
-async function downloadTelegramFile(
+async function downloadTelegramFileRaw(
   token: string,
   fileId: string,
-): Promise<{ base64: string; mimeType: string } | { error: string }> {
+): Promise<{ bytes: Buffer; mimeType: string } | { error: string }> {
   const res = await apiCall(token, "getFile", { file_id: fileId });
   if (!res.ok) return { error: `Telegram getFile failed (${res.status}).` };
   const data = (await res.json().catch(() => null)) as { ok?: boolean; result?: { file_path?: string } } | null;
@@ -121,13 +138,35 @@ async function downloadTelegramFile(
   const fileRes = await fetch(`${TELEGRAM_FILE_API}${token}/${filePath}`);
   if (!fileRes.ok) return { error: `Telegram file download failed (${fileRes.status}).` };
   const bytes = Buffer.from(await fileRes.arrayBuffer());
-  const base64 = bytes.toString("base64");
 
   const ext = (filePath.split(".").pop() || "").toLowerCase();
-  const mimeType = EXT_MIME[ext] || "audio/ogg";
+  return { bytes, mimeType: EXT_MIME[ext] || "application/octet-stream" };
+}
+
+async function downloadTelegramFile(
+  token: string,
+  fileId: string,
+): Promise<{ base64: string; mimeType: string } | { error: string }> {
+  const raw = await downloadTelegramFileRaw(token, fileId);
+  if ("error" in raw) return raw;
+  const mimeType = raw.mimeType === "application/octet-stream" ? "audio/ogg" : raw.mimeType;
+  const base64 = raw.bytes.toString("base64");
   const invalid = voiceAudioError(base64, mimeType);
   if (invalid) return { error: invalid };
   return { base64, mimeType };
+}
+
+const IMAGE_DOC_PATTERN = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
+function pickTelegramImage(message: NonNullable<TelegramUpdate["message"]>): { fileId: string } | null {
+  if (message.photo && message.photo.length > 0) {
+    return { fileId: message.photo[message.photo.length - 1].file_id };
+  }
+  const doc = message.document;
+  if (!doc) return null;
+  const mimeIsImage = (doc.mime_type || "").startsWith("image/");
+  const nameIsImage = IMAGE_DOC_PATTERN.test(doc.file_name || "");
+  return mimeIsImage || nameIsImage ? { fileId: doc.file_id } : null;
 }
 
 async function sendVoiceNote(token: string, chatId: number, dataUrl: string): Promise<boolean> {
@@ -249,6 +288,18 @@ export function createTelegramChannel(config: TelegramConfig): GatewayChannel {
           }
           text = transcript;
           inputIsVoice = true;
+        }
+
+        const imageFile = pickTelegramImage(msg);
+        if (imageFile) {
+          const download = await downloadTelegramFileRaw(token, imageFile.fileId);
+          if ("error" in download) {
+            await sendMessage(token, msg.chat.id, download.error).catch(() => {});
+            if (!text) continue;
+          } else {
+            const saved = saveMediaFile(download.bytes, download.mimeType);
+            text = imageAttachmentNote(saved, msg.caption || text);
+          }
         }
 
         if (!text) continue;

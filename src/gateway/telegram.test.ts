@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { existsSync, rmSync } from "node:fs";
 import { createTelegramChannel } from "./telegram.js";
 import { setVoiceMode } from "./voice-mode.js";
+import { MEDIA_DIR } from "../core/media.js";
 
 interface RecordedCall {
   url: string;
@@ -10,6 +12,7 @@ interface RecordedCall {
 interface MockSetup {
   firstUpdates: unknown[];
   transcript?: string | null;
+  filePath?: string;
 }
 
 function jsonResponse(payload: unknown): Response {
@@ -31,7 +34,8 @@ function installFetch(setup: MockSetup): { calls: RecordedCall[]; fetchMock: Ret
       updatesServed++;
       return jsonResponse({ ok: true, result: payload });
     }
-    if (url.includes("/getFile")) return jsonResponse({ ok: true, result: { file_path: "voice/file_1.oga" } });
+    if (url.includes("/getFile"))
+      return jsonResponse({ ok: true, result: { file_path: setup.filePath ?? "voice/file_1.oga" } });
     if (url.includes("/file/bot")) return new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 });
     if (url.includes("/sendMessage")) return jsonResponse({ ok: true, result: {} });
     if (url.includes("/sendVoice")) return jsonResponse({ ok: true, result: {} });
@@ -303,6 +307,99 @@ describe("telegram interactive approvals", () => {
       await waitFor(() => calls.some((c) => c.url.includes("/answerCallbackQuery")));
       expect(onMessage).not.toHaveBeenCalled();
       expect(sentMessages(calls)).toHaveLength(0);
+    } finally {
+      await channel.stop();
+    }
+  });
+});
+
+describe("telegram image pipeline", () => {
+  it("downloads the largest photo size and hands the agent an image note", async () => {
+    const { calls } = installFetch({
+      filePath: "photos/file_9.jpg",
+      firstUpdates: [
+        {
+          update_id: 7,
+          message: {
+            message_id: 70,
+            chat: { id: 777, type: "private" },
+            from: { username: "anton" },
+            caption: "what am I looking at?",
+            photo: [{ file_id: "SMALL" }, { file_id: "BIG" }],
+          },
+        },
+      ],
+    });
+    const onMessage = vi.fn(async (_chatId: string, _text: string, _username: string) => "It's a revenue chart.");
+    const channel = createTelegramChannel({ token: "TESTTOKEN", onMessage });
+    await channel.start();
+    try {
+      await waitFor(() => calls.some((c) => c.url.includes("/sendMessage")));
+
+      expect(onMessage).toHaveBeenCalledTimes(1);
+      const text = String(onMessage.mock.calls[0][1]);
+      expect(text).toContain("what am I looking at?");
+      expect(text).toContain("[Attached image:");
+      expect(text).toContain("image tool");
+      const savedPath = text.split("[Attached image: ")[1].split(" ")[0];
+      expect(savedPath.startsWith(MEDIA_DIR)).toBe(true);
+      expect(savedPath.endsWith(".jpg")).toBe(true);
+      expect(existsSync(savedPath)).toBe(true);
+      rmSync(savedPath, { force: true });
+
+      const getFileCall = calls.find((c) => c.url.includes("/getFile"));
+      expect(String(JSON.parse(String(getFileCall!.init?.body)).file_id)).toBe("BIG");
+      expect(sentMessages(calls).some((t) => t.includes("revenue chart"))).toBe(true);
+    } finally {
+      await channel.stop();
+    }
+  });
+
+  it("handles image documents and ignores non-image documents", async () => {
+    const { calls } = installFetch({
+      filePath: "documents/file_3.png",
+      firstUpdates: [
+        {
+          update_id: 8,
+          message: {
+            message_id: 81,
+            chat: { id: 778, type: "private" },
+            from: { username: "anton" },
+            caption: "screenshot attached",
+            document: { file_id: "DOC_IMG", mime_type: "image/png", file_name: "screenshot.png" },
+          },
+        },
+        {
+          update_id: 9,
+          message: {
+            message_id: 82,
+            chat: { id: 778, type: "private" },
+            from: { username: "anton" },
+            document: { file_id: "DOC_PDF", mime_type: "application/pdf", file_name: "report.pdf" },
+          },
+        },
+      ],
+    });
+    const onMessage = vi.fn(async (_chatId: string, _text: string, _username: string) => "ok");
+    const channel = createTelegramChannel({ token: "TESTTOKEN", onMessage });
+    await channel.start();
+    try {
+      await waitFor(() => onMessage.mock.calls.length >= 1 && sentMessages(calls).length >= 1);
+
+      expect(onMessage).toHaveBeenCalledTimes(1);
+      const text = String(onMessage.mock.calls[0][1]);
+      expect(text).toContain("screenshot attached");
+      expect(text).toContain("[Attached image:");
+      const savedPath = text.split("[Attached image: ")[1].split(" ")[0];
+      expect(savedPath.endsWith(".png")).toBe(true);
+      expect(existsSync(savedPath)).toBe(true);
+      rmSync(savedPath, { force: true });
+
+      const requestedIds = calls
+        .filter((c) => c.url.includes("/getFile"))
+        .map((c) => String(JSON.parse(String(c.init?.body)).file_id));
+      expect(requestedIds).toContain("DOC_IMG");
+      expect(requestedIds).not.toContain("DOC_PDF");
     } finally {
       await channel.stop();
     }

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { existsSync, rmSync } from "node:fs";
 import { createWhatsAppChannel } from "./whatsapp.js";
+import { MEDIA_DIR } from "../core/media.js";
 
 interface RecordedCall {
   url: string;
@@ -28,6 +30,12 @@ function installGraphMock(): { calls: RecordedCall[] } {
     }
     if (url.endsWith("/MEDIA1")) {
       return jsonResponse({ url: "https://graph.facebook.com/media/MEDIA1", mime_type: "audio/ogg; codecs=opus" });
+    }
+    if (url === "https://graph.facebook.com/media/IMAGE1") {
+      return new Response(new Uint8Array([9, 9, 9, 9]), { status: 200 });
+    }
+    if (url.endsWith("/IMG1")) {
+      return jsonResponse({ url: "https://graph.facebook.com/media/IMAGE1", mime_type: "image/png" });
     }
     return jsonResponse({ success: true });
   });
@@ -124,7 +132,7 @@ describe("whatsapp voice pipeline", () => {
 
   it("handles text messages and captions as before", async () => {
     const { calls } = installGraphMock();
-    const onMessage = vi.fn(async () => "Text reply.");
+    const onMessage = vi.fn(async (_chatId: string, _text: string, _username: string) => "Text reply.");
     const port = 34602;
     const channel = createWhatsAppChannel({
       token: "TEST",
@@ -144,7 +152,10 @@ describe("whatsapp voice pipeline", () => {
       );
       expect(onMessage).toHaveBeenCalledTimes(2);
       expect(onMessage).toHaveBeenNthCalledWith(1, "15551234567", "hello there", "Antonio");
-      expect(onMessage).toHaveBeenNthCalledWith(2, "15551234567", "look at this", "Antonio");
+      const imageText = String(onMessage.mock.calls[1][1]);
+      expect(imageText).toContain("look at this");
+      expect(imageText).toContain("[Attached image:");
+      rmSync(imageText.split("[Attached image: ")[1].split(" ")[0], { force: true });
       const bodies = messageBodies(calls);
       expect(bodies.filter((b) => b.type === "text")).toHaveLength(2);
       expect(bodies.some((b) => b.status === "read")).toBe(true);
@@ -181,7 +192,7 @@ describe("whatsapp voice pipeline", () => {
 
   it("keeps the legacy placeholder when no transcriber is configured", async () => {
     installGraphMock();
-    const onMessage = vi.fn(async () => "ok");
+    const onMessage = vi.fn(async (_chatId: string, _text: string, _username: string) => "ok");
     const port = 34604;
     const channel = createWhatsAppChannel({
       token: "TEST",
@@ -270,6 +281,94 @@ describe("whatsapp interactive approvals", () => {
       expect(onMessage).toHaveBeenCalledWith("15551234567", "/approve deny", "Antonio");
       const bodies = messageBodies(calls);
       expect(JSON.stringify(bodies)).toContain("Denied: git push");
+    } finally {
+      await channel.stop();
+    }
+  });
+});
+
+describe("whatsapp image pipeline", () => {
+  it("saves an image attachment and hands the agent a captioned note", async () => {
+    const { calls } = installGraphMock();
+    const onMessage = vi.fn(async (_chatId: string, _text: string, _username: string) => "It's a bar chart.");
+    const port = 34611;
+    const channel = createWhatsAppChannel({
+      token: "TEST",
+      phoneNumberId: "PN1",
+      verifyToken: "VT",
+      port,
+      onMessage,
+    });
+    await channel.start();
+    try {
+      await postWebhook(
+        port,
+        webhookPayload([
+          {
+            id: "wamid-img",
+            from: "15551234567",
+            type: "image",
+            image: { id: "IMG1", caption: "what does this show?" },
+          },
+        ]),
+      );
+
+      expect(onMessage).toHaveBeenCalledTimes(1);
+      const text = String(onMessage.mock.calls[0][1]);
+      expect(text).toContain("what does this show?");
+      expect(text).toContain("[Attached image:");
+      expect(text).toContain("image tool");
+      const savedPath = text.split("[Attached image: ")[1].split(" ")[0];
+      expect(savedPath.startsWith(MEDIA_DIR)).toBe(true);
+      expect(savedPath.endsWith(".png")).toBe(true);
+      expect(existsSync(savedPath)).toBe(true);
+      rmSync(savedPath, { force: true });
+      expect(calls.some((c) => c.url.endsWith("/IMG1"))).toBe(true);
+    } finally {
+      await channel.stop();
+    }
+  });
+
+  it("downloads image documents and leaves other documents as placeholders", async () => {
+    const { calls } = installGraphMock();
+    const onMessage = vi.fn(async (_chatId: string, _text: string, _username: string) => "ok");
+    const port = 34612;
+    const channel = createWhatsAppChannel({
+      token: "TEST",
+      phoneNumberId: "PN1",
+      verifyToken: "VT",
+      port,
+      onMessage,
+    });
+    await channel.start();
+    try {
+      await postWebhook(
+        port,
+        webhookPayload([
+          {
+            id: "wamid-doc",
+            from: "15551234567",
+            type: "document",
+            document: { id: "DOC1", filename: "report.pdf", mime_type: "application/pdf" },
+          },
+          {
+            id: "wamid-shot",
+            from: "15551234567",
+            type: "document",
+            document: { id: "IMG1", filename: "shot.png", mime_type: "image/png" },
+          },
+        ]),
+      );
+
+      expect(onMessage).toHaveBeenCalledTimes(2);
+      expect(onMessage.mock.calls[0][1]).toBe("[document: report.pdf]");
+      const imageText = String(onMessage.mock.calls[1][1]);
+      expect(imageText).toContain("[Attached image:");
+      const savedPath = imageText.split("[Attached image: ")[1].split(" ")[0];
+      expect(savedPath.endsWith(".png")).toBe(true);
+      expect(existsSync(savedPath)).toBe(true);
+      rmSync(savedPath, { force: true });
+      expect(calls.some((c) => c.url.endsWith("/DOC1"))).toBe(false);
     } finally {
       await channel.stop();
     }

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Tool, WorkspaceProfile } from "../types/index.js";
 import { createPolicyRuntime, enforceToolPolicy } from "./policy.js";
+import { MEDIA_DIR } from "./media.js";
 
 function profile(root: string): WorkspaceProfile {
   return {
@@ -168,6 +169,101 @@ describe("policy", () => {
     expect(result.success).toBe(true);
     expect(runtime.checkpointIds.length).toBeGreaterThanOrEqual(1);
     expect((result.data as { autoCheckpointId?: string }).autoCheckpointId).toBe(runtime.checkpointIds[0]);
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("image policy", () => {
+  function imageProfile(root: string): WorkspaceProfile {
+    const base = profile(root);
+    return { ...base, allowedTools: [...base.allowedTools, "image"] };
+  }
+
+  function imageTool(): Tool {
+    return {
+      name: "image",
+      description: "",
+      parameters: {},
+      execute: async (args) => ({ success: true, data: { received: String(args.image ?? "") } }),
+    };
+  }
+
+  it("allows a local image path inside the workspace and resolves it", async () => {
+    const root = tempRoot();
+    const file = join(root, "shot.png");
+    writeFileSync(file, "png-bytes");
+    const runtime = createPolicyRuntime(imageProfile(root));
+    const args = { image: file };
+
+    const result = await enforceToolPolicy(imageTool(), runtime).execute(args);
+
+    expect(result.success).toBe(true);
+    expect(args.image).toBe(file);
+    expect(runtime.decisions.at(-1)?.allowed).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("denies a local image path outside the workspace", async () => {
+    const root = tempRoot();
+    const outside = join(tmpdir(), `ntox-image-${randomUUID().slice(0, 8)}.png`);
+    writeFileSync(outside, "png-bytes");
+    const runtime = createPolicyRuntime(imageProfile(root));
+
+    const result = await enforceToolPolicy(imageTool(), runtime).execute({ image: outside });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("POLICY_DENIED");
+    expect(result.error).toContain("outside allowed roots");
+    rmSync(outside, { force: true });
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("always allows the bundled media directory used for channel attachments", async () => {
+    const root = tempRoot();
+    mkdirSync(MEDIA_DIR, { recursive: true });
+    const mediaFile = join(MEDIA_DIR, `policy-test-${randomUUID().slice(0, 8)}.png`);
+    writeFileSync(mediaFile, "png-bytes");
+    const runtime = createPolicyRuntime(imageProfile(root));
+
+    const result = await enforceToolPolicy(imageTool(), runtime).execute({ image: mediaFile });
+
+    expect(result.success).toBe(true);
+    rmSync(mediaFile, { force: true });
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("allows data URLs and base64 payloads without touching the filesystem", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime(imageProfile(root));
+
+    const dataUrl = await enforceToolPolicy(imageTool(), runtime).execute({ image: "data:image/png;base64,AAAA" });
+    expect(dataUrl.success).toBe(true);
+
+    const base64 = await enforceToolPolicy(imageTool(), runtime).execute({ image: "iVBORw0KGgoAAAANSUhEUg==" });
+    expect(base64.success).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("gates http image URLs behind the network policy", async () => {
+    const root = tempRoot();
+    const allowed = createPolicyRuntime(imageProfile(root));
+    const ok = await enforceToolPolicy(imageTool(), allowed).execute({ image: "https://example.com/pic.png" });
+    expect(ok.success).toBe(true);
+
+    const disabled = createPolicyRuntime({ ...imageProfile(root), networkPolicy: "disabled" });
+    const denied = await enforceToolPolicy(imageTool(), disabled).execute({ image: "https://example.com/pic.png" });
+    expect(denied.success).toBe(false);
+    expect(denied.error).toContain("Network disabled");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("does not block generation mode when no image argument is present", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime(imageProfile(root));
+
+    const result = await enforceToolPolicy(imageTool(), runtime).execute({ mode: "generate", prompt: "a cat" });
+
+    expect(result.success).toBe(true);
     rmSync(root, { recursive: true, force: true });
   });
 });

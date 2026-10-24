@@ -5,6 +5,7 @@ import type { GatewayChannel } from "./types.js";
 import { parseApprovalCallbackData, renderApprovalRequestInteractive } from "./commands.js";
 import { resolveVoiceReply, voiceReplyText } from "./voice-mode.js";
 import { voiceAudioError, dataUrlToVoice } from "./voice.js";
+import { imageAttachmentNote, saveMediaFile } from "../core/media.js";
 
 const WHATSAPP_API = "https://graph.facebook.com/v18.0";
 const TYPING_REFRESH_MS = 8000;
@@ -37,9 +38,9 @@ interface WebhookMessage {
   from: string;
   type: string;
   text?: { body?: string };
-  image?: { caption?: string; id?: string };
-  audio?: { id?: string };
-  document?: { caption?: string; filename?: string; id?: string };
+  image?: { caption?: string; id?: string; mime_type?: string };
+  audio?: { id?: string; mime_type?: string };
+  document?: { caption?: string; filename?: string; id?: string; mime_type?: string };
   video?: { caption?: string; id?: string };
   interactive?: { button_reply?: { id?: string; title?: string } };
 }
@@ -65,6 +66,14 @@ function extractText(msg: WebhookMessage): string | null {
   if (msg.type === "document") return `[document: ${msg.document?.filename || "unknown"}]`;
   if (msg.type === "video") return "[video]";
   return null;
+}
+
+const IMAGE_DOC_PATTERN = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
+function isImageDocument(msg: WebhookMessage): boolean {
+  const doc = msg.document;
+  if (!doc) return false;
+  return (doc.mime_type || "").startsWith("image/") || IMAGE_DOC_PATTERN.test(doc.filename || "");
 }
 
 function getContactName(contacts: WebhookContact[] | undefined, waId: string): string {
@@ -117,21 +126,30 @@ async function markAsRead(token: string, phoneNumberId: string, messageId: strin
   }
 }
 
-async function downloadWhatsAppMedia(
+async function downloadWhatsAppMediaRaw(
   token: string,
   mediaId: string,
-): Promise<{ base64: string; mimeType: string } | { error: string }> {
+): Promise<{ bytes: Buffer; mimeType: string } | { error: string }> {
   const metaRes = await fetch(`${WHATSAPP_API}/${mediaId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!metaRes.ok) return { error: `Media lookup failed (${metaRes.status}).` };
   const meta = (await metaRes.json().catch(() => null)) as { url?: string; mime_type?: string } | null;
-  if (!meta?.url) return { error: "That voice note has no downloadable URL." };
+  if (!meta?.url) return { error: "That media has no downloadable URL." };
 
   const fileRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${token}` } });
   if (!fileRes.ok) return { error: `Media download failed (${fileRes.status}).` };
-  const base64 = Buffer.from(await fileRes.arrayBuffer()).toString("base64");
-  const mimeType = meta.mime_type || "audio/ogg";
+  return { bytes: Buffer.from(await fileRes.arrayBuffer()), mimeType: meta.mime_type || "application/octet-stream" };
+}
+
+async function downloadWhatsAppMedia(
+  token: string,
+  mediaId: string,
+): Promise<{ base64: string; mimeType: string } | { error: string }> {
+  const raw = await downloadWhatsAppMediaRaw(token, mediaId);
+  if ("error" in raw) return raw;
+  const mimeType = raw.mimeType === "application/octet-stream" ? "audio/ogg" : raw.mimeType;
+  const base64 = raw.bytes.toString("base64");
   const invalid = voiceAudioError(base64, mimeType.split(";")[0].trim());
   if (invalid) return { error: invalid };
   return { base64, mimeType };
@@ -308,6 +326,19 @@ export function createWhatsAppChannel(config: WhatsAppConfig): GatewayChannel {
                 }
                 text = transcript;
                 inputIsVoice = true;
+              } else if (msg.type === "image" || (msg.type === "document" && isImageDocument(msg))) {
+                const mediaId = (msg.image ?? msg.document)?.id;
+                const caption = msg.image?.caption ?? msg.document?.caption;
+                if (mediaId) {
+                  const download = await downloadWhatsAppMediaRaw(token, mediaId);
+                  if ("error" in download) {
+                    await sendWhatsAppMessage(token, phoneNumberId, chatId, download.error);
+                    continue;
+                  }
+                  text = imageAttachmentNote(saveMediaFile(download.bytes, download.mimeType), caption);
+                } else {
+                  text = extractText(msg);
+                }
               } else {
                 text = extractText(msg);
               }
