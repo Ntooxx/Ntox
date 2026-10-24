@@ -200,7 +200,7 @@ Secrets are never part of the renderer's data model. The desktop keeps them writ
 - **Auth.** When the desktop owns the API process it generates a per-launch bearer token and requires it on every route except `/api/health`. Reusing an externally started API falls back to the configured token.
 - **Migration.** A legacy plaintext `apiKey` or channel token in `config.json` is moved into the credential store on first load and blanked in place; the desktop repeats the move into the encrypted blob on next launch.
 
-See `DESKTOP_SETTINGS_PLAN.md` for the full design and phased rollout.
+Settings design and rollout decisions were folded into this document.
 
 ### Multi-agent orchestration target
 

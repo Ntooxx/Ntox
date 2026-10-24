@@ -32,5 +32,4 @@ aether-probe/
 aether/
 genesis_build/
 roma-lineup/
-wasm-demo/target/
 .commandcode/

@@ -64,7 +64,7 @@ Assess navigation, task flow, feedback, user control, error recovery, accessibil
 5. Use screenshots or direct observations for visual findings. Use source inspection to confirm behavior or explain a defect, and label source-only concerns as such.
 6. Do not send messages, mutate workflows, alter settings, or change credentials unless the review environment explicitly authorizes those actions.
 
-The previous `docs/UI_UX_AUDIT.md` and `docs/UI_UX_REVIEW_PROMPT.md` may offer useful context, but their findings and environment notes are not proof of the current state. Recheck them before reusing them.
+The previous `docs/UI_UX_AUDIT.md` may offer useful context, but its findings and environment notes are not proof of the current state. Recheck them before reusing them.
 
 ## Scorecard
 
