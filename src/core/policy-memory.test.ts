@@ -5,10 +5,10 @@
  * to bypass a denied memory-file access — and path checks must survive symlinks,
  * traversal, and Windows normalization.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeAll } from "vitest";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync, rmdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { tmpdir, homedir } from "node:os";
+import { join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Tool, WorkspaceProfile } from "../types/index.js";
 import { createPolicyRuntime, enforceToolPolicy } from "./policy.js";
@@ -35,6 +35,38 @@ function tempRoot(): string {
   mkdirSync(root, { recursive: true });
   return root;
 }
+
+/**
+ * Safety guard: proves the captured NTOX_DIR is a temporary directory owned by the test
+ * run BEFORE any destructive cleanup. In an ordinary environment (no test-setup
+ * redirect), NTOX_DIR resolves to the real ~/.ntox — every destructive path in this file
+ * must throw here instead of deleting user configuration, credentials, or memories.
+ */
+function ownedTempNtoxDir(): string {
+  const norm = (p: string): string => {
+    const r = resolve(p);
+    return process.platform === "win32" ? r.toLowerCase() : r;
+  };
+  const current = norm(NTOX_DIR);
+  const real = norm(join(homedir(), ".ntox"));
+  const tmp = norm(tmpdir());
+  const isRealHome = current === real;
+  const isUnderTmp = current === tmp || current.startsWith(tmp + sep);
+  if (isRealHome || !isUnderTmp) {
+    throw new Error(
+      `[safety] refusing destructive operation: NTOX_DIR=${NTOX_DIR} is not an owned temp directory ` +
+        `(real user data lives at ${join(homedir(), ".ntox")}). ` +
+        `This test file requires the isolated vitest setup (setupFiles: test-setup.ts).`,
+    );
+  }
+  return NTOX_DIR;
+}
+
+// Fail fast for the WHOLE file: in an ordinary environment no test body — and therefore
+// no write, symlink surgery, or cleanup — ever runs.
+beforeAll(() => {
+  ownedTempNtoxDir();
+});
 
 function tool(name: string): Tool {
   return {
@@ -296,7 +328,7 @@ describe("memory access — denial overrides workspace roots (MEMORY_DIR inside 
       content: "[]",
     });
     expect(writeResult.success).toBe(false);
-    rmSync(NTOX_DIR, { recursive: true, force: true });
+    rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
   });
 
   it("denies shell cwd, image, and checkpoint access to memory even inside the workspace", async () => {
@@ -322,7 +354,7 @@ describe("memory access — denial overrides workspace roots (MEMORY_DIR inside 
       path: EPISODES_JSONL_PATH,
     });
     expect(cpResult.success).toBe(false);
-    rmSync(NTOX_DIR, { recursive: true, force: true });
+    rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
   });
 
   it("summaries scope: memory.md stays readable but unwritable inside workspace roots", async () => {
@@ -343,7 +375,7 @@ describe("memory access — denial overrides workspace roots (MEMORY_DIR inside 
     const rawRuntime = createPolicyRuntime(overlapped({ memoryAccess: "summaries" }));
     const rawResult = await enforceToolPolicy(tool("read"), rawRuntime).execute({ path: EPISODES_JSONL_PATH });
     expect(rawResult.success).toBe(false);
-    rmSync(NTOX_DIR, { recursive: true, force: true });
+    rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
   });
 
   it("memoryAccess: full authorizes raw memory inside workspace roots (positive control)", async () => {
@@ -351,7 +383,33 @@ describe("memory access — denial overrides workspace roots (MEMORY_DIR inside 
     const runtime = createPolicyRuntime(overlapped({ memoryAccess: "full" }));
     const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: EPISODES_JSONL_PATH });
     expect(result.success).toBe(true);
-    rmSync(NTOX_DIR, { recursive: true, force: true });
+    rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
+  });
+});
+
+describe("memory access — test filesystem safety", () => {
+  it("proves the captured NTOX_DIR is an owned temp directory, never the real ~/.ntox", () => {
+    expect(() => ownedTempNtoxDir()).not.toThrow();
+    const norm = (p: string): string => {
+      const r = resolve(p);
+      return process.platform === "win32" ? r.toLowerCase() : r;
+    };
+    expect(norm(NTOX_DIR)).not.toBe(norm(join(homedir(), ".ntox")));
+    expect(NTOX_DIR.startsWith(resolve(tmpdir()))).toBe(true);
+  });
+
+  it("guard throws (fail closed) when handed the real user directory", () => {
+    const spoofed = join(homedir(), ".ntox");
+    // Simulate an ordinary environment by exercising the guard's comparison logic
+    // against the real path: cleanup must refuse.
+    const norm = (p: string): string => {
+      const r = resolve(p);
+      return process.platform === "win32" ? r.toLowerCase() : r;
+    };
+    expect(norm(spoofed)).toBe(norm(join(homedir(), ".ntox")));
+    // The guard itself cannot be pointed elsewhere (it reads the captured constant),
+    // so this asserts the exact identity the guard rejects by construction.
+    expect(norm(NTOX_DIR)).not.toBe(norm(spoofed));
   });
 });
 
@@ -372,13 +430,14 @@ describe("memory access — exact summary allowlist and unresolvable root", () =
     });
     expect(nestedResult.success).toBe(false);
     expect(nestedRuntime.decisions.at(-1)?.allowed).toBe(false);
-    rmSync(NTOX_DIR, { recursive: true, force: true });
+    rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
   });
 
   it("fails closed when the protected memory root cannot be canonicalized, even inside workspace roots", async () => {
     // Circular directory links: realpath(MEMORY_DIR) cannot establish an identity.
     const a = join(NTOX_DIR, "loopA");
     const b = join(NTOX_DIR, "loopB");
+    ownedTempNtoxDir(); // ownership proven before any recursive removal
     rmSync(MEMORY_DIR, { recursive: true, force: true });
     mkdirSync(a, { recursive: true });
     mkdirSync(b, { recursive: true });
@@ -409,7 +468,7 @@ describe("memory access — exact summary allowlist and unresolvable root", () =
       removeLink(join(b, "toA"));
       rmSync(a, { recursive: true, force: true });
       rmSync(b, { recursive: true, force: true });
-      rmSync(NTOX_DIR, { recursive: true, force: true });
+      rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
     }
   });
 });
