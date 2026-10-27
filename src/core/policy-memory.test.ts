@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import type { Tool, WorkspaceProfile } from "../types/index.js";
 import { createPolicyRuntime, enforceToolPolicy } from "./policy.js";
 import { setInteractiveApproval } from "../tools/approval.js";
-import { MEMORY_DIR, EPISODES_JSONL_PATH } from "./config.js";
+import { MEMORY_DIR, EPISODES_JSONL_PATH, NTOX_DIR } from "./config.js";
 import { MemoryStore } from "../memory/episodic.js";
 
 function profile(root: string): WorkspaceProfile {
@@ -248,5 +248,109 @@ describe("memory access — path robustness", () => {
     rmSync(root, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
     rmSync(link, { force: true });
+  });
+});
+
+describe("memory access — fail-closed canonicalization", () => {
+  it("denies paths whose ancestry cannot be resolved (file used as directory), even with full access", async () => {
+    const root = tempRoot();
+    writeFileSync(join(root, "blocker.txt"), "i am a file");
+    const bogus = join(root, "blocker.txt", "sub", "x.json");
+    for (const memProfile of [profile(root), { ...profile(root), memoryAccess: "full" as const }]) {
+      const runtime = createPolicyRuntime(memProfile);
+      const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: bogus });
+      expect(result.success).toBe(false);
+      expect(runtime.decisions.at(-1)?.allowed).toBe(false);
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("still allows brand-new nested files in the workspace (ENOENT ancestry is resolvable)", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime(profile(root));
+    const result = await enforceToolPolicy(tool("write"), runtime).execute({
+      path: join(root, "new", "deep", "file.txt"),
+      content: "x",
+    });
+    expect(result.success).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("memory access — denial overrides workspace roots (MEMORY_DIR inside roots)", () => {
+  // The overlap case from review: workspace/read/write roots CONTAIN the memory directory.
+  function overlapped(extra: Partial<WorkspaceProfile> = {}): WorkspaceProfile {
+    return { ...profile(NTOX_DIR), memoryAccess: "deny", ...extra };
+  }
+
+  it("memoryAccess: deny blocks raw reads and writes even when roots authorize the path", async () => {
+    mkdirSync(MEMORY_DIR, { recursive: true });
+    const readRuntime = createPolicyRuntime(overlapped());
+    const readResult = await enforceToolPolicy(tool("read"), readRuntime).execute({ path: EPISODES_JSONL_PATH });
+    expect(readResult.success).toBe(false);
+    expect(readRuntime.decisions.at(-1)?.allowed).toBe(false);
+
+    const writeRuntime = createPolicyRuntime(overlapped());
+    const writeResult = await enforceToolPolicy(tool("write"), writeRuntime).execute({
+      path: EPISODES_JSONL_PATH,
+      content: "[]",
+    });
+    expect(writeResult.success).toBe(false);
+    rmSync(NTOX_DIR, { recursive: true, force: true });
+  });
+
+  it("denies shell cwd, image, and checkpoint access to memory even inside the workspace", async () => {
+    mkdirSync(MEMORY_DIR, { recursive: true });
+    const shellRuntime = createPolicyRuntime(overlapped());
+    const shellResult = await enforceToolPolicy(tool("shell"), shellRuntime).execute({
+      command: "dir",
+      workdir: MEMORY_DIR,
+    });
+    expect(shellResult.success).toBe(false);
+
+    const imageRuntime = createPolicyRuntime(overlapped());
+    const imageResult = await enforceToolPolicy(tool("image"), imageRuntime).execute({
+      image: join(MEMORY_DIR, "shot.png"),
+    });
+    expect(imageResult.success).toBe(false);
+
+    const cpRuntime = createPolicyRuntime({
+      ...overlapped({ allowedTools: [...profile(NTOX_DIR).allowedTools, "checkpoint"] }),
+    });
+    const cpResult = await enforceToolPolicy(tool("checkpoint"), cpRuntime).execute({
+      action: "create",
+      path: EPISODES_JSONL_PATH,
+    });
+    expect(cpResult.success).toBe(false);
+    rmSync(NTOX_DIR, { recursive: true, force: true });
+  });
+
+  it("summaries scope: memory.md stays readable but unwritable inside workspace roots", async () => {
+    mkdirSync(MEMORY_DIR, { recursive: true });
+    const readRuntime = createPolicyRuntime(overlapped({ memoryAccess: "summaries" }));
+    const readResult = await enforceToolPolicy(tool("read"), readRuntime).execute({
+      path: join(MEMORY_DIR, "memory.md"),
+    });
+    expect(readResult.success).toBe(true);
+
+    const writeRuntime = createPolicyRuntime(overlapped({ memoryAccess: "summaries" }));
+    const writeResult = await enforceToolPolicy(tool("write"), writeRuntime).execute({
+      path: join(MEMORY_DIR, "memory.md"),
+      content: "x",
+    });
+    expect(writeResult.success).toBe(false);
+
+    const rawRuntime = createPolicyRuntime(overlapped({ memoryAccess: "summaries" }));
+    const rawResult = await enforceToolPolicy(tool("read"), rawRuntime).execute({ path: EPISODES_JSONL_PATH });
+    expect(rawResult.success).toBe(false);
+    rmSync(NTOX_DIR, { recursive: true, force: true });
+  });
+
+  it("memoryAccess: full authorizes raw memory inside workspace roots (positive control)", async () => {
+    mkdirSync(MEMORY_DIR, { recursive: true });
+    const runtime = createPolicyRuntime(overlapped({ memoryAccess: "full" }));
+    const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: EPISODES_JSONL_PATH });
+    expect(result.success).toBe(true);
+    rmSync(NTOX_DIR, { recursive: true, force: true });
   });
 });
