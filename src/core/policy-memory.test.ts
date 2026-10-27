@@ -6,7 +6,7 @@
  * traversal, and Windows normalization.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -352,5 +352,64 @@ describe("memory access — denial overrides workspace roots (MEMORY_DIR inside 
     const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: EPISODES_JSONL_PATH });
     expect(result.success).toBe(true);
     rmSync(NTOX_DIR, { recursive: true, force: true });
+  });
+});
+
+describe("memory access — exact summary allowlist and unresolvable root", () => {
+  it("summaries allowlists exactly memory.md: nested memory.md files are denied", async () => {
+    mkdirSync(join(MEMORY_DIR, "private"), { recursive: true });
+    const base: WorkspaceProfile = { ...profile(NTOX_DIR), memoryAccess: "summaries" };
+
+    const exact = createPolicyRuntime(base);
+    const exactResult = await enforceToolPolicy(tool("read"), exact).execute({
+      path: join(MEMORY_DIR, "memory.md"),
+    });
+    expect(exactResult.success).toBe(true);
+
+    const nestedRuntime = createPolicyRuntime(base);
+    const nestedResult = await enforceToolPolicy(tool("read"), nestedRuntime).execute({
+      path: join(MEMORY_DIR, "private", "memory.md"),
+    });
+    expect(nestedResult.success).toBe(false);
+    expect(nestedRuntime.decisions.at(-1)?.allowed).toBe(false);
+    rmSync(NTOX_DIR, { recursive: true, force: true });
+  });
+
+  it("fails closed when the protected memory root cannot be canonicalized, even inside workspace roots", async () => {
+    // Circular directory links: realpath(MEMORY_DIR) cannot establish an identity.
+    const a = join(NTOX_DIR, "loopA");
+    const b = join(NTOX_DIR, "loopB");
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
+    mkdirSync(a, { recursive: true });
+    mkdirSync(b, { recursive: true });
+    const linkType = process.platform === "win32" ? ("junction" as const) : ("dir" as const);
+    symlinkSync(b, join(a, "toB"), linkType);
+    symlinkSync(a, join(b, "toA"), linkType);
+    symlinkSync(a, MEMORY_DIR, linkType);
+    const removeLink = (p: string): void => {
+      try {
+        rmdirSync(p);
+      } catch {
+        rmSync(p, { force: true });
+      }
+    };
+
+    try {
+      // Workspace roots CONTAIN the memory path: with a wrong "outside" verdict the
+      // roots check would authorize this read. It must be denied (unresolved).
+      const runtime = createPolicyRuntime(profile(NTOX_DIR));
+      const result = await enforceToolPolicy(tool("read"), runtime).execute({
+        path: join(MEMORY_DIR, "episodes.jsonl"),
+      });
+      expect(result.success).toBe(false);
+      expect(runtime.decisions.at(-1)?.allowed).toBe(false);
+    } finally {
+      removeLink(MEMORY_DIR);
+      removeLink(join(a, "toB"));
+      removeLink(join(b, "toA"));
+      rmSync(a, { recursive: true, force: true });
+      rmSync(b, { recursive: true, force: true });
+      rmSync(NTOX_DIR, { recursive: true, force: true });
+    }
   });
 });

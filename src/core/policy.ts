@@ -167,20 +167,28 @@ function memoryFix(profile: WorkspaceProfile): string | undefined {
  * Deciding layer for paths inside MEMORY_DIR — evaluated BEFORE ordinary roots, so a
  * memoryAccess denial overrides workspace/read/write permissions even when MEMORY_DIR
  * sits inside an authorized root (and an authorized memory verdict grants access that
- * roots alone would not). Retrieval (prompt injection) never routes through this check:
- * content-to-model is not file authority. Environment variables are never consulted.
+ * roots alone would not). The summaries allowlist is the ONE exact file
+ * canonical(join(MEMORY_DIR, "memory.md")) — nested files with the same basename do not
+ * qualify. If the protected root itself cannot be canonicalized the verdict is
+ * "unresolved" (fail closed), never "outside". Retrieval (prompt injection) never routes
+ * through this check: content-to-model is not file authority. Environment variables are
+ * never consulted.
  */
 function memoryVerdict(path: string, profile: WorkspaceProfile, op: "read" | "write" | "cwd"): MemoryVerdict {
   const canonical = canonicalize(path);
   if (!canonical) return "unresolved";
   const canonicalMemory = canonicalize(MEMORY_DIR);
-  if (!canonicalMemory || !withinCanonical(canonical, canonicalMemory)) return "outside";
+  if (!canonicalMemory) return "unresolved"; // protected root identity unknown -> fail closed
+  if (!withinCanonical(canonical, canonicalMemory)) return "outside";
   const scope = profile.memoryAccess ?? "summaries";
   if (scope === "deny") return "deny";
   if (scope === "full") return "allow";
-  // "summaries": read-only access to memory.md; raw episodic files stay private,
+  if (op !== "read") return "deny";
+  // "summaries": read-only access to exactly memory.md; raw episodic files stay private,
   // and nothing may use the memory directory as a working directory.
-  return op === "read" && basename(canonical) === "memory.md" ? "allow" : "deny";
+  const summaryFile = canonicalize(join(MEMORY_DIR, "memory.md"));
+  if (!summaryFile) return "unresolved";
+  return canonical === summaryFile ? "allow" : "deny";
 }
 
 function argPath(args: Record<string, unknown>, key: string, fallback: string): string {
