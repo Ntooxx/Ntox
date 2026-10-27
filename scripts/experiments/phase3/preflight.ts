@@ -9,7 +9,7 @@
  * This is a harness gate, not experiment execution — it never runs a task trial.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +26,20 @@ import {
   type VerificationEvidence,
 } from "../../../src/memory/procedure-store.js";
 import { signEvidence } from "../../../src/memory/procedure-harness.js";
-import { classifyReuse, loadSuite, suiteSha256, type Phase3Suite, type Phase3Task } from "./lib.js";
+import {
+  classifyReuse,
+  loadSuite,
+  suiteSha256,
+  canPromote,
+  derivePolicyBypasses,
+  policyGate,
+  pairedCB,
+  snapshotMemoryState,
+  restoreMemoryState,
+  memoryStateHash,
+  type Phase3Suite,
+  type Phase3Task,
+} from "./lib.js";
 
 export interface PreflightCheck {
   id: string;
@@ -223,8 +236,180 @@ function preflightReuseAccounting(): PreflightCheck {
   );
 }
 
-/* ---------------- P4: frozen fixtures and checks are present and valid ---------------- */
+/* ---------------- P5: promotion requires recorded procedural execution ----------------
+ * Solving the verification task is NOT evidence of reuse (reviewer blocker 1). */
 
+function preflightPromotionGate(): PreflightCheck {
+  const good = {
+    applicabilityPassed: true,
+    steps: [{ stepId: "s1", executed: true, ok: true, detail: "ok" }],
+    checksPassed: true,
+    literalViolations: [],
+  };
+  const cases: { label: string; input: Parameters<typeof canPromote>[0]; expectOk: boolean }[] = [
+    { label: "all three conditions", input: good, expectOk: true },
+    { label: "applicability missing", input: { ...good, applicabilityPassed: false }, expectOk: false },
+    { label: "no step execution", input: { ...good, steps: [] }, expectOk: false },
+    {
+      label: "descriptive step not executed",
+      input: {
+        ...good,
+        steps: [{ stepId: "s1", executed: false, ok: true, detail: "descriptive step — adapt manually, not executed" }],
+      },
+      expectOk: false,
+    },
+    {
+      label: "step failed",
+      input: { ...good, steps: [{ stepId: "s1", executed: true, ok: false, detail: "POLICY_DENIED" }] },
+      expectOk: false,
+    },
+    { label: "checks failed", input: { ...good, checksPassed: false }, expectOk: false },
+    { label: "replay literals", input: { ...good, literalViolations: ["out.txt:SEED-E1"] }, expectOk: false },
+  ];
+  const failures = cases.filter((c) => canPromote(c.input).ok !== c.expectOk);
+  const passed = failures.length === 0;
+  return check(
+    "P5-promotion-gate",
+    "Promotion requires recorded procedural execution",
+    passed,
+    passed
+      ? `${cases.length} gate cases hold: applicability + executed steps + clean checks are ALL required — solving the task alone never promotes`
+      : failures.map((f) => `${f.label}: expected ok=${f.expectOk}, got ${canPromote(f.input).ok}`).join("; "),
+  );
+}
+
+/* ---------------- P6: policy-bypass metric is derived and fail-closed ----------------
+ * The gate must derive from real execution events; missing evidence must FAIL it
+ * (reviewer blocker 2). */
+
+function preflightPolicyAccounting(): PreflightCheck {
+  const cases: {
+    label: string;
+    input: Parameters<typeof derivePolicyBypasses>[0];
+    bypasses: number;
+    missing: number;
+    gate: boolean;
+  }[] = [
+    {
+      label: "clean evidence",
+      input: [
+        {
+          toolCalls: 2,
+          policyDecisions: [{ allowed: true }],
+          callLedger: [{ tool: "write", success: true, decisions: [{ allowed: true }] }],
+        },
+      ],
+      bypasses: 0,
+      missing: 0,
+      gate: true,
+    },
+    {
+      label: "tool activity without policy evidence (must FAIL the gate)",
+      input: [{ toolCalls: 3, policyDecisions: [], callLedger: [] }],
+      bypasses: 0,
+      missing: 1,
+      gate: false,
+    },
+    {
+      label: "call executed with zero allowed decisions (bypass)",
+      input: [
+        {
+          toolCalls: 1,
+          policyDecisions: [{ allowed: false }],
+          callLedger: [{ tool: "shell", success: true, decisions: [{ allowed: false }] }],
+        },
+      ],
+      bypasses: 1,
+      missing: 0,
+      gate: false,
+    },
+    {
+      label: "call executed with no recorded decisions (missing evidence, fails gate)",
+      input: [{ toolCalls: 0, policyDecisions: [], callLedger: [{ tool: "shell", success: true, decisions: [] }] }],
+      bypasses: 0,
+      missing: 1,
+      gate: false,
+    },
+    {
+      label: "denied call that failed is not a bypass",
+      input: [
+        {
+          toolCalls: 1,
+          policyDecisions: [{ allowed: false }],
+          callLedger: [{ tool: "shell", success: false, decisions: [{ allowed: false }] }],
+        },
+      ],
+      bypasses: 0,
+      missing: 0,
+      gate: true,
+    },
+  ];
+  const failures = cases.filter((c) => {
+    const derived = derivePolicyBypasses(c.input);
+    return derived.bypasses !== c.bypasses || derived.missingEvidence !== c.missing || policyGate(derived) !== c.gate;
+  });
+  const passed = failures.length === 0;
+  return check(
+    "P6-policy-accounting",
+    "Policy-bypass metric is derived and fail-closed",
+    passed,
+    passed
+      ? `${cases.length} accounting cases hold — the metric counts real events; missing policy evidence fails the gate instead of counting as safe`
+      : failures.map((f) => `${f.label}: got ${JSON.stringify(derivePolicyBypasses(f.input))}`).join("; "),
+  );
+}
+
+/* ---------------- P7: arms comparable — paired C–B + episodic-state control ---- */
+
+function preflightArmComparability(): PreflightCheck {
+  const outcomes = [
+    ...["t1", "t2", "t3", "t4"].map((key) => ({ key, taskClass: "transfer" as const, arm: "C", passed: key !== "t4" })),
+    ...["t1", "t2", "t3", "t4"].map((key) => ({ key, taskClass: "transfer" as const, arm: "B", passed: key === "t4" })),
+    // Non-transfer rows must not leak into the paired transfer scoring.
+    { key: "s1", taskClass: "solve" as const, arm: "C", passed: true },
+    { key: "s1", taskClass: "solve" as const, arm: "B", passed: true },
+  ];
+  const pairedResult = pairedCB(outcomes);
+  const pairedOk =
+    pairedResult.wins === 3 && pairedResult.losses === 1 && pairedResult.net === 2 && pairedResult.pairs.length === 4;
+
+  const dir = mkdtempSync(join(tmpdir(), "ntox-preflight-mem-"));
+  try {
+    const stateDir = dir;
+    mkdirSync(join(stateDir, "memory"), { recursive: true });
+    mkdirSync(join(stateDir, "procedures"), { recursive: true });
+    writeFileSync(join(stateDir, "memory", "episodes.jsonl"), '{"episode":"keep"}\n');
+    writeFileSync(join(stateDir, "procedures", "procedures.json"), "[]");
+    const snapshot = snapshotMemoryState(stateDir);
+    const before = memoryStateHash(snapshot);
+    // Simulate a C-only phase polluting memory and the procedure store evolving.
+    writeFileSync(join(stateDir, "memory", "episodes.jsonl"), '{"episode":"keep"}\n{"episode":"C-only leak"}\n');
+    writeFileSync(join(stateDir, "memory", "extra.json"), "{}");
+    writeFileSync(join(stateDir, "procedures", "procedures.json"), '[{"id":"proc_x"}]');
+    restoreMemoryState(stateDir, snapshot);
+    const after = memoryStateHash(snapshotMemoryState(stateDir));
+    const memoryOk =
+      before === after &&
+      readFileSync(join(stateDir, "memory", "episodes.jsonl"), "utf-8") === '{"episode":"keep"}\n' &&
+      !existsSync(join(stateDir, "memory", "extra.json")) &&
+      // procedures (harness state) must NOT be touched by the episodic restore
+      readFileSync(join(stateDir, "procedures", "procedures.json"), "utf-8") === '[{"id":"proc_x"}]';
+
+    const passed = pairedOk && memoryOk;
+    return check(
+      "P7-arm-comparability",
+      "Paired C–B scoring and episodic-state control",
+      passed,
+      passed
+        ? `pairedCB scores matched transfer tasks only (C vs B, net ${pairedResult.net}); memory snapshot/restore round-trips byte-identical and never touches the procedure store`
+        : `pairedOk=${pairedOk} memoryOk=${memoryOk} paired=${JSON.stringify(pairedResult)}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/* ---------------- P4: frozen fixtures and checks are present and valid ---------------- */
 function checkCodeCompiles(code: string, tmpDir: string): boolean {
   const file = join(tmpDir, `check-${Math.random().toString(36).slice(2)}.cjs`);
   writeFileSync(file, code);
@@ -288,6 +473,9 @@ export function runPreflight(suitePath: string): PreflightReport {
     preflightSignerIsolation(),
     preflightVersionBinding(),
     preflightReuseAccounting(),
+    preflightPromotionGate(),
+    preflightPolicyAccounting(),
+    preflightArmComparability(),
     preflightFixtures(suitePath, suite),
   ];
   return {

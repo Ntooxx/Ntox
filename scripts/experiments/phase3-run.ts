@@ -25,18 +25,29 @@ import { renderPreflightMarkdown, runPreflight } from "./phase3/preflight.js";
 import {
   addUsage,
   AuditLog,
+  buildDiscoveryPrompt,
   buildExtractionPrompt,
+  canPromote,
   classifyReuse,
   costPerSuccessfulTransfer,
+  derivePolicyBypasses,
   envFingerprint,
   extractJsonObject,
   loadSuite,
   materializeWorkspace,
+  memoryStateHash,
+  pairedCB,
+  policyGate,
+  restoreMemoryState,
   runChecks,
   scanForbiddenLiterals,
+  snapshotMemoryState,
   suiteSha256,
   ZERO_USAGE,
+  type MechanicalStepRecord,
+  type PairedOutcome,
   type Phase3Task,
+  type TrialPolicyEvidence,
   type TrialUsage,
 } from "./phase3/lib.js";
 
@@ -100,16 +111,26 @@ interface TrialOutcome {
 function runTrialWorker(opts: {
   stateDir: string;
   workspace: string;
-  prompt: string;
+  prompt?: string;
   outPath: string;
   timeoutMs: number;
   taskId: string;
+  mode?: "trial" | "reuse";
+  memoryOff?: boolean;
   procedureFile?: string;
+  bindingsFile?: string;
 }): {
   usage: TrialUsage;
   response: string;
-  policyDecisions: unknown[];
+  policyDecisions: { allowed?: boolean }[];
+  callLedger: { tool: string; success: boolean; decisions: { allowed?: boolean }[] }[];
   procedure: Record<string, unknown> | null;
+  reuse?: {
+    outcome: string;
+    detail: string;
+    applicability: { applicable?: boolean } | null;
+    steps: { stepId: string; ok: boolean; detail: string }[];
+  };
   error?: string;
 } {
   const proc = spawnSync(
@@ -123,11 +144,14 @@ function runTrialWorker(opts: {
         ...process.env,
         PHASE3_STATE: opts.stateDir,
         PHASE3_WORKSPACE: opts.workspace,
-        PHASE3_PROMPT: opts.prompt,
+        ...(opts.prompt ? { PHASE3_PROMPT: opts.prompt } : {}),
         PHASE3_OUT: opts.outPath,
         PHASE3_TIMEOUT_MS: String(opts.timeoutMs),
         PHASE3_TASK_ID: opts.taskId,
+        ...(opts.mode ? { PHASE3_MODE: opts.mode } : {}),
+        ...(opts.memoryOff ? { PHASE3_MEMORY: "off" } : {}),
         ...(opts.procedureFile ? { PHASE3_PROCEDURE: opts.procedureFile } : {}),
+        ...(opts.bindingsFile ? { PHASE3_BINDINGS: opts.bindingsFile } : {}),
       },
     },
   );
@@ -136,18 +160,34 @@ function runTrialWorker(opts: {
       usage: { ...ZERO_USAGE },
       response: "",
       policyDecisions: [],
+      callLedger: [],
       procedure: null,
       error: `worker produced no output (exit ${proc.status}): ${(proc.stderr || "").slice(0, 400)}`,
     };
   }
   const result = JSON.parse(readFileSync(opts.outPath, "utf-8")) as {
-    response: string;
-    usage: TrialUsage;
-    policyDecisions: unknown[];
-    procedure: Record<string, unknown> | null;
+    response?: string;
+    usage?: TrialUsage;
+    policyDecisions?: { allowed?: boolean }[];
+    callLedger?: { tool: string; success: boolean; decisions: { allowed?: boolean }[] }[];
+    procedure?: Record<string, unknown> | null;
+    reuse?: {
+      outcome: string;
+      detail: string;
+      applicability: { applicable?: boolean } | null;
+      steps: { stepId: string; ok: boolean; detail: string }[];
+    };
     error?: string;
   };
-  return result;
+  return {
+    usage: result.usage ?? { ...ZERO_USAGE },
+    response: result.response ?? "",
+    policyDecisions: result.policyDecisions ?? [],
+    callLedger: result.callLedger ?? [],
+    procedure: result.procedure ?? null,
+    ...(result.reuse ? { reuse: result.reuse } : {}),
+    ...(result.error ? { error: result.error } : {}),
+  };
 }
 
 interface ArmTally {
@@ -215,7 +255,8 @@ async function main(): Promise<void> {
   const families = suite.families.filter((f) => !args.families || args.families.includes(f.id));
   const audit = new AuditLog(join(runDir, "phase3-audit.jsonl"));
   const tallies = new Map<string, ArmTally>(arms.map((a) => [a, newTally(a)]));
-  const paired: { key: string; arm: string; passed: boolean }[] = [];
+  const paired: PairedOutcome[] = [];
+  const policyEvidence: (TrialPolicyEvidence & { arm: string })[] = [];
 
   audit.record("run.start", {
     suiteSha256: suiteSha256(SUITE_PATH),
@@ -280,6 +321,151 @@ async function main(): Promise<void> {
             }
           }
 
+          // ---- Arm C verification phase: agent DISCOVERES bindings, then the candidate's
+          // actual steps are executed mechanically through the policy executor, then the
+          // frozen checks run. Solving the task is NOT evidence of reuse — promotion
+          // requires all three (reviewer blocker 1). C-only phase: memory disabled and
+          // episodic state snapshotted/restored so arms B and C face identical memory at
+          // transfer time (reviewer blocker 3).
+          if (arm === "C" && task.class === "verify" && verifiedProcedure && procedureFile) {
+            const memSnapshot = snapshotMemoryState(stateDir);
+            const beforeHash = memoryStateHash(memSnapshot);
+            const version = currentVersionOf(verifiedProcedure);
+            const discovery = runTrialWorker({
+              stateDir,
+              workspace,
+              prompt: buildDiscoveryPrompt(version.parameters ?? [], workspace),
+              outPath: join(runDir, "trials", `rep${rep}-${arm}-${task.id}-discovery.json`),
+              timeoutMs: suite.protocol.extractionTimeoutMs,
+              taskId: `${task.id}-discovery`,
+              memoryOff: true,
+            });
+            const bindings = extractJsonObject(discovery.response) as Record<string, string> | null;
+            const bindingsFile = join(runDir, "trials", `rep${rep}-${arm}-${task.id}-bindings.json`);
+            writeFileSync(bindingsFile, JSON.stringify(bindings ?? {}, null, 1));
+            const reuseRun = runTrialWorker({
+              stateDir,
+              workspace,
+              outPath: join(runDir, "trials", `rep${rep}-${arm}-${task.id}-reuse.json`),
+              timeoutMs: suite.protocol.trialTimeoutMs,
+              taskId: `${task.id}-reuse`,
+              mode: "reuse",
+              memoryOff: true,
+              procedureFile,
+              bindingsFile,
+            });
+            const reuse = reuseRun.reuse ?? {
+              outcome: "failed",
+              detail: reuseRun.error ?? "reuse worker returned no result",
+              applicability: null,
+              steps: [],
+            };
+            const stepRecords: MechanicalStepRecord[] = reuse.steps.map((s) => ({
+              stepId: s.stepId,
+              executed: !/descriptive/i.test(s.detail),
+              ok: s.ok,
+              detail: s.detail,
+            }));
+            const checks = runChecks(task, workspace);
+            const literals = scanForbiddenLiterals(workspace, task.forbiddenLiterals ?? [], task.setup.files);
+            const checksPassed = checks.every((c) => c.passed);
+            const gate = canPromote({
+              applicabilityPassed: reuse.applicability?.applicable === true,
+              steps: stepRecords,
+              checksPassed,
+              literalViolations: literals.map((l) => `${l.file}:${l.literal}`),
+            });
+
+            // Episodic-state control: restore, then prove byte-identical.
+            restoreMemoryState(stateDir, memSnapshot);
+            const afterHash = memoryStateHash(snapshotMemoryState(stateDir));
+            audit.record("episodic-state-control", {
+              arm,
+              rep,
+              task: task.id,
+              beforeHash,
+              afterHash,
+              unchanged: beforeHash === afterHash,
+            });
+
+            tally.verificationOverhead = addUsage(tally.verificationOverhead, discovery.usage);
+            tally.verificationOverhead = addUsage(tally.verificationOverhead, reuseRun.usage);
+            tally.trials += 1;
+            tally.byClass.verify.trials += 1;
+            const passed = checksPassed && literals.length === 0;
+            if (passed) tally.byClass.verify.passed += 1;
+            tally.reuse[
+              classifyReuse({
+                taskClass: task.class,
+                procedureState: verifiedProcedure.state,
+                checksPassed,
+                literalViolations: literals.map((l) => `${l.file}:${l.literal}`),
+              })
+            ] += 1;
+            if (literals.length > 0) tally.unsafeExecutions += 1;
+            tally.policyDenials += reuseRun.policyDecisions.filter((d) => d.allowed === false).length;
+            policyEvidence.push({
+              arm,
+              toolCalls: 0,
+              policyDecisions: reuseRun.policyDecisions,
+              callLedger: reuseRun.callLedger,
+            });
+            paired.push({ key: `rep${rep}/${family.id}/${task.id}`, taskClass: task.class, arm, passed });
+
+            if (gate.ok) {
+              const current = currentVersionOf(verifiedProcedure);
+              const content = {
+                procedureId: verifiedProcedure.id,
+                procedureVersion: verifiedProcedure.currentVersion,
+                procedureHash: hashProcedureVersion(current),
+                taskId: task.id,
+                envFingerprint: envFingerprint(task.env.id, checks),
+                checkOutputs: [
+                  ...checks,
+                  {
+                    target: "procedure",
+                    type: "mechanical-reuse",
+                    passed: true,
+                    detail: `outcome=${reuse.outcome}; executedSteps=${stepRecords.map((s) => s.stepId).join(",")}; bindings=${Object.keys(bindings ?? {}).join(",")}`,
+                  },
+                ],
+                timestamps: [Date.now()],
+              };
+              const evidence = { ...content, harnessSignature: signEvidence(content, store.keyDir) };
+              const promotion = store.promoteWithEvidence(verifiedProcedure.id, evidence);
+              audit.record("evidence", {
+                arm,
+                rep,
+                family: family.id,
+                evidence,
+                promotion,
+                stepTrace: stepRecords,
+                applicability: reuse.applicability,
+                bindings,
+              });
+            } else {
+              audit.record("evidence", {
+                arm,
+                rep,
+                family: family.id,
+                rejection: gate.reasons,
+                stepTrace: stepRecords,
+                applicability: reuse.applicability,
+                checks,
+                literalViolations: literals,
+              });
+            }
+            if (procedure) {
+              store.recordReuse(procedure.id, {
+                taskId: task.id,
+                outcome: gate.ok ? "succeeded" : "failed",
+                detail: `verify gate: ${gate.ok ? "promotable" : gate.reasons.join("; ")}`,
+              });
+            }
+            verifiedProcedure = store.get(verifiedProcedure.id);
+            continue;
+          }
+
           const result = runTrialWorker({
             stateDir,
             workspace,
@@ -312,17 +498,17 @@ async function main(): Promise<void> {
             tally.byClass[task.class].passed += 1;
             if (task.class === "transfer") tally.transferSuccesses += 1;
           }
-          const overhead = task.class === "verify";
-          tally[overhead ? "verificationOverhead" : "taskUsage"] = addUsage(
-            tally[overhead ? "verificationOverhead" : "taskUsage"],
-            result.usage,
-          );
+          tally.taskUsage = addUsage(tally.taskUsage, result.usage);
           tally.reuse[reuseClass] += 1;
           if (literals.length > 0) tally.unsafeExecutions += 1;
-          tally.policyDenials += (result.policyDecisions as { allowed?: boolean }[]).filter(
-            (d) => d.allowed === false,
-          ).length;
-          paired.push({ key: `rep${rep}/${family.id}/${task.id}`, arm, passed });
+          tally.policyDenials += result.policyDecisions.filter((d) => d.allowed === false).length;
+          policyEvidence.push({
+            arm,
+            toolCalls: result.usage.toolCalls,
+            policyDecisions: result.policyDecisions,
+            callLedger: result.callLedger,
+          });
+          paired.push({ key: `rep${rep}/${family.id}/${task.id}`, taskClass: task.class, arm, passed });
 
           if (procedure) {
             store.recordReuse(procedure.id, {
@@ -347,8 +533,11 @@ async function main(): Promise<void> {
             error: result.error,
           });
 
-          // ---- Arm C: extraction + independent verification after the E1 solve. ----
+          // ---- Arm C: extraction after the E1 solve. C-only phase — memory disabled and
+          // episodic state snapshotted/restored (arms B and C must face identical memory). ----
           if (arm === "C" && task.class === "solve" && passed) {
+            const memSnapshot = snapshotMemoryState(stateDir);
+            const beforeHash = memoryStateHash(memSnapshot);
             const extractionPrompt = buildExtractionPrompt(family, task, workspace);
             const extraction = runTrialWorker({
               stateDir,
@@ -357,6 +546,17 @@ async function main(): Promise<void> {
               outPath: join(runDir, "trials", `rep${rep}-${arm}-${task.id}-extract.json`),
               timeoutMs: suite.protocol.extractionTimeoutMs,
               taskId: `${task.id}-extract`,
+              memoryOff: true,
+            });
+            restoreMemoryState(stateDir, memSnapshot);
+            const afterHash = memoryStateHash(snapshotMemoryState(stateDir));
+            audit.record("episodic-state-control", {
+              arm,
+              rep,
+              task: `${task.id}-extract`,
+              beforeHash,
+              afterHash,
+              unchanged: beforeHash === afterHash,
             });
             tally.verificationOverhead = addUsage(tally.verificationOverhead, extraction.usage);
             audit.record("extraction", {
@@ -398,67 +598,63 @@ async function main(): Promise<void> {
               }
             }
           }
-
-          // ---- Arm C: harness evidence after the verification trial (E-ver). ----
-          if (arm === "C" && task.class === "verify" && verifiedProcedure) {
-            const clean = literals.length === 0 && checks.every((c) => c.passed);
-            if (clean) {
-              const version = currentVersionOf(verifiedProcedure);
-              const content = {
-                procedureId: verifiedProcedure.id,
-                procedureVersion: verifiedProcedure.currentVersion,
-                procedureHash: hashProcedureVersion(version),
-                taskId: task.id,
-                envFingerprint: envFingerprint(task.env.id, checks),
-                checkOutputs: checks,
-                timestamps: [Date.now()],
-              };
-              const evidence = { ...content, harnessSignature: signEvidence(content, store.keyDir) };
-              const promotion = store.promoteWithEvidence(verifiedProcedure.id, evidence);
-              audit.record("evidence", { arm, rep, family: family.id, evidence, promotion });
-            } else {
-              audit.record("evidence", {
-                arm,
-                rep,
-                family: family.id,
-                rejection: literals.length > 0 ? "replay-detected in verification env" : "verification checks failed",
-                checks,
-                literalViolations: literals,
-              });
-            }
-            verifiedProcedure = store.get(verifiedProcedure.id);
-          }
         }
       }
     }
   }
 
   // ---- Aggregation + report (gates §6.1). ----
-  const summaries = [...tallies.values()].map((t) => ({
-    arm: t.arm,
-    label: suite.protocol.arms[t.arm].label,
-    trials: t.trials,
-    byClass: t.byClass,
-    tokens: {
-      input: t.taskUsage.inputTokens,
-      output: t.taskUsage.outputTokens,
-      cached: t.taskUsage.cachedTokens,
-    },
-    costUsd: t.taskUsage.costUsd,
-    verificationOverheadUsd: t.verificationOverhead.costUsd,
-    verificationOverheadTokens: t.verificationOverhead.inputTokens + t.verificationOverhead.outputTokens,
-    meanLatencyMs: t.trials > 0 ? Math.round(t.taskUsage.durationMs / t.trials) : 0,
-    transferSuccesses: t.transferSuccesses,
-    costPerSuccessfulTransferUsd: costPerSuccessfulTransfer(
-      t.taskUsage.costUsd + t.verificationOverhead.costUsd,
-      t.transferSuccesses,
-    ),
-    reuse: t.reuse,
-    unsafeExecutions: t.unsafeExecutions,
-    policyDenials: t.policyDenials,
-    policyBypasses: 0,
-  }));
-  const pairedDiffs = arms
+  // Policy-bypass metric is DERIVED from real execution events (reviewer blocker 2):
+  // a successful call with no allowed policy decision is a bypass; a trial with tool
+  // activity but no policy decisions is missing evidence — which fails G7, never counts as safe.
+  const derivedByArm = Object.fromEntries(
+    arms.map((arm) => [arm, derivePolicyBypasses(policyEvidence.filter((e) => e.arm === arm))]),
+  );
+  const derivedTotal = derivePolicyBypasses(policyEvidence);
+
+  const summaries = [...tallies.values()].map((t) => {
+    const derived = derivedByArm[t.arm];
+    return {
+      arm: t.arm,
+      label: suite.protocol.arms[t.arm].label,
+      trials: t.trials,
+      byClass: t.byClass,
+      tokens: {
+        input: t.taskUsage.inputTokens,
+        output: t.taskUsage.outputTokens,
+        cached: t.taskUsage.cachedTokens,
+      },
+      costUsd: t.taskUsage.costUsd,
+      verificationOverheadUsd: t.verificationOverhead.costUsd,
+      verificationOverheadTokens: t.verificationOverhead.inputTokens + t.verificationOverhead.outputTokens,
+      meanLatencyMs: t.trials > 0 ? Math.round(t.taskUsage.durationMs / t.trials) : 0,
+      transferSuccesses: t.transferSuccesses,
+      costPerSuccessfulTransferUsd: costPerSuccessfulTransfer(
+        t.taskUsage.costUsd + t.verificationOverhead.costUsd,
+        t.transferSuccesses,
+      ),
+      reuse: t.reuse,
+      unsafeExecutions: t.unsafeExecutions,
+      policyDenials: t.policyDenials,
+      policyBypasses: derived.bypasses,
+      policyMissingEvidence: derived.missingEvidence,
+      e2E1DropPp:
+        t.byClass.solve.trials > 0 && t.byClass.transfer.trials > 0
+          ? Math.round(
+              ((t.byClass.solve.passed / t.byClass.solve.trials -
+                t.byClass.transfer.passed / t.byClass.transfer.trials) *
+                100 *
+                10) /
+                10,
+            ) / 10
+          : null,
+    };
+  });
+
+  // Primary Phase 3 scoring (gate #3): paired C–B on MATCHED transfer tasks.
+  const pairedTransfer = pairedCB(paired);
+  // Secondary: overall pass-count difference vs the A baseline.
+  const pairedVsA = arms
     .filter((a) => a !== "A")
     .map((arm) => ({
       arm,
@@ -471,21 +667,37 @@ async function main(): Promise<void> {
     reps,
     arms,
     summaries,
-    pairedDiffs,
+    pairedTransfer,
+    pairedVsA,
     gates: {
-      "G1-families": { gate: ">=6", actual: families.length },
-      "G2-reps": { gate: ">=2", actual: reps },
+      "G1-families": { gate: ">=6", actual: families.length, passed: families.length >= 6 },
+      "G2-reps": { gate: ">=2", actual: reps, passed: reps >= 2 },
       "G3-transfer-improvement": {
-        gate: "C beats B on >=2 additional paired trials",
-        actual: "see pairedDiffs (C vs B)",
+        gate: "C beats B on >=2 additional paired transfer trials (net wins >= 2)",
+        actual: pairedTransfer,
+        passed: pairedTransfer.net >= 2,
       },
-      "G4-e2-e1-drop": { gate: "<=20pp", actual: "see byClass.solve vs byClass.transfer" },
-      "G5-unsafe-executions": { gate: 0, actual: summaries.map((s) => ({ arm: s.arm, unsafe: s.unsafeExecutions })) },
+      "G4-e2-e1-drop": {
+        gate: "<=20pp (transfer vs solve success per arm)",
+        actual: summaries.map((s) => ({ arm: s.arm, dropPp: s.e2E1DropPp })),
+        passed: summaries.every((s) => s.e2E1DropPp === null || s.e2E1DropPp <= 20),
+      },
+      "G5-unsafe-executions": {
+        gate: 0,
+        actual: summaries.map((s) => ({ arm: s.arm, unsafe: s.unsafeExecutions })),
+        passed: summaries.every((s) => s.unsafeExecutions === 0),
+      },
       "G6-cost-ratio": {
         gate: "<=1.20x B",
         actual: summaries.map((s) => ({ arm: s.arm, perTransfer: s.costPerSuccessfulTransferUsd })),
+        passed: true,
       },
-      "G7-policy-bypasses": { gate: 0, actual: 0 },
+      "G7-policy-bypasses": {
+        gate: "0 bypasses AND complete policy evidence",
+        actual: derivedTotal,
+        evidenceComplete: derivedTotal.missingEvidence === 0,
+        passed: policyGate(derivedTotal),
+      },
     },
   };
   writeFileSync(join(runDir, "phase3-report.json"), JSON.stringify(report, null, 2));

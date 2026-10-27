@@ -6,7 +6,16 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join, relative } from "node:path";
 
 export type TaskClass = "solve" | "verify" | "transfer" | "decoy";
@@ -215,16 +224,175 @@ export function buildExtractionPrompt(family: Phase3Family, task: Phase3Task, wo
     `Return a single JSON object and nothing else (no markdown fences, no prose) with exactly these keys:`,
     `- "name": short procedure name`,
     `- "description": one sentence`,
-    `- "steps": array of {id, description, tool?, args?} — mechanical where possible (tool "shell" or "write" with args)`,
+    `- "steps": array of {id, description, tool, args} — EVERY step must be mechanical and executable as-is:`,
+    `  tool "shell" (args: {command}) or "write" (args: {path, content}). No descriptive steps.`,
     `- "prerequisites": array of {id, description, kind: "command"|"path-exists"|"file-contains", ...}`,
     `- "scope": {applies: [...], doesNotApply: [...]}`,
     `- "parameters": array of {name, description, learnedValue} — one per environment-specific value you used`,
     `Rules:`,
     `- Every environment-specific value must appear in step args as a {{name}} placeholder.`,
     `- learnedValue must be the exact value used in THIS environment (${JSON.stringify(task.env.values)}).`,
+    `- Executing the steps in order with correct bindings must fully produce the task's output artifact.`,
     `- descriptions must tell a future run what to DISCOVER in its own environment, not what to copy.`,
     `- Parameters must cover: ${family.parameters.join(", ") || "(none declared)"}.`,
   ].join("\n");
+}
+
+/** Discovery prompt: fresh-environment values for the procedure's declared parameters. */
+export function buildDiscoveryPrompt(parameters: { name: string; description: string }[], workspace: string): string {
+  return [
+    `Work in the directory ${workspace}. A procedure needs current-environment values for these parameters:`,
+    ...parameters.map((p) => `- {{${p.name}}}: ${p.description}`),
+    `Discover each value IN THIS WORKSPACE (never assume values from any other environment).`,
+    `Return a single JSON object mapping each parameter name to its value here, and nothing else.`,
+  ].join("\n");
+}
+
+/* ---------------- Promotion gate (reviewer blocker 1) ----------------
+ * Solving the verification task is NOT evidence of reuse. Promotion requires:
+ * (a) successful applicability checks, (b) a recorded execution of the candidate's
+ * ACTUAL steps (every step mechanically executed through the policy executor), and
+ * (c) passing independent output verification with zero replay literals. */
+
+export interface MechanicalStepRecord {
+  stepId: string;
+  executed: boolean;
+  ok: boolean;
+  detail: string;
+}
+
+export interface PromotionConditions {
+  applicabilityPassed: boolean;
+  steps: MechanicalStepRecord[];
+  checksPassed: boolean;
+  literalViolations: string[];
+}
+
+export function canPromote(c: PromotionConditions): { ok: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+  if (!c.applicabilityPassed) reasons.push("applicability checks did not pass");
+  if (c.steps.length === 0) reasons.push("no recorded step execution");
+  for (const step of c.steps) {
+    if (!step.executed || /descriptive/i.test(step.detail)) {
+      reasons.push(`step ${step.stepId} was not mechanically executed`);
+    } else if (!step.ok) {
+      reasons.push(`step ${step.stepId} failed`);
+    }
+  }
+  if (!c.checksPassed) reasons.push("independent output checks failed");
+  if (c.literalViolations.length > 0) {
+    reasons.push(`replay literals in artifacts: ${c.literalViolations.join(", ")}`);
+  }
+  return { ok: reasons.length === 0, reasons };
+}
+
+/* ---------------- Policy-bypass accounting (reviewer blocker 2) ----------------
+ * Derived from real execution events, never hardcoded. Missing policy evidence fails
+ * the gate — an unevidenced call is never counted as safe. */
+
+export interface PolicyCallEvidence {
+  tool: string;
+  success: boolean;
+  decisions: { allowed?: boolean }[];
+}
+
+export interface TrialPolicyEvidence {
+  toolCalls: number;
+  policyDecisions: { allowed?: boolean }[];
+  /** Every executor call (applicability probe, mechanical step) with its policy decisions. */
+  callLedger: PolicyCallEvidence[];
+}
+
+export function derivePolicyBypasses(trials: TrialPolicyEvidence[]): { bypasses: number; missingEvidence: number } {
+  let bypasses = 0;
+  let missingEvidence = 0;
+  for (const trial of trials) {
+    if (trial.toolCalls > 0 && trial.policyDecisions.length === 0) missingEvidence += 1;
+    for (const call of trial.callLedger) {
+      if (!call.success) continue;
+      if (call.decisions.length === 0) {
+        missingEvidence += 1;
+      } else if (!call.decisions.some((d) => d.allowed === true)) {
+        bypasses += 1; // executed successfully with zero allowed policy decisions
+      }
+    }
+  }
+  return { bypasses, missingEvidence };
+}
+
+export function policyGate(derived: { bypasses: number; missingEvidence: number }): boolean {
+  return derived.bypasses === 0 && derived.missingEvidence === 0;
+}
+
+/* ---------------- Paired C–B scoring (reviewer blocker 3) ---------------- */
+
+export interface PairedOutcome {
+  key: string;
+  taskClass: TaskClass;
+  arm: string;
+  passed: boolean;
+}
+
+export function pairedCB(outcomes: PairedOutcome[]): {
+  pairs: { key: string; c: boolean; b: boolean; result: "win" | "loss" | "tie" }[];
+  wins: number;
+  losses: number;
+  ties: number;
+  net: number;
+} {
+  const byKey = new Map<string, Record<string, boolean>>();
+  for (const outcome of outcomes.filter((o) => o.taskClass === "transfer")) {
+    const row = byKey.get(outcome.key) ?? {};
+    row[outcome.arm] = outcome.passed;
+    byKey.set(outcome.key, row);
+  }
+  const pairs = [...byKey.entries()]
+    .filter(([, row]) => "C" in row && "B" in row)
+    .map(([key, row]) => ({
+      key,
+      c: row["C"],
+      b: row["B"],
+      result: (row["C"] && !row["B"] ? "win" : !row["C"] && row["B"] ? "loss" : "tie") as "win" | "loss" | "tie",
+    }));
+  const wins = pairs.filter((p) => p.result === "win").length;
+  const losses = pairs.filter((p) => p.result === "loss").length;
+  const ties = pairs.filter((p) => p.result === "tie").length;
+  return { pairs, wins, losses, ties, net: wins - losses };
+}
+
+/* ---------------- Episodic-state control (reviewer blocker 3) ----------------
+ * C-only phases (extraction, discovery, mechanical reuse) must leave the episodic
+ * state byte-identical so arm B and C face the same memory at transfer time. */
+
+export function snapshotMemoryState(stateDir: string): Record<string, string> {
+  const memoryDir = join(stateDir, "memory");
+  const snapshot: Record<string, string> = {};
+  const walk = (dir: string, prefix: string): void => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(full, rel);
+      else snapshot[rel] = readFileSync(full, "utf-8");
+    }
+  };
+  walk(memoryDir, "");
+  return snapshot;
+}
+
+export function restoreMemoryState(stateDir: string, snapshot: Record<string, string>): void {
+  const memoryDir = join(stateDir, "memory");
+  rmSync(memoryDir, { recursive: true, force: true });
+  for (const [rel, content] of Object.entries(snapshot)) {
+    const target = join(memoryDir, ...rel.split("/"));
+    mkdirSync(join(target, ".."), { recursive: true });
+    writeFileSync(target, content);
+  }
+}
+
+export function memoryStateHash(snapshot: Record<string, string>): string {
+  const canonical = JSON.stringify(Object.fromEntries(Object.entries(snapshot).sort()));
+  return `mem-${createHash("sha256").update(canonical).digest("hex").slice(0, 16)}`;
 }
 
 /** Pull the first JSON object out of an LLM response (extraction output). */
