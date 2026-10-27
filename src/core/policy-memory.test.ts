@@ -8,7 +8,8 @@
 import { describe, it, expect, afterEach, beforeAll } from "vitest";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync, rmdirSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep, basename } from "node:path";
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { Tool, WorkspaceProfile } from "../types/index.js";
 import { createPolicyRuntime, enforceToolPolicy } from "./policy.js";
@@ -37,25 +38,40 @@ function tempRoot(): string {
 }
 
 /**
- * Safety guard: proves the captured NTOX_DIR is a temporary directory owned by the test
- * run BEFORE any destructive cleanup. In an ordinary environment (no test-setup
- * redirect), NTOX_DIR resolves to the real ~/.ntox — every destructive path in this file
- * must throw here instead of deleting user configuration, credentials, or memories.
+ * Safety guard: proves the captured NTOX_DIR is a temporary directory owned by THIS test
+ * run BEFORE any destructive cleanup. Requirements (all must hold):
+ *  1. strict descendant of the system temp directory — never temp itself;
+ *  2. mkdtemp prefix created by the test setup ("ntox-test-");
+ *  3. explicit ownership marker file written by src/core/test-setup.ts;
+ *  4. never the real ~/.ntox.
+ * In an ordinary environment (no test-setup redirect), every destructive path in this
+ * file must throw here instead of deleting user configuration, credentials, or memories —
+ * and an arbitrary directory under temp (temp root, unrelated dirs, prefix spoofs without
+ * a marker) is equally rejected.
  */
-function ownedTempNtoxDir(): string {
+const TEST_MARKER = ".ntox-test-owned";
+
+function isOwnedTestDir(dir: string): boolean {
   const norm = (p: string): string => {
     const r = resolve(p);
     return process.platform === "win32" ? r.toLowerCase() : r;
   };
-  const current = norm(NTOX_DIR);
-  const real = norm(join(homedir(), ".ntox"));
+  const current = norm(dir);
   const tmp = norm(tmpdir());
-  const isRealHome = current === real;
-  const isUnderTmp = current === tmp || current.startsWith(tmp + sep);
-  if (isRealHome || !isUnderTmp) {
+  const real = norm(join(homedir(), ".ntox"));
+  if (current === real) return false;
+  if (!current.startsWith(tmp + sep)) return false; // strict descendant; temp root rejected
+  if (!basename(current).toLowerCase().startsWith("ntox-test-")) return false;
+  if (!existsSync(join(dir, TEST_MARKER))) return false; // proof of creation by test-setup
+  return true;
+}
+
+function ownedTempNtoxDir(): string {
+  if (!isOwnedTestDir(NTOX_DIR)) {
     throw new Error(
-      `[safety] refusing destructive operation: NTOX_DIR=${NTOX_DIR} is not an owned temp directory ` +
-        `(real user data lives at ${join(homedir(), ".ntox")}). ` +
+      `[safety] refusing destructive operation: NTOX_DIR=${NTOX_DIR} is not an owned test directory ` +
+        `(needs: strict descendant of ${tmpdir()} with prefix ntox-test- containing ${TEST_MARKER}; ` +
+        `real user data lives at ${join(homedir(), ".ntox")}). ` +
         `This test file requires the isolated vitest setup (setupFiles: test-setup.ts).`,
     );
   }
@@ -328,7 +344,10 @@ describe("memory access — denial overrides workspace roots (MEMORY_DIR inside 
       content: "[]",
     });
     expect(writeResult.success).toBe(false);
-    rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
+    // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+    // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+    ownedTempNtoxDir();
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
   });
 
   it("denies shell cwd, image, and checkpoint access to memory even inside the workspace", async () => {
@@ -354,7 +373,10 @@ describe("memory access — denial overrides workspace roots (MEMORY_DIR inside 
       path: EPISODES_JSONL_PATH,
     });
     expect(cpResult.success).toBe(false);
-    rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
+    // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+    // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+    ownedTempNtoxDir();
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
   });
 
   it("summaries scope: memory.md stays readable but unwritable inside workspace roots", async () => {
@@ -375,7 +397,10 @@ describe("memory access — denial overrides workspace roots (MEMORY_DIR inside 
     const rawRuntime = createPolicyRuntime(overlapped({ memoryAccess: "summaries" }));
     const rawResult = await enforceToolPolicy(tool("read"), rawRuntime).execute({ path: EPISODES_JSONL_PATH });
     expect(rawResult.success).toBe(false);
-    rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
+    // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+    // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+    ownedTempNtoxDir();
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
   });
 
   it("memoryAccess: full authorizes raw memory inside workspace roots (positive control)", async () => {
@@ -383,33 +408,59 @@ describe("memory access — denial overrides workspace roots (MEMORY_DIR inside 
     const runtime = createPolicyRuntime(overlapped({ memoryAccess: "full" }));
     const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: EPISODES_JSONL_PATH });
     expect(result.success).toBe(true);
-    rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
+    // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+    // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+    ownedTempNtoxDir();
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
   });
 });
 
 describe("memory access — test filesystem safety", () => {
-  it("proves the captured NTOX_DIR is an owned temp directory, never the real ~/.ntox", () => {
+  it("proves the captured NTOX_DIR is an owned test directory, never the real ~/.ntox", () => {
     expect(() => ownedTempNtoxDir()).not.toThrow();
+    expect(isOwnedTestDir(NTOX_DIR)).toBe(true);
     const norm = (p: string): string => {
       const r = resolve(p);
       return process.platform === "win32" ? r.toLowerCase() : r;
     };
     expect(norm(NTOX_DIR)).not.toBe(norm(join(homedir(), ".ntox")));
+    expect(NTOX_DIR.startsWith(resolve(tmpdir()) + sep)).toBe(true);
     expect(NTOX_DIR.startsWith(resolve(tmpdir()))).toBe(true);
   });
 
-  it("guard throws (fail closed) when handed the real user directory", () => {
-    const spoofed = join(homedir(), ".ntox");
-    // Simulate an ordinary environment by exercising the guard's comparison logic
-    // against the real path: cleanup must refuse.
+  it("rejects the system temp directory itself (not a strict descendant)", () => {
+    expect(isOwnedTestDir(tmpdir())).toBe(false);
+  });
+
+  it("rejects unrelated directories under temp, including ntox-test- prefix spoofs without the ownership marker", () => {
+    const unrelated = join(tmpdir(), `unrelated-${randomUUID().slice(0, 8)}`);
+    const spoof = join(tmpdir(), `ntox-test-${randomUUID().slice(0, 8)}`);
+    mkdirSync(unrelated, { recursive: true });
+    mkdirSync(spoof, { recursive: true });
+    try {
+      expect(isOwnedTestDir(unrelated)).toBe(false);
+      expect(isOwnedTestDir(spoof)).toBe(false); // right prefix, missing marker -> rejected
+      expect(isOwnedTestDir(join(unrelated, "nested"))).toBe(false);
+    } finally {
+      rmSync(unrelated, { recursive: true, force: true });
+      rmSync(spoof, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects the real user directory by identity", () => {
     const norm = (p: string): string => {
       const r = resolve(p);
       return process.platform === "win32" ? r.toLowerCase() : r;
     };
-    expect(norm(spoofed)).toBe(norm(join(homedir(), ".ntox")));
-    // The guard itself cannot be pointed elsewhere (it reads the captured constant),
-    // so this asserts the exact identity the guard rejects by construction.
-    expect(norm(NTOX_DIR)).not.toBe(norm(spoofed));
+    expect(norm(NTOX_DIR)).not.toBe(norm(join(homedir(), ".ntox")));
+    // The guard cannot be pointed at the real path (it reads the captured constant);
+    // this pins the exact identity the guard rejects by construction.
+    expect(isOwnedTestDir(join(tmpdir(), "..", ".ntox"))).toBe(false);
+  });
+
+  it("guard throws (fail closed) when handed a non-owned directory", () => {
+    expect(isOwnedTestDir(NTOX_DIR)).toBe(true);
+    expect(isOwnedTestDir(tmpdir())).toBe(false);
   });
 });
 
@@ -430,7 +481,10 @@ describe("memory access — exact summary allowlist and unresolvable root", () =
     });
     expect(nestedResult.success).toBe(false);
     expect(nestedRuntime.decisions.at(-1)?.allowed).toBe(false);
-    rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
+    // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+    // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+    ownedTempNtoxDir();
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
   });
 
   it("fails closed when the protected memory root cannot be canonicalized, even inside workspace roots", async () => {
@@ -468,7 +522,10 @@ describe("memory access — exact summary allowlist and unresolvable root", () =
       removeLink(join(b, "toA"));
       rmSync(a, { recursive: true, force: true });
       rmSync(b, { recursive: true, force: true });
-      rmSync(ownedTempNtoxDir(), { recursive: true, force: true });
+      // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+      // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+      ownedTempNtoxDir();
+      rmSync(MEMORY_DIR, { recursive: true, force: true });
     }
   });
 });
