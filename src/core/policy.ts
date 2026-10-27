@@ -1,13 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve, relative, isAbsolute, join } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { resolve, relative, isAbsolute, join, dirname, basename } from "node:path";
 import type { NetworkPolicy, PolicyDecision, Tool, ToolContext, ToolResult, WorkspaceProfile } from "../types/index.js";
 import { checkpointTool } from "../tools/checkpoint.js";
 import { hasInteractiveApproval, requestInteractiveApproval } from "../tools/approval.js";
 import { CONFIG_PATH, NTOX_DIR, MEMORY_DIR, loadConfig, saveConfig } from "./config.js";
-
-/** Experiment isolation: NTOX_ISOLATE_MEMORY=1 removes the implicit always-allowed
- *  MEMORY_DIR read so agents can only reach memory through the retrieval mechanism. */
-const memoryAutoAllowed = (): boolean => process.env.NTOX_ISOLATE_MEMORY !== "1";
 import { MEDIA_DIR } from "./media.js";
 
 export interface PolicyRuntime {
@@ -67,6 +63,7 @@ export function createDefaultProfile(root = process.cwd()): WorkspaceProfile {
     shellPolicy: "approval-required",
     networkPolicy: "browser-allowed",
     autoCheckpoint: true,
+    memoryAccess: "summaries",
   };
 }
 
@@ -96,12 +93,54 @@ export function resetPolicyRuntime(runtime: PolicyRuntime): void {
   runtime.checkpointIds.length = 0;
 }
 
+/**
+ * Canonical form of a path for policy comparison: resolves symlinks/junctions via realpath
+ * (nearest existing ancestor for not-yet-created paths), strips Windows long-path prefixes
+ * and trailing dot/space quirks, and case-folds on win32. Lexical `resolve()` still collapses
+ * `..` traversal before this runs.
+ */
+function canonicalize(p: string): string {
+  let abs = resolve(p);
+  if (process.platform === "win32") {
+    abs = abs.replace(/^\\\\\?\\/, "").replace(/[. ]+$/, "");
+  }
+  try {
+    abs = realpathSync(abs);
+  } catch {
+    try {
+      abs = join(realpathSync(dirname(abs)), basename(abs));
+    } catch {
+      /* keep lexical form */
+    }
+  }
+  if (process.platform === "win32") abs = abs.replace(/^\\\\\?\\/, "").toLowerCase();
+  return abs;
+}
+
 export function isWithinRoot(path: string, roots: string[]): boolean {
-  const abs = resolve(path);
+  const abs = canonicalize(path);
   return roots.some((root) => {
-    const rel = relative(resolve(root), abs);
+    const rel = relative(canonicalize(root), abs);
     return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
   });
+}
+
+/**
+ * Which memory files this profile may touch directly (validated config, never env).
+ * - "deny": nothing in MEMORY_DIR (experiment isolation: config-driven, stricter only)
+ * - "summaries" (default): only memory.md — raw episodic files stay private
+ * - "full": explicit authorization for the whole memory directory
+ * Retrieval (prompt injection) never flows through this check: content-to-model is not
+ * file authority.
+ */
+function isMemoryAllowed(path: string, profile: WorkspaceProfile, op: "read" | "write" | "cwd"): boolean {
+  const scope = profile.memoryAccess ?? "summaries";
+  if (scope === "deny") return false;
+  if (!isWithinRoot(path, [MEMORY_DIR])) return false;
+  if (scope === "full") return true;
+  // "summaries": read-only access to memory.md; raw episodic files stay private,
+  // and nothing may use the memory directory as a working directory.
+  return op === "read" && basename(canonicalize(path)) === "memory.md";
 }
 
 function argPath(args: Record<string, unknown>, key: string, fallback: string): string {
@@ -246,7 +285,7 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
         );
       if (
         !isWithinRoot(path, [runtime.profile.workspaceRoot, ...runtime.profile.writeRoots]) &&
-        !(memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))
+        !isMemoryAllowed(path, runtime.profile, "cwd")
       )
         return deny(
           runtime,
@@ -286,7 +325,7 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
       if (action === "rollback" || action === "create") {
         const scope: "read" | "write" = action === "rollback" ? "write" : "read";
         const roots = action === "rollback" ? runtime.profile.writeRoots : runtime.profile.readRoots;
-        if (args.path && !isWithinRoot(path, roots) && !(memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))) {
+        if (args.path && !isWithinRoot(path, roots) && !isMemoryAllowed(path, runtime.profile, scope)) {
           const grant: PolicyGrant =
             scope === "write" ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
           return deny(runtime, tool, `Checkpoint ${action} outside allowed roots`, path, grant, rootFix(path, scope));
@@ -296,7 +335,7 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
       continue;
     }
     const roots = isWrite ? runtime.profile.writeRoots : runtime.profile.readRoots;
-    if (!isWithinRoot(path, roots) && !(memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))) {
+    if (!isWithinRoot(path, roots) && !isMemoryAllowed(path, runtime.profile, isWrite ? "write" : "read")) {
       const scope: "read" | "write" = isWrite ? "write" : "read";
       const grant: PolicyGrant = isWrite ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
       return deny(runtime, tool, `${tool} path outside allowed roots`, path, grant, rootFix(path, scope));
@@ -368,7 +407,7 @@ function checkImageArg(runtime: PolicyRuntime, args: Record<string, unknown>): P
   if (
     isWithinRoot(path, runtime.profile.readRoots) ||
     isWithinRoot(path, [MEDIA_DIR]) ||
-    (memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))
+    isMemoryAllowed(path, runtime.profile, "read")
   ) {
     record(runtime, "image", true, "image path allowed", path);
     args.image = path;

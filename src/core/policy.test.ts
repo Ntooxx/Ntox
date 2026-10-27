@@ -117,35 +117,44 @@ describe("policy", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("allows write tool calls inside the memory directory even when roots exclude it", async () => {
+  it("denies raw memory writes by default; allows them only with explicit memoryAccess: full", async () => {
     const root = tempRoot();
     const memoryFile = join(MEMORY_DIR, `agent-write-${randomUUID().slice(0, 8)}.json`);
-    const runtime = createPolicyRuntime(profile(root));
     const tool: Tool = {
       name: "write",
       description: "",
       parameters: {},
       execute: async () => ({ success: true }),
     };
-    const result = await enforceToolPolicy(tool, runtime).execute({ path: memoryFile, content: "{}" });
-    expect(result.success).toBe(true);
-    expect(runtime.decisions.at(-1)?.allowed).toBe(true);
+    const denied = createPolicyRuntime(profile(root));
+    const deniedResult = await enforceToolPolicy(tool, denied).execute({ path: memoryFile, content: "{}" });
+    expect(deniedResult.success).toBe(false);
+    expect(denied.decisions.at(-1)?.allowed).toBe(false);
+
+    const authorized = createPolicyRuntime({ ...profile(root), memoryAccess: "full" });
+    const allowedResult = await enforceToolPolicy(tool, authorized).execute({ path: memoryFile, content: "{}" });
+    expect(allowedResult.success).toBe(true);
     rmSync(root, { recursive: true, force: true });
     rmSync(memoryFile, { force: true });
   });
 
-  it("allows read tool calls inside the memory directory even when roots exclude it", async () => {
+  it("denies raw episodic reads by default; allows them only with explicit memoryAccess: full", async () => {
     const root = tempRoot();
     const memoryFile = join(MEMORY_DIR, `agent-read-${randomUUID().slice(0, 8)}.json`);
-    const runtime = createPolicyRuntime(profile(root));
     const tool: Tool = {
       name: "read",
       description: "",
       parameters: {},
       execute: async () => ({ success: true, data: "ok" }),
     };
-    const result = await enforceToolPolicy(tool, runtime).execute({ path: memoryFile });
-    expect(result.success).toBe(true);
+    const denied = createPolicyRuntime(profile(root));
+    const deniedResult = await enforceToolPolicy(tool, denied).execute({ path: memoryFile });
+    expect(deniedResult.success).toBe(false);
+    expect(denied.decisions.at(-1)?.allowed).toBe(false);
+
+    const authorized = createPolicyRuntime({ ...profile(root), memoryAccess: "full" });
+    const allowedResult = await enforceToolPolicy(tool, authorized).execute({ path: memoryFile });
+    expect(allowedResult.success).toBe(true);
     rmSync(root, { recursive: true, force: true });
     rmSync(memoryFile, { force: true });
   });

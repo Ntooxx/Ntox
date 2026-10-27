@@ -110,7 +110,13 @@ for (const cond of CONDS) {
   const dir = join(PHASE2, `state-${cond.name}`);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, "memory"), { recursive: true });
-  const cfg = { ...baseConfig, memoryEnabled: cond.memory, embeddingModel: cond.embeddingModel };
+  // config-driven isolation (validated configuration, never env): profiles deny raw memory access
+  const cfg = {
+    ...baseConfig,
+    memoryEnabled: cond.memory,
+    embeddingModel: cond.embeddingModel,
+    profiles: (baseConfig.profiles ?? []).map((p) => ({ ...p, memoryAccess: "deny" })),
+  };
   writeFileSync(join(dir, "config.json"), JSON.stringify(cfg, null, 2));
   for (const f of ["credentials.json", "credentials.enc.json", "models-cache.json"]) {
     const src = join(homedir(), ".ntox", f);
