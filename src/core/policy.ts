@@ -3,7 +3,11 @@ import { resolve, relative, isAbsolute, join } from "node:path";
 import type { NetworkPolicy, PolicyDecision, Tool, ToolContext, ToolResult, WorkspaceProfile } from "../types/index.js";
 import { checkpointTool } from "../tools/checkpoint.js";
 import { hasInteractiveApproval, requestInteractiveApproval } from "../tools/approval.js";
-import { CONFIG_PATH, NTOX_DIR, loadConfig, saveConfig } from "./config.js";
+import { CONFIG_PATH, NTOX_DIR, MEMORY_DIR, loadConfig, saveConfig } from "./config.js";
+
+/** Experiment isolation: NTOX_ISOLATE_MEMORY=1 removes the implicit always-allowed
+ *  MEMORY_DIR read so agents can only reach memory through the retrieval mechanism. */
+const memoryAutoAllowed = (): boolean => process.env.NTOX_ISOLATE_MEMORY !== "1";
 import { MEDIA_DIR } from "./media.js";
 
 export interface PolicyRuntime {
@@ -240,7 +244,10 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
           { kind: "shell" },
           `Set shellPolicy to "approval-required" for profile ${runtime.profile.id} in ${CONFIG_PATH} to allow it.`,
         );
-      if (!isWithinRoot(path, [runtime.profile.workspaceRoot, ...runtime.profile.writeRoots]))
+      if (
+        !isWithinRoot(path, [runtime.profile.workspaceRoot, ...runtime.profile.writeRoots]) &&
+        !(memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))
+      )
         return deny(
           runtime,
           tool,
@@ -279,8 +286,9 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
       if (action === "rollback" || action === "create") {
         const scope: "read" | "write" = action === "rollback" ? "write" : "read";
         const roots = action === "rollback" ? runtime.profile.writeRoots : runtime.profile.readRoots;
-        if (args.path && !isWithinRoot(path, roots)) {
-          const grant: PolicyGrant = scope === "write" ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
+        if (args.path && !isWithinRoot(path, roots) && !(memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))) {
+          const grant: PolicyGrant =
+            scope === "write" ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
           return deny(runtime, tool, `Checkpoint ${action} outside allowed roots`, path, grant, rootFix(path, scope));
         }
       }
@@ -288,7 +296,7 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
       continue;
     }
     const roots = isWrite ? runtime.profile.writeRoots : runtime.profile.readRoots;
-    if (!isWithinRoot(path, roots)) {
+    if (!isWithinRoot(path, roots) && !(memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))) {
       const scope: "read" | "write" = isWrite ? "write" : "read";
       const grant: PolicyGrant = isWrite ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
       return deny(runtime, tool, `${tool} path outside allowed roots`, path, grant, rootFix(path, scope));
@@ -357,7 +365,11 @@ function checkImageArg(runtime: PolicyRuntime, args: Record<string, unknown>): P
     return null;
   }
   const path = resolve(raw);
-  if (isWithinRoot(path, runtime.profile.readRoots) || isWithinRoot(path, [MEDIA_DIR])) {
+  if (
+    isWithinRoot(path, runtime.profile.readRoots) ||
+    isWithinRoot(path, [MEDIA_DIR]) ||
+    (memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))
+  ) {
     record(runtime, "image", true, "image path allowed", path);
     args.image = path;
     return null;

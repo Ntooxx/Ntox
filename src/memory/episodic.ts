@@ -39,6 +39,55 @@ function includesText(haystack: string, needle: string | undefined): boolean {
   return normalizeText(haystack).includes(normalizeText(needle));
 }
 
+/**
+ * Short, clipped outcome for prompt injection. The full assistantResponse is never injected —
+ * only a sentence-bounded excerpt — because an assistant claim is not automatically verified;
+ * durable memories (confidence/corrections) remain the evidence-backed layer.
+ */
+function clipOutcome(text: string | undefined, summary: string): string | null {
+  if (!text) return null;
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length < 8) return null;
+  if (normalizeText(clean) === normalizeText(summary)) return null;
+  const limit = 240;
+  if (clean.length <= limit) return clean;
+  const cut = clean.slice(0, limit);
+  const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("? "), cut.lastIndexOf("! "));
+  return (stop > 120 ? cut.slice(0, stop + 1) : cut.trimEnd()) + " …";
+}
+
+/** Dedup key: normalized text with workspace paths collapsed, so near-identical episodes
+ * (same task in different temp dirs) count as one fact. */
+function dedupKey(text: string): string {
+  return normalizeText(text.replace(/[A-Za-z]:\\\S+/g, "ws-path").replace(/\/(?:tmp|var\/folders)\/\S+/g, "ws-path"));
+}
+
+let dimWarningEmitted = false;
+function warnDimMismatch(queryDim: number, storedDim: number, count: number): void {
+  if (dimWarningEmitted) return;
+  dimWarningEmitted = true;
+  console.error(
+    `[memory] embedding dimension mismatch: ${count} stored episode(s) are ${storedDim}d vs query ${queryDim}d. ` +
+      `Cosine scores for them are 0 — re-embed the index (one dimension per index) to restore recall.`,
+  );
+}
+
+function dedupTop(
+  list: { episode: Episode; relevance: number }[],
+  max: number,
+): { episode: Episode; relevance: number }[] {
+  const seen = new Set<string>();
+  const out: { episode: Episode; relevance: number }[] = [];
+  for (const item of list) {
+    const key = dedupKey(`${item.episode.summary} ${item.episode.userMessage}`);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 const STOPWORDS = new Set([
   "the",
   "and",
@@ -618,15 +667,32 @@ export class MemoryStore {
     let relevant: { episode: Episode; relevance: number }[];
 
     if (queryEmbedding && queryEmbedding.length > 0) {
+      let dimMismatched = 0;
+      let mismatchedDim = 0;
       const candidates = this.episodes.filter((episode) => {
         if (!episode.embedding || episode.embedding.length === 0) return false;
+        if (episode.embedding.length !== queryEmbedding.length) {
+          dimMismatched += 1;
+          if (mismatchedDim === 0) mismatchedDim = episode.embedding.length;
+        }
         if (queryEmbeddingModel && episode.embeddingModel && episode.embeddingModel !== queryEmbeddingModel) {
           return false;
         }
         return true;
       });
+      if (dimMismatched > 0) warnDimMismatch(queryEmbedding.length, mismatchedDim, dimMismatched);
 
-      if (queryText && queryText.trim().length > 0) {
+      const pureCosine = process.env.NTOX_MEMORY_SCORING === "cosine";
+      if (pureCosine) {
+        // Experimental retrieval backend: rank strictly by cosine similarity.
+        // No BM25 blend and no 0.3 relevance threshold (both dilute strong semantic vectors).
+        relevant = candidates
+          .map((episode) => ({
+            episode,
+            relevance: cosineSimilarity(queryEmbedding, episode.embedding),
+          }))
+          .sort((a, b) => b.relevance - a.relevance);
+      } else if (queryText && queryText.trim().length > 0) {
         const corpus = buildBm25Corpus(
           candidates.map((episode) => ({ id: episode.id, text: `${episode.summary} ${episode.userMessage}` })),
         );
@@ -643,8 +709,7 @@ export class MemoryStore {
             relevance: 0.6 * cos + 0.4 * (maxBm25 > 0 ? raw / maxBm25 : 0),
           }))
           .filter((r) => r.relevance >= 0.3)
-          .sort((a, b) => b.relevance - a.relevance)
-          .slice(0, maxMemories);
+          .sort((a, b) => b.relevance - a.relevance);
       } else {
         relevant = this.retrieve(queryEmbedding, maxMemories, 0.4, queryEmbeddingModel).map((r) => ({
           episode: r.episode,
@@ -652,7 +717,7 @@ export class MemoryStore {
         }));
       }
 
-      if (relevant.length === 0 && queryText) {
+      if (!pureCosine && relevant.length === 0 && queryText) {
         relevant = this.bm25Only(queryText, maxMemories);
       }
     } else if (queryText && queryText.trim().length > 0) {
@@ -672,6 +737,10 @@ export class MemoryStore {
       }));
     }
 
+    // k slots must hold k unique facts: collapse near-identical episodes
+    // (same text modulo workspace paths) before capping.
+    relevant = dedupTop(relevant, maxMemories);
+
     const durable = this.listDurableMemories()
       .filter((memory) => memory.confidence >= 0.4)
       .sort(
@@ -688,7 +757,14 @@ export class MemoryStore {
 
     const episodes = relevant.map<PromptMemoryItem>(({ episode, relevance }) => {
       const date = new Date(episode.timestamp).toISOString().slice(0, 10);
-      return { id: episode.id, kind: "memory", text: `[${date}] ${episode.summary}`, relevance };
+      // Outcome-bearing recall: inject a clipped recorded outcome, never the full response.
+      const outcome = clipOutcome(episode.assistantResponse, episode.summary);
+      return {
+        id: episode.id,
+        kind: "memory",
+        text: outcome ? `[${date}] ${episode.summary} → outcome: ${outcome}` : `[${date}] ${episode.summary}`,
+        relevance,
+      };
     });
 
     return [...durable, ...episodes];
