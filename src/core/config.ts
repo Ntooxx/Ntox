@@ -131,6 +131,7 @@ const ConfigSchema = z.object({
       shellPolicy: z.enum(["disabled", "workspace", "approval-required"]),
       networkPolicy: z.enum(["disabled", "fetch-only", "browser-allowed"]),
       autoCheckpoint: z.boolean(),
+      memoryAccess: z.enum(["deny", "summaries", "full"]).default("summaries"),
     }),
   ),
 });

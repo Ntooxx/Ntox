@@ -36,6 +36,9 @@ export interface WorkspaceProfile {
   shellPolicy: ShellPolicy;
   networkPolicy: NetworkPolicy;
   autoCheckpoint: boolean;
+  /** Direct access to memory files: "summaries" (default, only memory.md) |
+   *  "full" (explicit authorization for raw episodic files) | "deny" (nothing). */
+  memoryAccess?: "deny" | "summaries" | "full";
 }
 
 export interface McpServerEntry {

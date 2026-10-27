@@ -1,13 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve, relative, isAbsolute, join } from "node:path";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { resolve, relative, isAbsolute, join, dirname, basename } from "node:path";
 import type { NetworkPolicy, PolicyDecision, Tool, ToolContext, ToolResult, WorkspaceProfile } from "../types/index.js";
 import { checkpointTool } from "../tools/checkpoint.js";
 import { hasInteractiveApproval, requestInteractiveApproval } from "../tools/approval.js";
 import { CONFIG_PATH, NTOX_DIR, MEMORY_DIR, loadConfig, saveConfig } from "./config.js";
-
-/** Experiment isolation: NTOX_ISOLATE_MEMORY=1 removes the implicit always-allowed
- *  MEMORY_DIR read so agents can only reach memory through the retrieval mechanism. */
-const memoryAutoAllowed = (): boolean => process.env.NTOX_ISOLATE_MEMORY !== "1";
 import { MEDIA_DIR } from "./media.js";
 
 export interface PolicyRuntime {
@@ -67,6 +63,7 @@ export function createDefaultProfile(root = process.cwd()): WorkspaceProfile {
     shellPolicy: "approval-required",
     networkPolicy: "browser-allowed",
     autoCheckpoint: true,
+    memoryAccess: "summaries",
   };
 }
 
@@ -96,12 +93,102 @@ export function resetPolicyRuntime(runtime: PolicyRuntime): void {
   runtime.checkpointIds.length = 0;
 }
 
+/**
+ * Canonical form of a path for policy comparison, fail closed:
+ * - resolves symlinks/junctions via realpath;
+ * - for nonexistent components, walks up to the deepest existing ancestor (ENOENT is safe:
+ *   a missing component cannot be a symlink) and reattaches the missing tail;
+ * - any resolution failure other than ENOENT (EACCES, ELOOP, ENOTDIR, ...) returns null —
+ *   ancestry that cannot be verified must never be trusted;
+ * - strips Windows long-path prefixes and trailing dot/space quirks, case-folds on win32.
+ * Lexical `resolve()` still collapses `..` traversal before this runs.
+ */
+function canonicalize(p: string): string | null {
+  let abs = resolve(p);
+  if (process.platform === "win32") {
+    abs = abs.replace(/^\\\\\?\\/, "").replace(/[. ]+$/, "");
+  }
+  const tail: string[] = [];
+  for (let depth = 0; depth < 64; depth++) {
+    try {
+      const real = realpathSync(abs);
+      if (tail.length > 0) {
+        // Children can only safely be appended below a DIRECTORY (Windows reports
+        // file-as-directory as ENOENT); anything else is unsafe ancestry -> fail closed.
+        try {
+          if (!statSync(real).isDirectory()) return null;
+        } catch {
+          return null;
+        }
+      }
+      const full = tail.length > 0 ? join(real, ...tail) : real;
+      if (process.platform === "win32") return full.replace(/^\\\\\?\\/, "").toLowerCase();
+      return full;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
+      const parent = dirname(abs);
+      if (parent === abs) return null;
+      tail.unshift(basename(abs));
+      abs = parent;
+    }
+  }
+  return null;
+}
+
+function withinCanonical(canonicalPath: string, root: string): boolean {
+  const canonicalRoot = canonicalize(root);
+  if (!canonicalRoot) return false;
+  const rel = relative(canonicalRoot, canonicalPath);
+  return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
+}
+
 export function isWithinRoot(path: string, roots: string[]): boolean {
-  const abs = resolve(path);
-  return roots.some((root) => {
-    const rel = relative(resolve(root), abs);
-    return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
-  });
+  const abs = canonicalize(path);
+  if (!abs) return false; // fail closed: unresolved ancestry is never "within"
+  return roots.some((root) => withinCanonical(abs, root));
+}
+
+type MemoryVerdict = "allow" | "deny" | "outside" | "unresolved";
+
+function memoryDenyReason(verdict: MemoryVerdict, profile: WorkspaceProfile, what: string): string {
+  if (verdict === "unresolved") {
+    return `Unsafe path: ancestry could not be resolved (fail closed) during ${what} check`;
+  }
+  return `Memory access denied for ${what} (memoryAccess=${profile.memoryAccess ?? "summaries"}, profile ${profile.id})`;
+}
+
+function memoryFix(profile: WorkspaceProfile): string | undefined {
+  const scope = profile.memoryAccess ?? "summaries";
+  if (scope === "full") return undefined;
+  return `Set memoryAccess to "full" for profile ${profile.id} in ${CONFIG_PATH} to authorize raw memory access.`;
+}
+
+/**
+ * Deciding layer for paths inside MEMORY_DIR — evaluated BEFORE ordinary roots, so a
+ * memoryAccess denial overrides workspace/read/write permissions even when MEMORY_DIR
+ * sits inside an authorized root (and an authorized memory verdict grants access that
+ * roots alone would not). The summaries allowlist is the ONE exact file
+ * canonical(join(MEMORY_DIR, "memory.md")) — nested files with the same basename do not
+ * qualify. If the protected root itself cannot be canonicalized the verdict is
+ * "unresolved" (fail closed), never "outside". Retrieval (prompt injection) never routes
+ * through this check: content-to-model is not file authority. Environment variables are
+ * never consulted.
+ */
+function memoryVerdict(path: string, profile: WorkspaceProfile, op: "read" | "write" | "cwd"): MemoryVerdict {
+  const canonical = canonicalize(path);
+  if (!canonical) return "unresolved";
+  const canonicalMemory = canonicalize(MEMORY_DIR);
+  if (!canonicalMemory) return "unresolved"; // protected root identity unknown -> fail closed
+  if (!withinCanonical(canonical, canonicalMemory)) return "outside";
+  const scope = profile.memoryAccess ?? "summaries";
+  if (scope === "deny") return "deny";
+  if (scope === "full") return "allow";
+  if (op !== "read") return "deny";
+  // "summaries": read-only access to exactly memory.md; raw episodic files stay private,
+  // and nothing may use the memory directory as a working directory.
+  const summaryFile = canonicalize(join(MEMORY_DIR, "memory.md"));
+  if (!summaryFile) return "unresolved";
+  return canonical === summaryFile ? "allow" : "deny";
 }
 
 function argPath(args: Record<string, unknown>, key: string, fallback: string): string {
@@ -244,10 +331,25 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
           { kind: "shell" },
           `Set shellPolicy to "approval-required" for profile ${runtime.profile.id} in ${CONFIG_PATH} to allow it.`,
         );
+      // Memory verdict decides first: denial overrides workspace roots (memory may live
+      // inside them); shell/process are never path-sandboxed beyond workdir — memory-isolated
+      // trials disable them via config (shellPolicy: "disabled"), stronger containment is
+      // the Docker sandbox's job, not command inspection.
+      const shellMem = memoryVerdict(path, runtime.profile, "cwd");
+      if (shellMem === "deny" || shellMem === "unresolved") {
+        return deny(
+          runtime,
+          tool,
+          memoryDenyReason(shellMem, runtime.profile, "shell working directory"),
+          path,
+          { kind: "roots", read: [path], write: [path] },
+          memoryFix(runtime.profile),
+        );
+      }
       if (
-        !isWithinRoot(path, [runtime.profile.workspaceRoot, ...runtime.profile.writeRoots]) &&
-        !(memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))
-      )
+        shellMem === "outside" &&
+        !isWithinRoot(path, [runtime.profile.workspaceRoot, ...runtime.profile.writeRoots])
+      ) {
         return deny(
           runtime,
           tool,
@@ -256,6 +358,7 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
           { kind: "roots", read: [path], write: [path] },
           rootFix(path, "write"),
         );
+      }
       record(runtime, tool, true, `Shell allowed in workspace`, path);
       args.workdir = path;
       continue;
@@ -286,17 +389,38 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
       if (action === "rollback" || action === "create") {
         const scope: "read" | "write" = action === "rollback" ? "write" : "read";
         const roots = action === "rollback" ? runtime.profile.writeRoots : runtime.profile.readRoots;
-        if (args.path && !isWithinRoot(path, roots) && !(memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))) {
-          const grant: PolicyGrant =
-            scope === "write" ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
-          return deny(runtime, tool, `Checkpoint ${action} outside allowed roots`, path, grant, rootFix(path, scope));
+        if (args.path) {
+          const mem = memoryVerdict(path, runtime.profile, scope);
+          if (mem === "deny" || mem === "unresolved") {
+            const grant: PolicyGrant =
+              scope === "write" ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
+            return deny(
+              runtime,
+              tool,
+              memoryDenyReason(mem, runtime.profile, `checkpoint ${action}`),
+              path,
+              grant,
+              memoryFix(runtime.profile),
+            );
+          }
+          if (mem === "outside" && !isWithinRoot(path, roots)) {
+            const grant: PolicyGrant =
+              scope === "write" ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
+            return deny(runtime, tool, `Checkpoint ${action} outside allowed roots`, path, grant, rootFix(path, scope));
+          }
         }
       }
       record(runtime, tool, true, `Checkpoint allowed`, path);
       continue;
     }
     const roots = isWrite ? runtime.profile.writeRoots : runtime.profile.readRoots;
-    if (!isWithinRoot(path, roots) && !(memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))) {
+    const op: "read" | "write" = isWrite ? "write" : "read";
+    const mem = memoryVerdict(path, runtime.profile, op);
+    if (mem === "deny" || mem === "unresolved") {
+      const grant: PolicyGrant = isWrite ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
+      return deny(runtime, tool, memoryDenyReason(mem, runtime.profile, op), path, grant, memoryFix(runtime.profile));
+    }
+    if (mem === "outside" && !isWithinRoot(path, roots)) {
       const scope: "read" | "write" = isWrite ? "write" : "read";
       const grant: PolicyGrant = isWrite ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
       return deny(runtime, tool, `${tool} path outside allowed roots`, path, grant, rootFix(path, scope));
@@ -365,11 +489,18 @@ function checkImageArg(runtime: PolicyRuntime, args: Record<string, unknown>): P
     return null;
   }
   const path = resolve(raw);
-  if (
-    isWithinRoot(path, runtime.profile.readRoots) ||
-    isWithinRoot(path, [MEDIA_DIR]) ||
-    (memoryAutoAllowed() && isWithinRoot(path, [MEMORY_DIR]))
-  ) {
+  const mem = memoryVerdict(path, runtime.profile, "read");
+  if (mem === "deny" || mem === "unresolved") {
+    return deny(
+      runtime,
+      "image",
+      memoryDenyReason(mem, runtime.profile, "image read"),
+      path,
+      undefined,
+      memoryFix(runtime.profile),
+    );
+  }
+  if (mem === "allow" || isWithinRoot(path, runtime.profile.readRoots) || isWithinRoot(path, [MEDIA_DIR])) {
     record(runtime, "image", true, "image path allowed", path);
     args.image = path;
     return null;

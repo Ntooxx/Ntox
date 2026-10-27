@@ -110,7 +110,15 @@ for (const cond of CONDS) {
   const dir = join(PHASE2, `state-${cond.name}`);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, "memory"), { recursive: true });
-  const cfg = { ...baseConfig, memoryEnabled: cond.memory, embeddingModel: cond.embeddingModel };
+  // config-driven isolation for memory-isolated trials (validated configuration, never env):
+  // profiles deny raw memory access AND disable unrestricted shell/process execution —
+  // tool-policy cannot sandbox arbitrary commands, so trials must not rely on it.
+  const cfg = {
+    ...baseConfig,
+    memoryEnabled: cond.memory,
+    embeddingModel: cond.embeddingModel,
+    profiles: (baseConfig.profiles ?? []).map((p) => ({ ...p, memoryAccess: "deny", shellPolicy: "disabled" })),
+  };
   writeFileSync(join(dir, "config.json"), JSON.stringify(cfg, null, 2));
   for (const f of ["credentials.json", "credentials.enc.json", "models-cache.json"]) {
     const src = join(homedir(), ".ntox", f);
