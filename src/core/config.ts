@@ -16,6 +16,7 @@ import {
   MISTAKES_PATH,
   MODELS_CACHE_PATH,
   NTOX_DIR,
+  PROCEDURES_DIR,
   SKILLS_DIR,
   getBaseDir,
   getMemoryDir,
@@ -42,6 +43,7 @@ export {
   MISTAKES_PATH,
   MODELS_CACHE_PATH,
   NTOX_DIR,
+  PROCEDURES_DIR,
   SKILLS_DIR,
   getBaseDir,
   getMemoryDir,
@@ -69,8 +71,12 @@ const ConfigSchema = z.object({
   temperature: z.number().min(0).max(2),
   systemPrompt: z.string(),
   embeddingModel: z.string().min(1),
+  embeddingDimensions: z.number().int().min(64).max(4096).optional(),
   memoryEnabled: z.boolean(),
   memoryRetrievalCount: z.number().int().min(1).max(100),
+  memoryScoring: z.enum(["cosine", "hybrid"]),
+  /** Phase 3 experimental: verified procedural memory. Production default disabled. */
+  proceduralMemoryEnabled: z.boolean(),
   systemContextBudget: z.number().int().min(200).max(20_000),
   contextCompilerEnabled: z.boolean(),
   predictionLlmEnabled: z.boolean(),
@@ -240,7 +246,7 @@ const DEFAULT_CONFIG: NtoxConfig = {
 
     "## Memory and Profile",
     "You have access to the user's profile (name, expertise, preferences) and past conversation memories.",
-    "A memory file at ~/.ntox/memory/memory.md contains summaries of older conversations — read it when context is relevant.",
+    `A memory file at ${join(MEMORY_DIR, "memory.md")} contains summaries of older conversations — read it when context is relevant.`,
     "Use remembered facts to personalize responses.",
     "When the user shares personal info (name, job, preferences), acknowledge it and the system will save it.",
     "Do NOT repeatedly ask the user who they are if you have their name in the profile context.",
@@ -265,8 +271,17 @@ const DEFAULT_CONFIG: NtoxConfig = {
     "Admit uncertainty. The user trusts you more when you're honest about what you don't know.",
   ].join("\n"),
   embeddingModel: "openai/text-embedding-3-small",
+  embeddingDimensions: undefined,
   memoryEnabled: true,
   memoryRetrievalCount: 20,
+  // Default retrieval scoring: pure cosine. The legacy BM25 hybrid (0.6·cos + 0.4·BM25
+  // with a 0.3 threshold) is available via "hybrid" for A/B comparison; Phase 1 measured
+  // it dropping lexically-disjoint recall to 9.1% against strong semantic vectors.
+  // This value is validated by zod and read by resolveMemoryScoring() — env vars are
+  // intentionally never consulted for scoring mode (see SECURITY.md).
+  memoryScoring: "cosine" as const,
+  // Phase 3 — Verified Procedural Memory: experimental, strictly off by default.
+  proceduralMemoryEnabled: false,
   systemContextBudget: 20000,
   contextCompilerEnabled: true,
   predictionLlmEnabled: true,

@@ -82,6 +82,7 @@ export interface CostUsage {
   inputTokens: number;
   outputTokens: number;
   cost: number;
+  cachedTokens?: number;
 }
 
 export interface ToolCall {
@@ -106,8 +107,17 @@ export interface NtoxConfig {
   temperature: number;
   systemPrompt: string;
   embeddingModel: string;
+  /** Explicit embedding dimension. Sent as `dimensions` so query and corpus vectors stay
+   *  consistent (one dimension per index). Omit to use the provider's default. */
+  embeddingDimensions?: number;
   memoryEnabled: boolean;
   memoryRetrievalCount: number;
+  /** Episodic retrieval ranking: "cosine" (pure cosine — default, best measured recall)
+   *  or "hybrid" (legacy 0.6·cos + 0.4·BM25 with a 0.3 threshold). */
+  memoryScoring: "cosine" | "hybrid";
+  /** Phase 3 experimental: verified procedural memory (procedure store + applicability
+   *  checking + reuse). Disabled by default; additive to episodic memory, never replacing it. */
+  proceduralMemoryEnabled: boolean;
   systemContextBudget: number;
   contextCompilerEnabled: boolean;
   predictionLlmEnabled: boolean;

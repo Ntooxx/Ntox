@@ -3,7 +3,7 @@ import { resolve, relative, isAbsolute, join, dirname, basename } from "node:pat
 import type { NetworkPolicy, PolicyDecision, Tool, ToolContext, ToolResult, WorkspaceProfile } from "../types/index.js";
 import { checkpointTool } from "../tools/checkpoint.js";
 import { hasInteractiveApproval, requestInteractiveApproval } from "../tools/approval.js";
-import { CONFIG_PATH, NTOX_DIR, MEMORY_DIR, loadConfig, saveConfig } from "./config.js";
+import { CONFIG_PATH, NTOX_DIR, MEMORY_DIR, PROCEDURES_DIR, loadConfig, saveConfig } from "./config.js";
 import { MEDIA_DIR } from "./media.js";
 
 export interface PolicyRuntime {
@@ -196,6 +196,28 @@ function argPath(args: Record<string, unknown>, key: string, fallback: string): 
   return resolve(raw);
 }
 
+/**
+ * Deciding layer for the procedural store (NTOX_DIR/procedures) — Phase 3 rule §5 review:
+ * the verification boundary (procedures.json + the HMAC harness key) must live OUTSIDE the
+ * agent's authority boundary. Verdict is "deny" for every operation (read/write/cwd/image)
+ * at any depth, with NO profile grant that can open it — unlike memoryAccess there is no
+ * "full" scope: the store is harness-authority-only. Procedure content reaches the model
+ * exclusively through retrieval rendering (untrusted-data framing), which is not file
+ * authority. Canonicalization failures fail closed, same as the memory verdict.
+ */
+function proceduresVerdict(path: string): MemoryVerdict {
+  const canonical = canonicalize(path);
+  if (!canonical) return "unresolved";
+  const canonicalProcedures = canonicalize(PROCEDURES_DIR);
+  if (!canonicalProcedures) return "unresolved"; // protected root identity unknown -> fail closed
+  if (!withinCanonical(canonical, canonicalProcedures)) return "outside";
+  return "deny";
+}
+
+function proceduresDenyReason(): string {
+  return "Procedural memory store is harness-authority-only (procedure verification boundary): agent access denied, no profile grant opens it";
+}
+
 function record(runtime: PolicyRuntime, tool: string, allowed: boolean, reason: string, path?: string): PolicyDecision {
   const decision = { tool, allowed, reason, path, timestamp: Date.now() };
   runtime.decisions.push(decision);
@@ -331,6 +353,12 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
           { kind: "shell" },
           `Set shellPolicy to "approval-required" for profile ${runtime.profile.id} in ${CONFIG_PATH} to allow it.`,
         );
+      // Procedural store verdict decides FIRST: the harness verification boundary (and its
+      // HMAC key) is unreachable for agent tool calls — cwd, roots, and grants never reopen it.
+      const shellProc = proceduresVerdict(path);
+      if (shellProc === "deny" || shellProc === "unresolved") {
+        return deny(runtime, tool, proceduresDenyReason(), path);
+      }
       // Memory verdict decides first: denial overrides workspace roots (memory may live
       // inside them); shell/process are never path-sandboxed beyond workdir — memory-isolated
       // trials disable them via config (shellPolicy: "disabled"), stronger containment is
@@ -390,6 +418,10 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
         const scope: "read" | "write" = action === "rollback" ? "write" : "read";
         const roots = action === "rollback" ? runtime.profile.writeRoots : runtime.profile.readRoots;
         if (args.path) {
+          const cpProc = proceduresVerdict(path);
+          if (cpProc === "deny" || cpProc === "unresolved") {
+            return deny(runtime, tool, proceduresDenyReason(), path);
+          }
           const mem = memoryVerdict(path, runtime.profile, scope);
           if (mem === "deny" || mem === "unresolved") {
             const grant: PolicyGrant =
@@ -415,6 +447,11 @@ function checkPaths(runtime: PolicyRuntime, tool: string, args: Record<string, u
     }
     const roots = isWrite ? runtime.profile.writeRoots : runtime.profile.readRoots;
     const op: "read" | "write" = isWrite ? "write" : "read";
+    // Harness-authority-only store: denial overrides roots exactly like the memory verdict.
+    const proc = proceduresVerdict(path);
+    if (proc === "deny" || proc === "unresolved") {
+      return deny(runtime, tool, proceduresDenyReason(), path);
+    }
     const mem = memoryVerdict(path, runtime.profile, op);
     if (mem === "deny" || mem === "unresolved") {
       const grant: PolicyGrant = isWrite ? { kind: "roots", write: [path] } : { kind: "roots", read: [path] };
@@ -489,6 +526,10 @@ function checkImageArg(runtime: PolicyRuntime, args: Record<string, unknown>): P
     return null;
   }
   const path = resolve(raw);
+  const proc = proceduresVerdict(path);
+  if (proc === "deny" || proc === "unresolved") {
+    return deny(runtime, "image", proceduresDenyReason(), path);
+  }
   const mem = memoryVerdict(path, runtime.profile, "read");
   if (mem === "deny" || mem === "unresolved") {
     return deny(
