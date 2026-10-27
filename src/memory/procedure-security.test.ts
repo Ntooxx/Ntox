@@ -1,14 +1,21 @@
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Tool, ToolResult, WorkspaceProfile } from "../types/index.js";
 import { createPolicyRuntime, enforceToolPolicy } from "../core/policy.js";
 import { NTOX_DIR, PROCEDURES_DIR } from "../core/config.js";
 import { checkApplicability, computeEnvFingerprint, type ProcedureExecutor } from "./applicability.js";
 import { attemptReuse, renderProcedureForPrompt } from "./procedure-reuse.js";
-import { ProcedureStore, signEvidence } from "./procedure-store.js";
+import {
+  ProcedureStore,
+  currentVersionOf,
+  hashProcedureVersion,
+  type StoredProcedure,
+  type VerificationEvidence,
+} from "./procedure-store.js";
+import { signEvidence } from "./procedure-harness.js";
 
 function tempStore(): { store: ProcedureStore; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "ntox-proc-"));
@@ -40,14 +47,23 @@ function denyResult(): ToolResult {
 function verifiedStore() {
   const { store, dir } = tempStore();
   const proc = store.addProcedure(BASE);
+  store.promoteWithEvidence(proc.id, boundEvidence(store.get(proc.id)!, store.keyDir));
+  return { store, dir, proc: store.get(proc.id)! };
+}
+
+/** Harness evidence bound to the procedure's current version content. */
+function boundEvidence(proc: StoredProcedure, keyDir: string): VerificationEvidence {
+  const version = currentVersionOf(proc);
   const content = {
+    procedureId: proc.id,
+    procedureVersion: proc.currentVersion,
+    procedureHash: hashProcedureVersion(version),
     taskId: "solve-1",
     envFingerprint: "env-1",
     checkOutputs: [{ target: "workspace", type: "command", passed: true, detail: "exit 0" }],
     timestamps: [1],
   };
-  store.promoteWithEvidence(proc.id, { ...content, harnessSignature: signEvidence(content, store.keyPath) });
-  return { store, dir, proc: store.get(proc.id)! };
+  return { ...content, harnessSignature: signEvidence(content, keyDir) };
 }
 
 describe("checkApplicability", () => {
@@ -520,9 +536,14 @@ describe("verification independence — outside the agent's authority boundary (
     expect(result.success).toBe(false);
   });
 
-  it("no src/ module outside the store can sign, validate, or promote evidence", () => {
+  it("signing capability is isolated to the harness module — the agent surface cannot sign", () => {
     const srcRoot = fileURLToPath(new URL("../", import.meta.url));
     const offenders: string[] = [];
+    // Signing identifiers (private key material handling) — harness module ONLY.
+    const SIGNING = /\b(signEvidence|ensureHarnessKeypair|createPrivateKey|generateKeyPairSync)\b|\bprivateKey\b/;
+    // Verification/promotion API — store module only (harness + tests call into it).
+    const VERIFICATION_API = /\b(validateEvidence|promoteWithEvidence|hashProcedureVersion)\b/;
+    const IMPORTS_HARNESS = /from\s+["'][^"']*procedure-harness(\.js)?["']/;
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         if (entry.name === "node_modules" || entry.name === "dist") continue;
@@ -532,16 +553,29 @@ describe("verification independence — outside the agent's authority boundary (
           continue;
         }
         if (!entry.name.endsWith(".ts") || entry.name.endsWith(".test.ts")) continue;
-        if (basename(full) === "procedure-store.ts") continue;
+        const isHarness = entry.name === "procedure-harness.ts";
+        const isStore = entry.name === "procedure-store.ts";
         const source = readFileSync(full, "utf-8");
-        const hit = source.match(/\b(signEvidence|validateEvidence|promoteWithEvidence|loadHarnessKey)\b/);
+        const hit =
+          (!isHarness && source.match(SIGNING)) ||
+          (!isHarness && !isStore && source.match(VERIFICATION_API)) ||
+          (!isHarness && source.match(IMPORTS_HARNESS));
         if (hit) offenders.push(`${relative(srcRoot, full)} → ${hit[0]}`);
       }
     };
     walk(srcRoot);
-    expect(
-      offenders,
-      `signing/promotion identifiers leaked outside procedure-store.ts: ${offenders.join(", ")}`,
-    ).toEqual([]);
+    expect(offenders, `signer isolation violated: ${offenders.join(", ")}`).toEqual([]);
+  });
+
+  it("the store module exposes no signing capability (export surface)", async () => {
+    const storeModule = await import("./procedure-store.js");
+    const exports = Object.keys(storeModule);
+    expect(exports).not.toContain("signEvidence");
+    expect(exports).not.toContain("ensureHarnessKeypair");
+    // The verifier carries only public-key verification (validateEvidence exported,
+    // promotion reachable through the store class, which never signs).
+    expect(exports).toContain("validateEvidence");
+    expect(ProcedureStore.prototype.promoteWithEvidence).toBeTypeOf("function");
+    expect(Object.getOwnPropertyNames(ProcedureStore.prototype)).not.toContain("signEvidence");
   });
 });

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createPublicKey, randomUUID, verify } from "node:crypto";
 import { dirname, join } from "node:path";
 import { NTOX_DIR, PROCEDURES_DIR } from "../core/config.js";
 import { cosineSimilarity } from "../utils/math.js";
@@ -15,9 +15,10 @@ import { cosineSimilarity } from "../utils/math.js";
  * 2. Execution authority is never derived from procedure state; reuse flows through the
  *    caller-supplied executor, which must be NTOX's existing policy-enforced tool surface.
  * 3. Verification state influences retrieval ranking and display only — never decisions.
- * 4. Evidence is harness-structured and HMAC-signed with a key that lives outside the
- *    agent's authority boundary (policy-denied at any depth — reviewer requirement 1);
- *    an agent saying "done" is not evidence and cannot promote a candidate.
+ * 4. Evidence is harness-structured and signed outside the agent's authority boundary:
+ *    this module only VERIFIES against the harness public key (signing lives in
+ *    procedure-harness.ts, harness-side), evidence is bound to procedure id + version +
+ *    content hash, and an agent saying "done" is not evidence and cannot promote.
  */
 
 export type ProcedureState = "candidate" | "verified" | "restricted" | "rejected" | "retired";
@@ -92,13 +93,24 @@ export interface ProcedureVersion {
 
 /** Harness-generated evidence (design §4). Never produced from agent prose. */
 export interface VerificationEvidence {
+  /** Binding: which procedure, which version, which exact content was verified. */
+  procedureId: string;
+  procedureVersion: number;
+  /** hashProcedureVersion() of the verified version — promotion re-checks it. */
+  procedureHash: string;
   taskId: string;
   envFingerprint: string;
   checkOutputs: { target: string; type: string; passed: boolean; detail: string }[];
   timestamps: number[];
-  /** signEvidence() over the canonical content; verified on every promotion. */
+  /** Ed25519 harness signature over the canonical content; verified on every promotion. */
   harnessSignature: string;
 }
+
+/** Signed evidence content — everything except the signature. */
+export type EvidenceContent = Omit<VerificationEvidence, "harnessSignature">;
+
+/** Signature scheme marker: Ed25519 with the harness-held private key. */
+export const SIGNATURE_PREFIX = "ntox-harness-v1:ed25519:";
 
 export type ReuseOutcome = "succeeded" | "failed" | "prerequisite-failed" | "denied" | "refused";
 
@@ -137,51 +149,25 @@ export interface AddProcedureInput {
   embeddingModel?: string;
 }
 
-/** Default harness key location: beside the store, inside the policy-denied procedures dir. */
-export function harnessKeyPath(): string {
-  return join(PROCEDURES_DIR, ".harness.key");
+/** Default harness key directory: the policy-denied procedures dir. */
+export function harnessKeypairPaths(keyDir: string = PROCEDURES_DIR): {
+  keyDir: string;
+  privateKeyPath: string;
+  publicKeyPath: string;
+} {
+  return {
+    keyDir,
+    privateKeyPath: join(keyDir, ".harness.private.key"),
+    publicKeyPath: join(keyDir, ".harness.public.key"),
+  };
 }
 
-/**
- * Load the HMAC key that backs evidence signatures, creating it on first use (mode 0600).
- * The key lives under PROCEDURES_DIR — the policy verdict denies the agent's entire tool
- * surface access to it (read/write/cwd/image, no grant opens it), so only harness-side code
- * can sign. A corrupt key fails closed: no signing, no verification, loud error.
- */
-function loadHarnessKey(keyPath: string): Buffer {
-  if (existsSync(keyPath)) {
-    const raw = readFileSync(keyPath, "utf-8").trim();
-    if (/^[0-9a-f]{64}$/i.test(raw)) return Buffer.from(raw, "hex");
-    throw new Error(
-      `harness key at ${keyPath} is corrupt — refusing to sign or verify evidence (fix or delete the key file manually)`,
-    );
-  }
-  const key = randomBytes(32);
-  mkdirSync(dirname(keyPath), { recursive: true });
-  try {
-    writeFileSync(keyPath, `${key.toString("hex")}\n`, { mode: 0o600, flag: "wx" });
-    return key;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      const raw = readFileSync(keyPath, "utf-8").trim();
-      if (/^[0-9a-f]{64}$/i.test(raw)) return Buffer.from(raw, "hex");
-      throw new Error(`harness key at ${keyPath} is corrupt — refusing to sign or verify evidence`, { cause: error });
-    }
-    throw error;
-  }
-}
-
-/**
- * Harness HMAC over the canonical evidence content. Signing requires the key file outside
- * the agent's authority boundary — the agent surface exposes no way to call this, and even
- * fully public source code is not enough to forge a signature without the key (reviewer
- * requirement 1: signature must be genuinely independent of the agent).
- */
-export function signEvidence(
-  evidence: Omit<VerificationEvidence, "harnessSignature">,
-  keyPath: string = harnessKeyPath(),
-): string {
-  const canonical = JSON.stringify({
+/** Deterministic canonical content of evidence — the exact bytes the harness signs. */
+export function canonicalEvidenceContent(evidence: EvidenceContent): string {
+  return JSON.stringify({
+    procedureId: evidence.procedureId,
+    procedureVersion: evidence.procedureVersion,
+    procedureHash: evidence.procedureHash,
     taskId: evidence.taskId,
     envFingerprint: evidence.envFingerprint,
     checkOutputs: evidence.checkOutputs.map((c) => ({
@@ -192,12 +178,37 @@ export function signEvidence(
     })),
     timestamps: evidence.timestamps,
   });
-  const key = loadHarnessKey(keyPath);
-  return `ntox-harness-v1:hmac-sha256:${createHmac("sha256", key).update(canonical).digest("hex")}`;
 }
 
-/** Returns null when evidence is structurally valid and fully HMAC-verifying, else the reason. */
-export function validateEvidence(evidence: VerificationEvidence, keyPath: string = harnessKeyPath()): string | null {
+/**
+ * Content hash of a procedure version — binds evidence to the exact steps/prerequisites/
+ * scope/parameters/learnedScope that were verified. Recomputed at promotion; any revision
+ * (new version) or content drift invalidates old evidence for future promotions.
+ */
+export function hashProcedureVersion(version: ProcedureVersion): string {
+  const canonical = JSON.stringify({
+    steps: version.steps,
+    prerequisites: version.prerequisites,
+    scope: version.scope,
+    parameters: version.parameters ?? [],
+    learnedScope: version.learnedScope ?? "",
+  });
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+}
+
+/**
+ * Returns null when evidence is structurally valid and its Ed25519 signature verifies
+ * against the harness PUBLIC key, else the reason. Verification-only by construction:
+ * this module cannot sign — signing lives in the harness-side procedure-harness.ts.
+ * Binding of evidence to a specific procedure/version/content is enforced in
+ * promoteWithEvidence (it needs the procedure to compare against).
+ */
+export function validateEvidence(evidence: VerificationEvidence, keyDir: string = PROCEDURES_DIR): string | null {
+  if (!evidence.procedureId || typeof evidence.procedureId !== "string") return "evidence.procedureId missing";
+  if (!Number.isInteger(evidence.procedureVersion) || evidence.procedureVersion < 1) {
+    return "evidence.procedureVersion missing";
+  }
+  if (!evidence.procedureHash || typeof evidence.procedureHash !== "string") return "evidence.procedureHash missing";
   if (!evidence.taskId || typeof evidence.taskId !== "string") return "evidence.taskId missing";
   if (!evidence.envFingerprint || typeof evidence.envFingerprint !== "string") {
     return "evidence.envFingerprint missing";
@@ -214,20 +225,21 @@ export function validateEvidence(evidence: VerificationEvidence, keyPath: string
   }
   const { harnessSignature, ...content } = evidence;
   if (!harnessSignature) return "harnessSignature missing";
-  if (!harnessSignature.startsWith("ntox-harness-v1:hmac-sha256:")) {
-    // Covers unkeyed hash forgeries: source code alone must never be enough to sign.
-    return "harnessSignature missing or not a harness HMAC (unsigned/forged evidence)";
+  if (!harnessSignature.startsWith(SIGNATURE_PREFIX)) {
+    // Covers unkeyed hash and HMAC forgeries: source code alone must never be enough to sign.
+    return "harnessSignature is not a harness Ed25519 signature (unsigned/forged evidence)";
   }
-  let expected: string;
+  const { publicKeyPath } = harnessKeypairPaths(keyDir);
+  if (!existsSync(publicKeyPath)) {
+    return `harness public key missing at ${publicKeyPath} — verification fails closed`;
+  }
   try {
-    expected = signEvidence(content, keyPath);
+    const publicKey = createPublicKey(readFileSync(publicKeyPath, "utf-8"));
+    const signature = Buffer.from(harnessSignature.slice(SIGNATURE_PREFIX.length), "base64");
+    const ok = verify(null, Buffer.from(canonicalEvidenceContent(content), "utf-8"), publicKey, signature);
+    if (!ok) return "harnessSignature does not verify against the harness public key (forged or tampered evidence)";
   } catch (error) {
-    return `harness key unavailable: ${error instanceof Error ? error.message : String(error)}`;
-  }
-  const a = Buffer.from(harnessSignature);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    return "harnessSignature does not match evidence content (wrong key or tampered evidence)";
+    return `harness signature verification failed: ${error instanceof Error ? error.message : String(error)}`;
   }
   return null;
 }
@@ -281,24 +293,24 @@ export function isProceduralMemoryEnabled(config: { proceduralMemoryEnabled?: bo
 
 export interface ProcedureStoreOptions {
   path?: string;
-  /** HMAC key for evidence signing (defaults beside the store, inside PROCEDURES_DIR). */
-  keyPath?: string;
+  /** Directory holding the harness keypair (defaults beside the store). */
+  keyDir?: string;
 }
 
 export class ProcedureStore {
   private procedures: StoredProcedure[] = [];
   private loaded = false;
   private readonly path: string;
-  private readonly keyPathField: string;
+  private readonly keyDirField: string;
 
   constructor(options: ProcedureStoreOptions = {}) {
     this.path = options.path ?? join(NTOX_DIR, "procedures", "procedures.json");
-    this.keyPathField = options.keyPath ?? join(dirname(this.path), ".harness.key");
+    this.keyDirField = options.keyDir ?? dirname(this.path);
   }
 
-  /** Where this store signs/verifies evidence — harness-side key, outside agent authority. */
-  get keyPath(): string {
-    return this.keyPathField;
+  /** Where this store verifies evidence — public key only; signing is harness-side. */
+  get keyDir(): string {
+    return this.keyDirField;
   }
 
   private load(): void {
@@ -409,8 +421,10 @@ export class ProcedureStore {
   }
 
   /**
-   * Promotion gate (rule §5.4): only structurally valid, fully passing, signature-matching
-   * harness evidence can promote candidate → verified. Agent claims fail validateEvidence.
+   * Promotion gate (rule §5.4): only structurally valid, fully passing, signature-verifying
+   * harness evidence — bound to THIS procedure's CURRENT version content — can promote
+   * candidate → verified. Agent claims fail validateEvidence; evidence replayed across
+   * procedures or versions fails the binding checks (reviewer blocker: version binding).
    */
   promoteWithEvidence(
     id: string,
@@ -422,7 +436,27 @@ export class ProcedureStore {
     if (procedure.state !== "candidate" && procedure.state !== "verified") {
       return { ok: false, reason: `state "${procedure.state}" cannot be promoted; revise it first` };
     }
-    const invalid = validateEvidence(evidence, this.keyPathField);
+    if (evidence.procedureId !== procedure.id) {
+      return {
+        ok: false,
+        reason: `evidence rejected: bound to procedure ${evidence.procedureId}, not ${procedure.id}`,
+      };
+    }
+    const version = currentVersionOf(procedure);
+    if (evidence.procedureVersion !== version.version) {
+      return {
+        ok: false,
+        reason: `evidence rejected: not bound to current version ${version.version} (evidence covers version ${evidence.procedureVersion})`,
+      };
+    }
+    const hash = hashProcedureVersion(version);
+    if (evidence.procedureHash !== hash) {
+      return {
+        ok: false,
+        reason: `evidence rejected: procedure content hash mismatch (evidence ${evidence.procedureHash}, current ${hash})`,
+      };
+    }
+    const invalid = validateEvidence(evidence, this.keyDirField);
     if (invalid) return { ok: false, reason: `evidence rejected: ${invalid}` };
     procedure.evidence.push(evidence);
     procedure.state = "verified";

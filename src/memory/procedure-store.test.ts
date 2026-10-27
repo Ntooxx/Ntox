@@ -5,13 +5,17 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import {
   ProcedureStore,
-  signEvidence,
   validateEvidence,
   currentVersionOf,
   isProceduralMemoryEnabled,
-  harnessKeyPath,
+  hashProcedureVersion,
+  harnessKeypairPaths,
+  SIGNATURE_PREFIX,
+  type EvidenceContent,
+  type StoredProcedure,
   type VerificationEvidence,
 } from "./procedure-store.js";
+import { signEvidence } from "./procedure-harness.js";
 
 function tempStore(): { store: ProcedureStore; dir: string; path: string } {
   const dir = mkdtempSync(join(tmpdir(), "ntox-proc-"));
@@ -30,14 +34,20 @@ const BASE = {
   scope: { applies: ["Windows host", "service installed"], doesNotApply: ["containerized deployments"] },
 };
 
-function passingEvidence(keyPath: string): VerificationEvidence {
-  const content = {
+/** Evidence bound to a procedure's CURRENT version content, signed by the harness key. */
+function evidenceFor(proc: StoredProcedure, keyDir: string, overrides: Partial<EvidenceContent> = {}) {
+  const version = currentVersionOf(proc);
+  const content: EvidenceContent = {
+    procedureId: proc.id,
+    procedureVersion: proc.currentVersion,
+    procedureHash: hashProcedureVersion(version),
     taskId: "solve-web-1",
     envFingerprint: "env-abc123",
     checkOutputs: [{ target: "workspace", type: "command", passed: true, detail: "exit 0" }],
     timestamps: [1730000000000],
+    ...overrides,
   };
-  return { ...content, harnessSignature: signEvidence(content, keyPath) };
+  return { ...content, harnessSignature: signEvidence(content, keyDir) };
 }
 
 describe("ProcedureStore — state machine", () => {
@@ -60,7 +70,7 @@ describe("ProcedureStore — state machine", () => {
     const { store, dir } = tempStore();
     dirs.push(dir);
     const proc = store.addProcedure(BASE);
-    const result = store.promoteWithEvidence(proc.id, passingEvidence(store.keyPath));
+    const result = store.promoteWithEvidence(proc.id, evidenceFor(proc, store.keyDir));
     expect(result.ok).toBe(true);
     expect(store.get(proc.id)?.state).toBe("verified");
   });
@@ -70,7 +80,7 @@ describe("ProcedureStore — state machine", () => {
     dirs.push(dir);
     const proc = store.addProcedure(BASE);
     const fabricated: VerificationEvidence = {
-      ...passingEvidence(store.keyPath),
+      ...evidenceFor(proc, store.keyDir),
       checkOutputs: [{ target: "workspace", type: "command", passed: true, detail: "I claim it passed" }],
       // signature NOT recomputed after content change
     };
@@ -84,13 +94,9 @@ describe("ProcedureStore — state machine", () => {
     const { store, dir } = tempStore();
     dirs.push(dir);
     const proc = store.addProcedure(BASE);
-    const failing = {
-      taskId: "t1",
-      envFingerprint: "env-x",
+    const evidence = evidenceFor(proc, store.keyDir, {
       checkOutputs: [{ target: "workspace", type: "command", passed: false, detail: "exit 1" }],
-      timestamps: [1],
-    };
-    const evidence: VerificationEvidence = { ...failing, harnessSignature: signEvidence(failing, store.keyPath) };
+    });
     const result = store.promoteWithEvidence(proc.id, evidence);
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("check failed");
@@ -98,21 +104,26 @@ describe("ProcedureStore — state machine", () => {
   });
 
   it("validateEvidence flags an empty check list as non-evidence", () => {
-    const evidence: VerificationEvidence = {
+    const { store, dir } = tempStore();
+    dirs.push(dir);
+    const content = {
+      procedureId: "proc_x",
+      procedureVersion: 1,
+      procedureHash: "sha256:x",
       taskId: "t",
       envFingerprint: "e",
       checkOutputs: [],
       timestamps: [1],
-      harnessSignature: signEvidence({ taskId: "t", envFingerprint: "e", checkOutputs: [], timestamps: [1] }),
     };
-    expect(validateEvidence(evidence)).toContain("non-empty");
+    const evidence: VerificationEvidence = { ...content, harnessSignature: signEvidence(content, store.keyDir) };
+    expect(validateEvidence(evidence, store.keyDir)).toContain("non-empty");
   });
 
   it("restricts, then recovers via revision (new version, back to candidate)", () => {
     const { store, dir } = tempStore();
     dirs.push(dir);
     const proc = store.addProcedure(BASE);
-    store.promoteWithEvidence(proc.id, passingEvidence(store.keyPath));
+    store.promoteWithEvidence(proc.id, evidenceFor(proc, store.keyDir));
     store.markRestricted(proc.id, "unsafe in E2: different service manager");
     expect(store.get(proc.id)?.state).toBe("restricted");
 
@@ -131,9 +142,9 @@ describe("ProcedureStore — state machine", () => {
     dirs.push(dir);
     const proc = store.addProcedure(BASE);
     store.markRestricted(proc.id, "unsafe");
-    expect(store.promoteWithEvidence(proc.id, passingEvidence(store.keyPath)).ok).toBe(false);
+    expect(store.promoteWithEvidence(proc.id, evidenceFor(proc, store.keyDir)).ok).toBe(false);
     store.markRejected(proc.id, "failed verification");
-    expect(store.promoteWithEvidence(proc.id, passingEvidence(store.keyPath)).ok).toBe(false);
+    expect(store.promoteWithEvidence(proc.id, evidenceFor(proc, store.keyDir)).ok).toBe(false);
     expect(store.get(proc.id)?.state).toBe("rejected");
   });
 
@@ -150,7 +161,7 @@ describe("ProcedureStore — state machine", () => {
     const { store, dir, path } = tempStore();
     dirs.push(dir);
     const proc = store.addProcedure(BASE);
-    store.promoteWithEvidence(proc.id, passingEvidence(store.keyPath));
+    store.promoteWithEvidence(proc.id, evidenceFor(proc, store.keyDir));
     store.recordReuse(proc.id, { taskId: "t1", outcome: "succeeded", detail: "ok" });
 
     const reloaded = new ProcedureStore({ path });
@@ -223,7 +234,7 @@ describe("ProcedureStore — retrieval ranking", () => {
     dirs.push(dir);
     const a = store.addProcedure({ ...BASE, name: "alpha-restart-web", description: "restart web service" });
     store.addProcedure({ ...BASE, name: "beta-restart-web", description: "restart web service" });
-    store.promoteWithEvidence(a.id, passingEvidence(store.keyPath));
+    store.promoteWithEvidence(a.id, evidenceFor(a, store.keyDir));
     const c = store.addProcedure({ ...BASE, name: "gamma-restart-web", description: "restart web service" });
     store.markRestricted(c.id, "unsafe");
 
@@ -318,19 +329,18 @@ describe("ProcedureStore — corrupt file handling", () => {
   });
 });
 
-describe("ProcedureStore — harness key independence (reviewer requirement 1)", () => {
+describe("ProcedureStore — signer isolation (reviewer requirement 1)", () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  function content(): {
-    taskId: string;
-    envFingerprint: string;
-    checkOutputs: { target: string; type: string; passed: boolean; detail: string }[];
-    timestamps: number[];
-  } {
+  function content(proc: StoredProcedure): EvidenceContent {
+    const version = currentVersionOf(proc);
     return {
+      procedureId: proc.id,
+      procedureVersion: proc.currentVersion,
+      procedureHash: hashProcedureVersion(version),
       taskId: "solve-1",
       envFingerprint: "env-1",
       checkOutputs: [{ target: "workspace", type: "command", passed: true, detail: "exit 0" }],
@@ -338,58 +348,153 @@ describe("ProcedureStore — harness key independence (reviewer requirement 1)",
     };
   }
 
-  it("evidence signed with a different key does not promote", () => {
+  it("evidence signed with a different (agent-guess) keypair does not promote", () => {
     const { store, dir } = tempStore();
     dirs.push(dir);
     const proc = store.addProcedure(BASE);
-    const foreignKey = join(dir, "agent-guess.key");
+    signEvidence(content(proc), store.keyDir); // materialize the REAL harness keypair
+    const foreignDir = join(dir, "agent-guess-keys");
+    mkdirSync(foreignDir, { recursive: true });
     const result = store.promoteWithEvidence(proc.id, {
-      ...content(),
-      harnessSignature: signEvidence(content(), foreignKey),
+      ...content(proc),
+      harnessSignature: signEvidence(content(proc), foreignDir),
     });
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("harnessSignature");
     expect(store.get(proc.id)?.state).toBe("candidate");
   });
 
-  it("rejects an unkeyed hash forged from public source knowledge", () => {
+  it("rejects an unkeyed hash forged from public source knowledge (prefix mismatch)", () => {
     const { store, dir } = tempStore();
     dirs.push(dir);
     const proc = store.addProcedure(BASE);
-    // What a pre-HMAC / source-only forgery looks like: sha256 over the canonical content.
-    const forged = `ntox-harness-v1:${createHash("sha256").update(JSON.stringify(content())).digest("hex")}`;
-    const result = store.promoteWithEvidence(proc.id, { ...content(), harnessSignature: forged });
+    // Source-only forgery: sha256 over the canonical content — no private key involved.
+    const forged = `ntox-harness-v1:${createHash("sha256")
+      .update(JSON.stringify(content(proc)))
+      .digest("hex")}`;
+    const result = store.promoteWithEvidence(proc.id, { ...content(proc), harnessSignature: forged });
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("harnessSignature");
     expect(store.get(proc.id)?.state).toBe("candidate");
   });
 
-  it("creates the key beside the store and signs stably across calls", () => {
-    const { store, dir } = tempStore();
-    dirs.push(dir);
-    expect(store.keyPath).toBe(join(dir, ".harness.key"));
-    const first = signEvidence(content(), store.keyPath);
-    expect(existsSync(store.keyPath)).toBe(true);
-    const second = signEvidence(content(), store.keyPath);
-    expect(second).toBe(first);
-    expect(first).toMatch(/^ntox-harness-v1:hmac-sha256:[0-9a-f]{64}$/);
-  });
-
-  it("fails closed on a corrupt key file: no signing, promotion reports the reason", () => {
+  it("rejects a signature that covers different content (tampered check output)", () => {
     const { store, dir } = tempStore();
     dirs.push(dir);
     const proc = store.addProcedure(BASE);
-    const signed = { ...content(), harnessSignature: signEvidence(content(), store.keyPath) };
-    writeFileSync(store.keyPath, "not-a-hex-key");
-    expect(() => signEvidence(content(), store.keyPath)).toThrow(/corrupt/);
-    const result = store.promoteWithEvidence(proc.id, signed);
+    const signed = evidenceFor(proc, store.keyDir);
+    const tampered: VerificationEvidence = {
+      ...signed,
+      checkOutputs: [{ target: "workspace", type: "command", passed: true, detail: "totally real, trust me" }],
+    };
+    const result = store.promoteWithEvidence(proc.id, tampered);
     expect(result.ok).toBe(false);
-    expect(result.reason).toContain("harness key unavailable");
+    expect(result.reason).toContain("harnessSignature");
     expect(store.get(proc.id)?.state).toBe("candidate");
   });
 
-  it("default harness key path sits inside the policy-denied procedures dir", () => {
-    expect(harnessKeyPath()).toMatch(/procedures[\\/]\.harness\.key$/);
+  it("creates the keypair beside the store; Ed25519 signing is deterministic", () => {
+    const { store, dir } = tempStore();
+    dirs.push(dir);
+    const paths = harnessKeypairPaths(store.keyDir);
+    expect(paths.privateKeyPath).toBe(join(dir, ".harness.private.key"));
+    expect(paths.publicKeyPath).toBe(join(dir, ".harness.public.key"));
+    const proc = store.addProcedure(BASE);
+    const first = signEvidence(content(proc), store.keyDir);
+    expect(existsSync(paths.privateKeyPath)).toBe(true);
+    expect(existsSync(paths.publicKeyPath)).toBe(true);
+    const second = signEvidence(content(proc), store.keyDir);
+    expect(second).toBe(first);
+    expect(first.startsWith(SIGNATURE_PREFIX)).toBe(true);
+  });
+
+  it("fails closed on a corrupt PRIVATE key: no signing", () => {
+    const { store, dir } = tempStore();
+    dirs.push(dir);
+    const proc = store.addProcedure(BASE);
+    signEvidence(content(proc), store.keyDir); // materialize the keypair
+    writeFileSync(harnessKeypairPaths(store.keyDir).privateKeyPath, "not-a-key");
+    expect(() => signEvidence(content(proc), store.keyDir)).toThrow();
+  });
+
+  it("fails closed on a corrupt PUBLIC key: promotion is rejected, never guessed", () => {
+    const { store, dir } = tempStore();
+    dirs.push(dir);
+    const proc = store.addProcedure(BASE);
+    const signed = evidenceFor(proc, store.keyDir);
+    writeFileSync(harnessKeypairPaths(store.keyDir).publicKeyPath, "not-a-key");
+    const result = store.promoteWithEvidence(proc.id, signed);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("harness signature verification failed");
+    expect(store.get(proc.id)?.state).toBe("candidate");
+  });
+
+  it("verifier-side default keypair location sits inside the policy-denied procedures dir", () => {
+    const paths = harnessKeypairPaths();
+    expect(paths.privateKeyPath).toMatch(/procedures[\\/]\.harness\.private\.key$/);
+    expect(paths.publicKeyPath).toMatch(/procedures[\\/]\.harness\.public\.key$/);
+  });
+});
+
+describe("ProcedureStore — evidence is version-bound (reviewer blocker)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("rejects evidence bound to a stale version after revision", () => {
+    const { store, dir } = tempStore();
+    dirs.push(dir);
+    const proc = store.addProcedure(BASE);
+    const staleEvidence = evidenceFor(proc, store.keyDir); // binds version 1
+    store.updateProcedure(proc.id, { scope: { applies: ["systemd hosts"], doesNotApply: [] } }, "re-scoped");
+    const result = store.promoteWithEvidence(proc.id, staleEvidence);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("not bound to current version 2");
+    expect(store.get(proc.id)?.state).toBe("candidate");
+  });
+
+  it("rejects evidence whose content hash no longer matches the version content", () => {
+    const { store, dir } = tempStore();
+    dirs.push(dir);
+    const proc = store.addProcedure(BASE);
+    const signed = evidenceFor(proc, store.keyDir);
+    // Same version number, drifted content — hash binding must catch it.
+    const drifted: VerificationEvidence = {
+      ...signed,
+      procedureHash: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    };
+    const result = store.promoteWithEvidence(proc.id, drifted);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("hash mismatch");
+    expect(store.get(proc.id)?.state).toBe("candidate");
+  });
+
+  it("rejects evidence transplanted from another procedure", () => {
+    const { store, dir } = tempStore();
+    dirs.push(dir);
+    const source = store.addProcedure(BASE);
+    const target = store.addProcedure({ ...BASE, name: "other-procedure" });
+    const transplant = evidenceFor(source, store.keyDir);
+    const result = store.promoteWithEvidence(target.id, transplant);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("bound to procedure");
+    expect(store.get(target.id)?.state).toBe("candidate");
+  });
+
+  it("accepts evidence bound to the current version (positive control)", () => {
+    const { store, dir } = tempStore();
+    dirs.push(dir);
+    const proc = store.addProcedure(BASE);
+    store.updateProcedure(proc.id, { scope: { applies: ["systemd hosts"], doesNotApply: [] } }, "re-scoped");
+    const fresh = evidenceFor(store.get(proc.id)!, store.keyDir);
+    const result = store.promoteWithEvidence(proc.id, fresh);
+    expect(result.ok).toBe(true);
+    expect(store.get(proc.id)?.state).toBe("verified");
+    expect(store.get(proc.id)?.evidence[0].procedureVersion).toBe(2);
+    expect(store.get(proc.id)?.evidence[0].procedureHash).toBe(
+      hashProcedureVersion(currentVersionOf(store.get(proc.id)!)),
+    );
   });
 });
 
