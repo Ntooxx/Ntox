@@ -1,5 +1,9 @@
 # Phase 2 — Does better recall improve task success?
 
+> **Branch verification status (`feat/episodic-outcome-recall` @ 7d81ecb):** the husky commit gate (typecheck + eslint + **1680/1680 tests**) is green. `verify:all` passes **11/12** — the `format:check` gate **fails as a pre-existing baseline issue**: 22 files flagged, of which 20 are unmodified from HEAD (i.e. `main` fails prettier too; the commit hook never included prettier). This branch adds zero new formatting violations (`episodic.ts` prettier-clean). Treat the branch as *gate-green, baseline-debt-present* — **not** "fully verified" — until the formatting baseline is either remediated repo-wide or the check is scoped.
+>
+> **Security review required before merge (blocking):** `src/core/policy.ts` interleaves two changes: (a) the in-progress always-allow `MEMORY_DIR` read feature from the working tree, and (b) an experiment isolation gate (`NTOX_ISOLATE_MEMORY`) that can switch (a) off. Review concern: **an env-var used by experiments must not become the only protection for private memory files.** Recommended resolution before merging to main: default-deny memory access outside an explicit allowlist (e.g. only `memory.md` summaries), opt-in via validated config (not process env), enforcement independent of experiment tooling, and a test proving denial holds when no experiment env is set.
+
 Run: 2026-10-26/27 · model: xiaomi/mimo-v2.6-flash (live) · verification: frozen command checks, fresh temp workspace per trial, shell disabled for all arms (injection-only recall).
 
 ## Question
