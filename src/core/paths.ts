@@ -19,6 +19,8 @@ export const DURABLE_MEMORY_PATH = join(MEMORY_DIR, "durable.json");
 export const MISTAKES_PATH = join(MEMORY_DIR, "mistakes.json");
 export const SKILLS_DIR = join(NTOX_DIR, "skills");
 export const COGNITION_DIR = join(NTOX_DIR, "cognition");
+/** Phase 3 procedural store — harness-authority-only (policy denies the agent tool surface). */
+export const PROCEDURES_DIR = join(NTOX_DIR, "procedures");
 
 export function getMemoryDir(): string {
   if (!existsSync(MEMORY_DIR)) {

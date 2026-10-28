@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import type { Tool, WorkspaceProfile } from "../types/index.js";
 import { applyPolicyGrant, createPolicyRuntime, enforceToolPolicy, scopeDefaultProfile } from "./policy.js";
 import { setInteractiveApproval } from "../tools/approval.js";
-import { CONFIG_PATH } from "./config.js";
+import { CONFIG_PATH, MEMORY_DIR } from "./config.js";
 import { MEDIA_DIR } from "./media.js";
 
 function profile(root: string): WorkspaceProfile {
@@ -114,6 +114,80 @@ describe("policy", () => {
     });
     expect(result.success).toBe(false);
     expect(result.error).toContain("outside workspace");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("denies raw memory writes by default; allows them only with explicit memoryAccess: full", async () => {
+    const root = tempRoot();
+    const memoryFile = join(MEMORY_DIR, `agent-write-${randomUUID().slice(0, 8)}.json`);
+    const tool: Tool = {
+      name: "write",
+      description: "",
+      parameters: {},
+      execute: async () => ({ success: true }),
+    };
+    const denied = createPolicyRuntime(profile(root));
+    const deniedResult = await enforceToolPolicy(tool, denied).execute({ path: memoryFile, content: "{}" });
+    expect(deniedResult.success).toBe(false);
+    expect(denied.decisions.at(-1)?.allowed).toBe(false);
+
+    const authorized = createPolicyRuntime({ ...profile(root), memoryAccess: "full" });
+    const allowedResult = await enforceToolPolicy(tool, authorized).execute({ path: memoryFile, content: "{}" });
+    expect(allowedResult.success).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+    rmSync(memoryFile, { force: true });
+  });
+
+  it("denies raw episodic reads by default; allows them only with explicit memoryAccess: full", async () => {
+    const root = tempRoot();
+    const memoryFile = join(MEMORY_DIR, `agent-read-${randomUUID().slice(0, 8)}.json`);
+    const tool: Tool = {
+      name: "read",
+      description: "",
+      parameters: {},
+      execute: async () => ({ success: true, data: "ok" }),
+    };
+    const denied = createPolicyRuntime(profile(root));
+    const deniedResult = await enforceToolPolicy(tool, denied).execute({ path: memoryFile });
+    expect(deniedResult.success).toBe(false);
+    expect(denied.decisions.at(-1)?.allowed).toBe(false);
+
+    const authorized = createPolicyRuntime({ ...profile(root), memoryAccess: "full" });
+    const allowedResult = await enforceToolPolicy(tool, authorized).execute({ path: memoryFile });
+    expect(allowedResult.success).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+    rmSync(memoryFile, { force: true });
+  });
+
+  it("allows reading memory.md through the checkpoint path gate", async () => {
+    const root = tempRoot();
+    const memoryFile = join(MEMORY_DIR, "memory.md");
+    const runtime = createPolicyRuntime({ ...profile(root), autoCheckpoint: true });
+    const tool: Tool = {
+      name: "read",
+      description: "",
+      parameters: {},
+      execute: async () => ({ success: true, data: "ok" }),
+    };
+    const result = await enforceToolPolicy(tool, runtime).execute({ path: memoryFile });
+    expect(result.success).toBe(true);
+    expect(result.error ?? "").not.toContain("Checkpoint");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("still denies write outside workspace and outside the memory directory", async () => {
+    const root = tempRoot();
+    const outside = join(tmpdir(), `ntox-outside-${randomUUID().slice(0, 8)}.txt`);
+    const runtime = createPolicyRuntime(profile(root));
+    const tool: Tool = {
+      name: "write",
+      description: "",
+      parameters: {},
+      execute: async () => ({ success: true }),
+    };
+    const result = await enforceToolPolicy(tool, runtime).execute({ path: outside, content: "x" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("POLICY_DENIED");
     rmSync(root, { recursive: true, force: true });
   });
 

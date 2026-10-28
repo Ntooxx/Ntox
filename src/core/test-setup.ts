@@ -1,8 +1,12 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env.NTOX_DIR = mkdtempSync(join(tmpdir(), "ntox-test-"));
+const testDir = mkdtempSync(join(tmpdir(), "ntox-test-"));
+process.env.NTOX_DIR = testDir;
+// Ownership marker: proof that this directory was created by NTOX's test setup.
+// src/core/policy-memory.test.ts refuses destructive cleanup unless it finds this file.
+writeFileSync(join(testDir, ".ntox-test-owned"), "created by ntox vitest test-setup\n");
 
 for (const key of [
   "NTOX_API_KEY",

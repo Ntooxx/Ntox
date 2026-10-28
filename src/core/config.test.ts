@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import {
   BUNDLED_MARKETPLACE_INDEX,
+  MEMORY_DIR,
   NTOX_DIR,
   defaultMarketplaceIndex,
   hasLegacyToolPrompt,
@@ -11,6 +12,7 @@ import {
   saveConfig,
   validateConfig,
 } from "./config.js";
+import { join } from "node:path";
 import type { NtoxConfig } from "../types/index.js";
 import { loadCredentials } from "./credentials.js";
 
@@ -25,6 +27,8 @@ const valid: NtoxConfig = {
   embeddingModel: "openai/text-embedding-3-small",
   memoryEnabled: true,
   memoryRetrievalCount: 5,
+  memoryScoring: "cosine",
+  proceduralMemoryEnabled: false,
   systemContextBudget: 6000,
   contextCompilerEnabled: true,
   predictionLlmEnabled: true,
@@ -120,6 +124,15 @@ describe("validateConfig", () => {
     expect(validateConfig({ ...valid, webHost: "" }).valid).toBe(false);
   });
 
+  it("rejects an unknown memoryScoring mode", () => {
+    expect(validateConfig({ ...valid, memoryScoring: "bm25" as NtoxConfig["memoryScoring"] }).valid).toBe(false);
+  });
+
+  it("accepts an explicit embedding dimension within range", () => {
+    expect(validateConfig({ ...valid, embeddingDimensions: 1024 }).valid).toBe(true);
+    expect(validateConfig({ ...valid, embeddingDimensions: 16 }).valid).toBe(false);
+  });
+
   it("returns error messages for invalid config", () => {
     const r = validateConfig({ ...valid, model: "", maxTokens: -5 });
     expect(r.valid).toBe(false);
@@ -148,6 +161,7 @@ describe("config", () => {
     expect(config.maxTokens).toBe(32000);
     expect(config.temperature).toBe(0.7);
     expect(config.memoryEnabled).toBe(true);
+    expect(config.memoryScoring).toBe("cosine");
     expect(config.uiMode).toBe("normal");
     expect(config.defaultProfileId).toBe("default");
     expect(config.profiles[0].workspaceRoot).toBeTruthy();
@@ -157,6 +171,13 @@ describe("config", () => {
     if (existsSync(cfgPath())) unlinkSync(cfgPath());
     const config = loadConfig();
     expect(config.cognitiveEnabled).toBe(true);
+  });
+
+  it("points the memory prompt at the real MEMORY_DIR, not a hardcoded ~/.ntox path", () => {
+    if (existsSync(cfgPath())) unlinkSync(cfgPath());
+    const config = loadConfig();
+    expect(config.systemPrompt).toContain(join(MEMORY_DIR, "memory.md"));
+    expect(config.systemPrompt).not.toContain("~/.ntox/memory");
   });
 
   it("defaults the marketplace index to the bundled marketplace/index.json", () => {

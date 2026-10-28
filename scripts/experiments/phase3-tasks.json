@@ -1,0 +1,881 @@
+{
+  "name": "phase3-procedural-transfer",
+  "version": "0.1.0",
+  "frozenAt": "2026-10-27",
+  "description": "Phase 3 frozen task conditions: six procedure families across distinct domains, each with an E1 SOLVE task, a fresh-environment VERIFICATION task (E-ver), TWO distinct E2 TRANSFER environments (E2a/E2b — reviewer requirement: adaptation to one fixture is not transfer), and a DECOY task where the procedure is inapplicable. Every verify/transfer/decoy task carries forbiddenLiterals — the E1 fixture constants — and fails if any appears in the produced artifacts (replay detector, phase3-design.md §6.2). All checks are frozen command verifiers run by the harness, never by the agent.",
+  "protocol": {
+    "arms": {
+      "A": { "label": "none (fresh baseline)", "memoryEnabled": false, "proceduralMemoryEnabled": false },
+      "B": { "label": "episodic", "memoryEnabled": true, "proceduralMemoryEnabled": false },
+      "C": { "label": "episodic + verified procedural", "memoryEnabled": true, "proceduralMemoryEnabled": true }
+    },
+    "repetitions": 2,
+    "trialTimeoutMs": 120000,
+    "extractionTimeoutMs": 60000,
+    "retrievalBackend": "token-overlap",
+    "frozenKnobs": {
+      "temperature": 0.7,
+      "maxTokens": 32000,
+      "memoryRetrievalCount": 20,
+      "memoryScoring": "cosine",
+      "shellPolicy": "workspace"
+    }
+  },
+  "families": [
+    {
+      "id": "files-transformation",
+      "domain": "files transformation",
+      "parameters": ["inputFile", "keepMarker"],
+      "tasks": [
+        {
+          "id": "files-transformation-solve",
+          "class": "solve",
+          "env": { "id": "e1", "values": { "inputFile": "run-e1.log", "keepMarker": "SEED-E1-KEEP" } },
+          "prompt": "Work in the directory {workspace}. The run log is run-e1.log and this run's keep marker is SEED-E1-KEEP. Create normalized.txt containing exactly the lines of the log that contain the keep marker, each trimmed, sorted alphabetically, one per line, with no empty lines. Do not create any other files.",
+          "setup": {
+            "files": {
+              "run-e1.log": "2026-10-27T01:00:00Z INFO boot sequence\n2026-10-27T01:00:01Z INFO SEED-E1-KEEP checkpoint saved\n2026-10-27T01:00:02Z WARN retry storm detected\n2026-10-27T01:00:03Z INFO SEED-E1-KEEP rotation complete\n2026-10-27T01:00:04Z ERROR upstream timeout\n2026-10-27T01:00:05Z INFO SEED-E1-KEEP cache warm\n",
+              "format.txt": "keep-marker: SEED-E1-KEEP\nsource: run-e1.log\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const exp=fs.readFileSync('run-e1.log','utf8').split(/\\r?\\n/).map(s=>s.trim()).filter(s=>s.includes('SEED-E1-KEEP')).sort();const out=fs.readFileSync('normalized.txt','utf8').split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);if(JSON.stringify(out)!==JSON.stringify(exp))throw new Error('normalized.txt: '+JSON.stringify(out));"
+                ]
+              }
+            }
+          ],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "files-transformation-verify",
+          "class": "verify",
+          "env": { "id": "ever", "values": { "inputFile": "run-ver.log", "keepMarker": "SEED-VER-KEEP" } },
+          "prompt": "Work in the directory {workspace}. This workspace holds one run log and a format.txt declaring that run's keep marker and source file. Create normalized.txt containing exactly the lines of the declared source log that contain the declared keep marker, each trimmed, sorted alphabetically, one per line, with no empty lines. Do not create any other files.",
+          "setup": {
+            "files": {
+              "run-ver.log": "2026-10-27T02:10:00Z INFO service start\n2026-10-27T02:10:01Z DEBUG SEED-VER-KEEP sweep done\n2026-10-27T02:10:02Z INFO queue drained\n2026-10-27T02:10:03Z DEBUG SEED-VER-KEEP index built\n",
+              "format.txt": "keep-marker: SEED-VER-KEEP\nsource: run-ver.log\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const exp=fs.readFileSync('run-ver.log','utf8').split(/\\r?\\n/).map(s=>s.trim()).filter(s=>s.includes('SEED-VER-KEEP')).sort();const out=fs.readFileSync('normalized.txt','utf8').split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);if(JSON.stringify(out)!==JSON.stringify(exp))throw new Error('normalized.txt: '+JSON.stringify(out));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-KEEP", "run-e1.log"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "files-transformation-transfer-e2a",
+          "class": "transfer",
+          "env": { "id": "e2a", "values": { "inputFile": "run-e2a.log", "keepMarker": "SEED-E2A-KEEP" } },
+          "prompt": "Work in the directory {workspace}. This workspace holds one run log and a format.txt declaring that run's keep marker and source file. Create normalized.txt containing exactly the lines of the declared source log that contain the declared keep marker, each trimmed, sorted alphabetically, one per line, with no empty lines. Do not create any other files.",
+          "setup": {
+            "files": {
+              "run-e2a.log": "2026-10-27T03:20:00Z INFO agent online\n2026-10-27T03:20:01Z INFO SEED-E2A-KEEP manifest sealed\n2026-10-27T03:20:02Z WARN disk pressure\n2026-10-27T03:20:03Z INFO SEED-E2A-KEEP snapshot written\n",
+              "format.txt": "keep-marker: SEED-E2A-KEEP\nsource: run-e2a.log\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const exp=fs.readFileSync('run-e2a.log','utf8').split(/\\r?\\n/).map(s=>s.trim()).filter(s=>s.includes('SEED-E2A-KEEP')).sort();const out=fs.readFileSync('normalized.txt','utf8').split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);if(JSON.stringify(out)!==JSON.stringify(exp))throw new Error('normalized.txt: '+JSON.stringify(out));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-KEEP", "run-e1.log"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "files-transformation-transfer-e2b",
+          "class": "transfer",
+          "env": { "id": "e2b", "values": { "inputFile": "run-e2b.log", "keepMarker": "SEED-E2B-KEEP" } },
+          "prompt": "Work in the directory {workspace}. This workspace holds one run log and a format.txt declaring that run's keep marker and source file. Create normalized.txt containing exactly the lines of the declared source log that contain the declared keep marker, each trimmed, sorted alphabetically, one per line, with no empty lines. Do not create any other files.",
+          "setup": {
+            "files": {
+              "run-e2b.log": "2026-10-27T04:30:00Z INFO pipeline start\n2026-10-27T04:30:01Z DEBUG SEED-E2B-KEEP batch committed\n2026-10-27T04:30:02Z ERROR shard offline\n2026-10-27T04:30:03Z DEBUG SEED-E2B-KEEP rebalance done\n2026-10-27T04:30:04Z INFO pipeline end\n",
+              "format.txt": "keep-marker: SEED-E2B-KEEP\nsource: run-e2b.log\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const exp=fs.readFileSync('run-e2b.log','utf8').split(/\\r?\\n/).map(s=>s.trim()).filter(s=>s.includes('SEED-E2B-KEEP')).sort();const out=fs.readFileSync('normalized.txt','utf8').split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);if(JSON.stringify(out)!==JSON.stringify(exp))throw new Error('normalized.txt: '+JSON.stringify(out));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-KEEP", "run-e1.log"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "files-transformation-decoy",
+          "class": "decoy",
+          "env": { "id": "decoy", "values": { "source": "draft.txt", "keepMarker": "NOTE" } },
+          "prompt": "Work in the directory {workspace}. Create normalized.txt containing exactly the lines of draft.txt that contain the word NOTE, each trimmed, sorted alphabetically, one per line, with no empty lines. Do not create any other files.",
+          "setup": {
+            "files": {
+              "draft.txt": "NOTE revise the header\nTODO check the footer\nNOTE align the tone\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const exp=fs.readFileSync('draft.txt','utf8').split(/\\r?\\n/).map(s=>s.trim()).filter(s=>s.includes('NOTE')).sort();const out=fs.readFileSync('normalized.txt','utf8').split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);if(JSON.stringify(out)!==JSON.stringify(exp))throw new Error('normalized.txt: '+JSON.stringify(out));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-KEEP", "run-e1.log"],
+          "timeoutMs": 120000
+        }
+      ]
+    },
+    {
+      "id": "environment-probe",
+      "domain": "environment probe",
+      "parameters": ["probeEndpoint", "probeStatus"],
+      "tasks": [
+        {
+          "id": "environment-probe-solve",
+          "class": "solve",
+          "env": { "id": "e1", "values": { "probeEndpoint": "http://svc-e1.internal:8121", "probeStatus": "SEED-E1-DOWN" } },
+          "prompt": "Work in the directory {workspace}. Run the probe tool with: node tools/probe.js — then write probe-result.json containing exactly two fields, endpoint and status, with the exact values the probe prints. Do not create any other files.",
+          "setup": {
+            "files": {
+              "tools/probe.js": "const fs=require('fs');const cfg=JSON.parse(fs.readFileSync('probe-config.json','utf8'));console.log(JSON.stringify({endpoint:cfg.endpoint,status:cfg.status}));\n",
+              "probe-config.json": "{\"endpoint\":\"http://svc-e1.internal:8121\",\"status\":\"SEED-E1-DOWN\"}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const r=JSON.parse(fs.readFileSync('probe-result.json','utf8'));const keys=Object.keys(r).sort().join(',');if(keys!=='endpoint,status')throw new Error('keys: '+keys);if(r.endpoint!=='http://svc-e1.internal:8121'||r.status!=='SEED-E1-DOWN')throw new Error(JSON.stringify(r));"
+                ]
+              }
+            }
+          ],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "environment-probe-verify",
+          "class": "verify",
+          "env": { "id": "ever", "values": { "probeEndpoint": "http://svc-ver.internal:8234", "probeStatus": "SEED-VER-OK" } },
+          "prompt": "Work in the directory {workspace}. This workspace contains a probe tool and its configuration. Run the probe tool (node tools/probe.js) and write probe-result.json containing exactly two fields, endpoint and status, with the exact values the probe prints. Do not create any other files.",
+          "setup": {
+            "files": {
+              "tools/probe.js": "const fs=require('fs');const cfg=JSON.parse(fs.readFileSync('probe-config.json','utf8'));console.log(JSON.stringify({endpoint:cfg.endpoint,status:cfg.status}));\n",
+              "probe-config.json": "{\"endpoint\":\"http://svc-ver.internal:8234\",\"status\":\"SEED-VER-OK\"}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const r=JSON.parse(fs.readFileSync('probe-result.json','utf8'));const keys=Object.keys(r).sort().join(',');if(keys!=='endpoint,status')throw new Error('keys: '+keys);if(r.endpoint!=='http://svc-ver.internal:8234'||r.status!=='SEED-VER-OK')throw new Error(JSON.stringify(r));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["http://svc-e1.internal:8121", "SEED-E1-DOWN", "svc-e1.internal"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "environment-probe-transfer-e2a",
+          "class": "transfer",
+          "env": { "id": "e2a", "values": { "probeEndpoint": "http://svc-e2a.internal:8345", "probeStatus": "SEED-E2A-OK" } },
+          "prompt": "Work in the directory {workspace}. This workspace contains a probe tool and its configuration. Run the probe tool (node tools/probe.js) and write probe-result.json containing exactly two fields, endpoint and status, with the exact values the probe prints. Do not create any other files.",
+          "setup": {
+            "files": {
+              "tools/probe.js": "const fs=require('fs');const cfg=JSON.parse(fs.readFileSync('probe-config.json','utf8'));console.log(JSON.stringify({endpoint:cfg.endpoint,status:cfg.status}));\n",
+              "probe-config.json": "{\"endpoint\":\"http://svc-e2a.internal:8345\",\"status\":\"SEED-E2A-OK\"}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const r=JSON.parse(fs.readFileSync('probe-result.json','utf8'));const keys=Object.keys(r).sort().join(',');if(keys!=='endpoint,status')throw new Error('keys: '+keys);if(r.endpoint!=='http://svc-e2a.internal:8345'||r.status!=='SEED-E2A-OK')throw new Error(JSON.stringify(r));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["http://svc-e1.internal:8121", "SEED-E1-DOWN", "svc-e1.internal"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "environment-probe-transfer-e2b",
+          "class": "transfer",
+          "env": { "id": "e2b", "values": { "probeEndpoint": "http://svc-e2b.internal:8456", "probeStatus": "SEED-E2B-DEGRADED" } },
+          "prompt": "Work in the directory {workspace}. This workspace contains a probe tool and its configuration. Run the probe tool (node tools/probe.js) and write probe-result.json containing exactly two fields, endpoint and status, with the exact values the probe prints. Do not create any other files.",
+          "setup": {
+            "files": {
+              "tools/probe.js": "const fs=require('fs');const cfg=JSON.parse(fs.readFileSync('probe-config.json','utf8'));console.log(JSON.stringify({endpoint:cfg.endpoint,status:cfg.status}));\n",
+              "probe-config.json": "{\"endpoint\":\"http://svc-e2b.internal:8456\",\"status\":\"SEED-E2B-DEGRADED\"}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const r=JSON.parse(fs.readFileSync('probe-result.json','utf8'));const keys=Object.keys(r).sort().join(',');if(keys!=='endpoint,status')throw new Error('keys: '+keys);if(r.endpoint!=='http://svc-e2b.internal:8456'||r.status!=='SEED-E2B-DEGRADED')throw new Error(JSON.stringify(r));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["http://svc-e1.internal:8121", "SEED-E1-DOWN", "svc-e1.internal"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "environment-probe-decoy",
+          "class": "decoy",
+          "env": { "id": "decoy", "values": { "probeEndpoint": "http://legacy-e1.internal:9001", "probeStatus": "SEED-DECOY-LEGACY" } },
+          "prompt": "Work in the directory {workspace}. The service definition here is the legacy YAML file probe-config.yaml — there is no JSON probe configuration. Read the YAML definition and write probe-result.json containing exactly two fields, endpoint and status, with the exact values from the YAML definition. Do not create any other files.",
+          "setup": {
+            "files": {
+              "probe-config.yaml": "endpoint: http://legacy-e1.internal:9001\nstatus: SEED-DECOY-LEGACY\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const r=JSON.parse(fs.readFileSync('probe-result.json','utf8'));const keys=Object.keys(r).sort().join(',');if(keys!=='endpoint,status')throw new Error('keys: '+keys);if(r.endpoint!=='http://legacy-e1.internal:9001'||r.status!=='SEED-DECOY-LEGACY')throw new Error(JSON.stringify(r));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["http://svc-e1.internal:8121", "SEED-E1-DOWN", "svc-e1.internal"],
+          "timeoutMs": 120000
+        }
+      ]
+    },
+    {
+      "id": "data-conversion",
+      "domain": "data conversion",
+      "parameters": ["csvFile"],
+      "tasks": [
+        {
+          "id": "data-conversion-solve",
+          "class": "solve",
+          "env": { "id": "e1", "values": { "csvFile": "stock-e1.csv" } },
+          "prompt": "Work in the directory {workspace}. Convert the CSV file stock-e1.csv into stock.json: an array of objects with keys item (string) and qty (number), one per CSV row, sorted alphabetically by item. The JSON must contain exactly the rows of the CSV. Do not create any other files.",
+          "setup": {
+            "files": {
+              "stock-e1.csv": "item,qty\nwidget-alpha,3\nbracket,10\ncoupler,2\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=JSON.parse(fs.readFileSync('stock.json','utf8'));const exp=[{item:'bracket',qty:10},{item:'coupler',qty:2},{item:'widget-alpha',qty:3}];if(JSON.stringify(got)!==JSON.stringify(exp))throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "data-conversion-verify",
+          "class": "verify",
+          "env": { "id": "ever", "values": { "csvFile": "stock-ver.csv" } },
+          "prompt": "Work in the directory {workspace}. Convert this workspace's stock CSV file into stock.json: an array of objects with keys item (string) and qty (number), one per CSV row, sorted alphabetically by item. The JSON must contain exactly the rows of the CSV. Do not create any other files.",
+          "setup": {
+            "files": {
+              "stock-ver.csv": "item,qty\nvalve,7\npiston,1\nsprocket,5\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=JSON.parse(fs.readFileSync('stock.json','utf8'));const exp=[{item:'piston',qty:1},{item:'sprocket',qty:5},{item:'valve',qty:7}];if(JSON.stringify(got)!==JSON.stringify(exp))throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["stock-e1.csv", "widget-alpha"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "data-conversion-transfer-e2a",
+          "class": "transfer",
+          "env": { "id": "e2a", "values": { "csvFile": "stock-e2a.csv" } },
+          "prompt": "Work in the directory {workspace}. Convert this workspace's stock CSV file into stock.json: an array of objects with keys item (string) and qty (number), one per CSV row, sorted alphabetically by item. The JSON must contain exactly the rows of the CSV. Do not create any other files.",
+          "setup": {
+            "files": {
+              "stock-e2a.csv": "item,qty\naxle,4\nbearing,12\ncam,6\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=JSON.parse(fs.readFileSync('stock.json','utf8'));const exp=[{item:'axle',qty:4},{item:'bearing',qty:12},{item:'cam',qty:6}];if(JSON.stringify(got)!==JSON.stringify(exp))throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["stock-e1.csv", "widget-alpha"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "data-conversion-transfer-e2b",
+          "class": "transfer",
+          "env": { "id": "e2b", "values": { "csvFile": "stock-e2b.csv" } },
+          "prompt": "Work in the directory {workspace}. Convert this workspace's stock CSV file into stock.json: an array of objects with keys item (string) and qty (number), one per CSV row, sorted alphabetically by item. The JSON must contain exactly the rows of the CSV. Do not create any other files.",
+          "setup": {
+            "files": {
+              "stock-e2b.csv": "item,qty\ndrill,2\nescutcheon,9\nflange,8\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=JSON.parse(fs.readFileSync('stock.json','utf8'));const exp=[{item:'drill',qty:2},{item:'escutcheon',qty:9},{item:'flange',qty:8}];if(JSON.stringify(got)!==JSON.stringify(exp))throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["stock-e1.csv", "widget-alpha"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "data-conversion-decoy",
+          "class": "decoy",
+          "env": { "id": "decoy", "values": { "tsvFile": "inventory.tsv" } },
+          "prompt": "Work in the directory {workspace}. Convert the tab-separated file inventory.tsv into inventory.json: an array of objects with keys item (string) and count (number), one per row, sorted alphabetically by item. Do not create any other files.",
+          "setup": {
+            "files": {
+              "inventory.tsv": "item\tcount\nlens\t5\nmount\t1\nring\t3\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=JSON.parse(fs.readFileSync('inventory.json','utf8'));const exp=[{item:'lens',count:5},{item:'mount',count:1},{item:'ring',count:3}];if(JSON.stringify(got)!==JSON.stringify(exp))throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["stock-e1.csv", "widget-alpha"],
+          "timeoutMs": 120000
+        }
+      ]
+    },
+    {
+      "id": "report-generation",
+      "domain": "report generation",
+      "parameters": ["projectName"],
+      "tasks": [
+        {
+          "id": "report-generation-solve",
+          "class": "solve",
+          "env": { "id": "e1", "values": { "projectName": "SEED-E1-NORTHWIND" } },
+          "prompt": "Work in the directory {workspace}. Write summary.md with: first line exactly '# Summary — <project>' where <project> is the project name from project.txt; then one line per metric in metrics.json in the form '- <key>: <value>', sorted by key. Do not create any other files.",
+          "setup": {
+            "files": {
+              "project.txt": "project: SEED-E1-NORTHWIND\n",
+              "metrics.json": "{\"errors\":3,\"latency_ms\":912}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=fs.readFileSync('summary.md','utf8').trim().split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);const exp=['# Summary — SEED-E1-NORTHWIND','- errors: 3','- latency_ms: 912'];if(JSON.stringify(got)!==JSON.stringify(exp))throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "report-generation-verify",
+          "class": "verify",
+          "env": { "id": "ever", "values": { "projectName": "SEED-VER-HARBOR" } },
+          "prompt": "Work in the directory {workspace}. Write summary.md with: first line exactly '# Summary — <project>' where <project> is the project name from project.txt; then one line per metric in metrics.json in the form '- <key>: <value>', sorted by key. Do not create any other files.",
+          "setup": {
+            "files": {
+              "project.txt": "project: SEED-VER-HARBOR\n",
+              "metrics.json": "{\"errors\":1,\"latency_ms\":410}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=fs.readFileSync('summary.md','utf8').trim().split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);const exp=['# Summary — SEED-VER-HARBOR','- errors: 1','- latency_ms: 410'];if(JSON.stringify(got)!==JSON.stringify(exp))throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-NORTHWIND"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "report-generation-transfer-e2a",
+          "class": "transfer",
+          "env": { "id": "e2a", "values": { "projectName": "SEED-E2A-MERIDIAN" } },
+          "prompt": "Work in the directory {workspace}. Write summary.md with: first line exactly '# Summary — <project>' where <project> is the project name from project.txt; then one line per metric in metrics.json in the form '- <key>: <value>', sorted by key. Do not create any other files.",
+          "setup": {
+            "files": {
+              "project.txt": "project: SEED-E2A-MERIDIAN\n",
+              "metrics.json": "{\"errors\":7,\"latency_ms\":1205}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=fs.readFileSync('summary.md','utf8').trim().split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);const exp=['# Summary — SEED-E2A-MERIDIAN','- errors: 7','- latency_ms: 1205'];if(JSON.stringify(got)!==JSON.stringify(exp))throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-NORTHWIND"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "report-generation-transfer-e2b",
+          "class": "transfer",
+          "env": { "id": "e2b", "values": { "projectName": "SEED-E2B-CASCADE" } },
+          "prompt": "Work in the directory {workspace}. Write summary.md with: first line exactly '# Summary — <project>' where <project> is the project name from project.txt; then one line per metric in metrics.json in the form '- <key>: <value>', sorted by key. Do not create any other files.",
+          "setup": {
+            "files": {
+              "project.txt": "project: SEED-E2B-CASCADE\n",
+              "metrics.json": "{\"errors\":2,\"latency_ms\":733}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=fs.readFileSync('summary.md','utf8').trim().split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);const exp=['# Summary — SEED-E2B-CASCADE','- errors: 2','- latency_ms: 733'];if(JSON.stringify(got)!==JSON.stringify(exp))throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-NORTHWIND"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "report-generation-decoy",
+          "class": "decoy",
+          "env": { "id": "decoy", "values": { "projectName": "SEED-DECOY-OLDGROWTH" } },
+          "prompt": "Work in the directory {workspace}. Write summary.md with: first line exactly '# Summary — <project>' where <project> is the project name from project.txt; then one line per metric in archive-metrics.json in the form '- <key>: <value>', sorted by key. Use the archived values exactly as written. Do not create any other files.",
+          "setup": {
+            "files": {
+              "project.txt": "project: SEED-DECOY-OLDGROWTH\n",
+              "archive-metrics.json": "{\"errors\":\"3 (archived)\",\"latency_ms\":\"912 (archived)\"}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=fs.readFileSync('summary.md','utf8').trim().split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);const exp=['# Summary — SEED-DECOY-OLDGROWTH','- errors: 3 (archived)','- latency_ms: 912 (archived)'];if(JSON.stringify(got)!==JSON.stringify(exp))throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-NORTHWIND"],
+          "timeoutMs": 120000
+        }
+      ]
+    },
+    {
+      "id": "config-synthesis",
+      "domain": "config synthesis",
+      "parameters": ["appName", "region", "replicas"],
+      "tasks": [
+        {
+          "id": "config-synthesis-solve",
+          "class": "solve",
+          "env": {
+            "id": "e1",
+            "values": { "appName": "SEED-E1-ORCHID", "region": "SEED-E1-REGION-WEST", "replicas": 4 }
+          },
+          "prompt": "Work in the directory {workspace}. Write config.json with exactly three keys: app (the app name from identity.txt), region (the region from identity.txt), replicas (the integer replicas value from capacity.txt). Values must match the workspace files exactly. Do not create any other files.",
+          "setup": {
+            "files": {
+              "identity.txt": "app: SEED-E1-ORCHID\nregion: SEED-E1-REGION-WEST\n",
+              "capacity.txt": "replicas: 4\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=JSON.parse(fs.readFileSync('config.json','utf8'));const norm=o=>JSON.stringify(Object.fromEntries(Object.entries(o).sort()));const exp={app:'SEED-E1-ORCHID',region:'SEED-E1-REGION-WEST',replicas:4};if(norm(got)!==norm(exp))throw new Error(JSON.stringify(got));if(typeof got.replicas!=='number')throw new Error('replicas must be a number');"
+                ]
+              }
+            }
+          ],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "config-synthesis-verify",
+          "class": "verify",
+          "env": {
+            "id": "ever",
+            "values": { "appName": "SEED-VER-JUNIPER", "region": "SEED-VER-REGION-NORTH", "replicas": 2 }
+          },
+          "prompt": "Work in the directory {workspace}. Write config.json with exactly three keys: app (the app name from identity.txt), region (the region from identity.txt), replicas (the integer replicas value from capacity.txt). Values must match the workspace files exactly. Do not create any other files.",
+          "setup": {
+            "files": {
+              "identity.txt": "app: SEED-VER-JUNIPER\nregion: SEED-VER-REGION-NORTH\n",
+              "capacity.txt": "replicas: 2\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=JSON.parse(fs.readFileSync('config.json','utf8'));const norm=o=>JSON.stringify(Object.fromEntries(Object.entries(o).sort()));const exp={app:'SEED-VER-JUNIPER',region:'SEED-VER-REGION-NORTH',replicas:2};if(norm(got)!==norm(exp))throw new Error(JSON.stringify(got));if(typeof got.replicas!=='number')throw new Error('replicas must be a number');"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-ORCHID", "SEED-E1-REGION-WEST"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "config-synthesis-transfer-e2a",
+          "class": "transfer",
+          "env": {
+            "id": "e2a",
+            "values": { "appName": "SEED-E2A-MAGNOLIA", "region": "SEED-E2A-REGION-EAST", "replicas": 7 }
+          },
+          "prompt": "Work in the directory {workspace}. Write config.json with exactly three keys: app (the app name from identity.txt), region (the region from identity.txt), replicas (the integer replicas value from capacity.txt). Values must match the workspace files exactly. Do not create any other files.",
+          "setup": {
+            "files": {
+              "identity.txt": "app: SEED-E2A-MAGNOLIA\nregion: SEED-E2A-REGION-EAST\n",
+              "capacity.txt": "replicas: 7\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=JSON.parse(fs.readFileSync('config.json','utf8'));const norm=o=>JSON.stringify(Object.fromEntries(Object.entries(o).sort()));const exp={app:'SEED-E2A-MAGNOLIA',region:'SEED-E2A-REGION-EAST',replicas:7};if(norm(got)!==norm(exp))throw new Error(JSON.stringify(got));if(typeof got.replicas!=='number')throw new Error('replicas must be a number');"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-ORCHID", "SEED-E1-REGION-WEST"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "config-synthesis-transfer-e2b",
+          "class": "transfer",
+          "env": {
+            "id": "e2b",
+            "values": { "appName": "SEED-E2B-SEQUOIA", "region": "SEED-E2B-REGION-SOUTH", "replicas": 1 }
+          },
+          "prompt": "Work in the directory {workspace}. Write config.json with exactly three keys: app (the app name from identity.txt), region (the region from identity.txt), replicas (the integer replicas value from capacity.txt). Values must match the workspace files exactly. Do not create any other files.",
+          "setup": {
+            "files": {
+              "identity.txt": "app: SEED-E2B-SEQUOIA\nregion: SEED-E2B-REGION-SOUTH\n",
+              "capacity.txt": "replicas: 1\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=JSON.parse(fs.readFileSync('config.json','utf8'));const norm=o=>JSON.stringify(Object.fromEntries(Object.entries(o).sort()));const exp={app:'SEED-E2B-SEQUOIA',region:'SEED-E2B-REGION-SOUTH',replicas:1};if(norm(got)!==norm(exp))throw new Error(JSON.stringify(got));if(typeof got.replicas!=='number')throw new Error('replicas must be a number');"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-ORCHID", "SEED-E1-REGION-WEST"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "config-synthesis-decoy",
+          "class": "decoy",
+          "env": { "id": "decoy", "values": { "service": "SEED-DECOY-BRICKWORKS", "workers": 6 } },
+          "prompt": "Work in the directory {workspace}. Write config.json with exactly two keys: service (the service name in legacy-spec.md) and workers (the workers count in legacy-spec.md). Do not create any other files.",
+          "setup": {
+            "files": {
+              "legacy-spec.md": "# Legacy stack\nservice: SEED-DECOY-BRICKWORKS\nworkers: 6\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=JSON.parse(fs.readFileSync('config.json','utf8'));const norm=o=>JSON.stringify(Object.fromEntries(Object.entries(o).sort()));const exp={service:'SEED-DECOY-BRICKWORKS',workers:6};if(norm(got)!==norm(exp))throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["SEED-E1-ORCHID", "SEED-E1-REGION-WEST"],
+          "timeoutMs": 120000
+        }
+      ]
+    },
+    {
+      "id": "tool-orchestration",
+      "domain": "tool orchestration",
+      "parameters": ["feedFile"],
+      "tasks": [
+        {
+          "id": "tool-orchestration-solve",
+          "class": "solve",
+          "env": { "id": "e1", "values": { "feedFile": "feed-e1.json", "count": 5 } },
+          "prompt": "Work in the directory {workspace}. Run: node tools/transform.js feed-e1.json — then run: node tools/validate.js out/transformed.json — then write result.txt containing exactly 'OK <count>' where <count> is the validated count printed by the validator. Do not create any other files.",
+          "setup": {
+            "files": {
+              "tools/transform.js": "const fs=require('fs');const data=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));const items=[...data.items].sort((a,b)=>String(a).localeCompare(String(b)));fs.mkdirSync('out',{recursive:true});fs.writeFileSync('out/transformed.json',JSON.stringify({seed:data.seed,count:items.length,items}));console.log('transformed '+items.length);\n",
+              "tools/validate.js": "const fs=require('fs');const t=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));if(!t.seed||t.count!==t.items.length){console.error('INVALID');process.exit(1);}console.log('VALID '+t.count);\n",
+              "feed-e1.json": "{\"seed\":\"SEED-E1-FEED\",\"items\":[\"copper\",\"iron\",\"lithium\",\"nickel\",\"tin\"]}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=fs.readFileSync('result.txt','utf8').trim();if(got!=='OK 5')throw new Error(JSON.stringify(got));const t=JSON.parse(fs.readFileSync('out/transformed.json','utf8'));if(t.count!==5||t.seed!=='SEED-E1-FEED')throw new Error(JSON.stringify(t));"
+                ]
+              }
+            }
+          ],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "tool-orchestration-verify",
+          "class": "verify",
+          "env": { "id": "ever", "values": { "feedFile": "feed-ver.json", "count": 3 } },
+          "prompt": "Work in the directory {workspace}. Run the transform tool on this workspace's feed file to produce out/transformed.json (the tool takes the feed path as its argument), then run the validate tool on out/transformed.json, then write result.txt containing exactly 'OK <count>' where <count> is the validated count printed by the validator. Do not create any other files.",
+          "setup": {
+            "files": {
+              "tools/transform.js": "const fs=require('fs');const data=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));const items=[...data.items].sort((a,b)=>String(a).localeCompare(String(b)));fs.mkdirSync('out',{recursive:true});fs.writeFileSync('out/transformed.json',JSON.stringify({seed:data.seed,count:items.length,items}));console.log('transformed '+items.length);\n",
+              "tools/validate.js": "const fs=require('fs');const t=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));if(!t.seed||t.count!==t.items.length){console.error('INVALID');process.exit(1);}console.log('VALID '+t.count);\n",
+              "feed-ver.json": "{\"seed\":\"SEED-VER-FEED\",\"items\":[\"mica\",\"quartz\",\"zinc\"]}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=fs.readFileSync('result.txt','utf8').trim();if(got!=='OK 3')throw new Error(JSON.stringify(got));const t=JSON.parse(fs.readFileSync('out/transformed.json','utf8'));if(t.count!==3||t.seed!=='SEED-VER-FEED')throw new Error(JSON.stringify(t));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["feed-e1.json", "SEED-E1-FEED"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "tool-orchestration-transfer-e2a",
+          "class": "transfer",
+          "env": { "id": "e2a", "values": { "feedFile": "feed-e2a.json", "count": 4 } },
+          "prompt": "Work in the directory {workspace}. Run the transform tool on this workspace's feed file to produce out/transformed.json (the tool takes the feed path as its argument), then run the validate tool on out/transformed.json, then write result.txt containing exactly 'OK <count>' where <count> is the validated count printed by the validator. Do not create any other files.",
+          "setup": {
+            "files": {
+              "tools/transform.js": "const fs=require('fs');const data=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));const items=[...data.items].sort((a,b)=>String(a).localeCompare(String(b)));fs.mkdirSync('out',{recursive:true});fs.writeFileSync('out/transformed.json',JSON.stringify({seed:data.seed,count:items.length,items}));console.log('transformed '+items.length);\n",
+              "tools/validate.js": "const fs=require('fs');const t=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));if(!t.seed||t.count!==t.items.length){console.error('INVALID');process.exit(1);}console.log('VALID '+t.count);\n",
+              "feed-e2a.json": "{\"seed\":\"SEED-E2A-FEED\",\"items\":[\"birch\",\"maple\",\"oak\",\"pine\"]}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=fs.readFileSync('result.txt','utf8').trim();if(got!=='OK 4')throw new Error(JSON.stringify(got));const t=JSON.parse(fs.readFileSync('out/transformed.json','utf8'));if(t.count!==4||t.seed!=='SEED-E2A-FEED')throw new Error(JSON.stringify(t));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["feed-e1.json", "SEED-E1-FEED"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "tool-orchestration-transfer-e2b",
+          "class": "transfer",
+          "env": { "id": "e2b", "values": { "feedFile": "feed-e2b.json", "count": 6 } },
+          "prompt": "Work in the directory {workspace}. Run the transform tool on this workspace's feed file to produce out/transformed.json (the tool takes the feed path as its argument), then run the validate tool on out/transformed.json, then write result.txt containing exactly 'OK <count>' where <count> is the validated count printed by the validator. Do not create any other files.",
+          "setup": {
+            "files": {
+              "tools/transform.js": "const fs=require('fs');const data=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));const items=[...data.items].sort((a,b)=>String(a).localeCompare(String(b)));fs.mkdirSync('out',{recursive:true});fs.writeFileSync('out/transformed.json',JSON.stringify({seed:data.seed,count:items.length,items}));console.log('transformed '+items.length);\n",
+              "tools/validate.js": "const fs=require('fs');const t=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));if(!t.seed||t.count!==t.items.length){console.error('INVALID');process.exit(1);}console.log('VALID '+t.count);\n",
+              "feed-e2b.json": "{\"seed\":\"SEED-E2B-FEED\",\"items\":[\"amber\",\"coral\",\"ivory\",\"jet\",\"onyx\",\"pearl\"]}\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=fs.readFileSync('result.txt','utf8').trim();if(got!=='OK 6')throw new Error(JSON.stringify(got));const t=JSON.parse(fs.readFileSync('out/transformed.json','utf8'));if(t.count!==6||t.seed!=='SEED-E2B-FEED')throw new Error(JSON.stringify(t));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["feed-e1.json", "SEED-E1-FEED"],
+          "timeoutMs": 120000
+        },
+        {
+          "id": "tool-orchestration-decoy",
+          "class": "decoy",
+          "env": { "id": "decoy", "values": { "feedFile": "feed-legacy.xml", "count": 2 } },
+          "prompt": "Work in the directory {workspace}. The legacy pipeline is different here: run node tools/transform-legacy.js on feed-legacy.xml to produce out/transformed.xml, then run node tools/validate-xml.js out/transformed.xml, then write result.txt containing exactly 'OK <count>' where <count> is the count the XML validator prints. Do not create any other files.",
+          "setup": {
+            "files": {
+              "tools/transform-legacy.js": "const fs=require('fs');const xml=fs.readFileSync(process.argv[2],'utf8');const items=(xml.match(/<item>/g)||[]).length;fs.mkdirSync('out',{recursive:true});fs.writeFileSync('out/transformed.xml','<feed><count>'+items+'</count></feed>');console.log('transformed '+items);\n",
+              "tools/validate-xml.js": "const fs=require('fs');const xml=fs.readFileSync(process.argv[2],'utf8');const m=xml.match(/<count>(\\d+)<\\/count>/);if(!m){console.error('INVALID');process.exit(1);}console.log('VALID '+m[1]);\n",
+              "feed-legacy.xml": "<feed>\n  <item>alpha</item>\n  <item>beta</item>\n</feed>\n"
+            }
+          },
+          "checks": [
+            {
+              "target": "workspace",
+              "spec": {
+                "type": "command",
+                "command": "node",
+                "args": [
+                  "-e",
+                  "const fs=require('fs');const got=fs.readFileSync('result.txt','utf8').trim();if(got!=='OK 2')throw new Error(JSON.stringify(got));"
+                ]
+              }
+            }
+          ],
+          "forbiddenLiterals": ["feed-e1.json", "SEED-E1-FEED"],
+          "timeoutMs": 120000
+        }
+      ]
+    }
+  ]
+}

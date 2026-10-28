@@ -1,0 +1,531 @@
+/**
+ * Security proof matrix for memory-file access (default-deny model).
+ *
+ * Acceptance: a verified skill, a malicious prompt, or an experiment flag must all fail
+ * to bypass a denied memory-file access — and path checks must survive symlinks,
+ * traversal, and Windows normalization.
+ */
+import { describe, it, expect, afterEach, beforeAll } from "vitest";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync, rmdirSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
+import { join, relative, resolve, sep, basename } from "node:path";
+import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import type { Tool, WorkspaceProfile } from "../types/index.js";
+import { createPolicyRuntime, enforceToolPolicy } from "./policy.js";
+import { setInteractiveApproval } from "../tools/approval.js";
+import { MEMORY_DIR, EPISODES_JSONL_PATH, NTOX_DIR } from "./config.js";
+import { MemoryStore } from "../memory/episodic.js";
+
+function profile(root: string): WorkspaceProfile {
+  return {
+    id: "test",
+    name: "Test Workspace",
+    workspaceRoot: root,
+    readRoots: [root],
+    writeRoots: [root],
+    allowedTools: ["read", "write", "grep", "ls", "shell", "image"],
+    shellPolicy: "workspace",
+    networkPolicy: "fetch-only",
+    autoCheckpoint: false,
+  };
+}
+
+function tempRoot(): string {
+  const root = join(tmpdir(), `ntox-policy-sec-${randomUUID().slice(0, 8)}`);
+  mkdirSync(root, { recursive: true });
+  return root;
+}
+
+/**
+ * Safety guard: proves the captured NTOX_DIR is a temporary directory owned by THIS test
+ * run BEFORE any destructive cleanup. Requirements (all must hold):
+ *  1. strict descendant of the system temp directory — never temp itself;
+ *  2. mkdtemp prefix created by the test setup ("ntox-test-");
+ *  3. explicit ownership marker file written by src/core/test-setup.ts;
+ *  4. never the real ~/.ntox.
+ * In an ordinary environment (no test-setup redirect), every destructive path in this
+ * file must throw here instead of deleting user configuration, credentials, or memories —
+ * and an arbitrary directory under temp (temp root, unrelated dirs, prefix spoofs without
+ * a marker) is equally rejected.
+ */
+const TEST_MARKER = ".ntox-test-owned";
+
+function isOwnedTestDir(dir: string): boolean {
+  const norm = (p: string): string => {
+    const r = resolve(p);
+    return process.platform === "win32" ? r.toLowerCase() : r;
+  };
+  const current = norm(dir);
+  const tmp = norm(tmpdir());
+  const real = norm(join(homedir(), ".ntox"));
+  if (current === real) return false;
+  if (!current.startsWith(tmp + sep)) return false; // strict descendant; temp root rejected
+  if (!basename(current).toLowerCase().startsWith("ntox-test-")) return false;
+  if (!existsSync(join(dir, TEST_MARKER))) return false; // proof of creation by test-setup
+  return true;
+}
+
+function ownedTempNtoxDir(): string {
+  if (!isOwnedTestDir(NTOX_DIR)) {
+    throw new Error(
+      `[safety] refusing destructive operation: NTOX_DIR=${NTOX_DIR} is not an owned test directory ` +
+        `(needs: strict descendant of ${tmpdir()} with prefix ntox-test- containing ${TEST_MARKER}; ` +
+        `real user data lives at ${join(homedir(), ".ntox")}). ` +
+        `This test file requires the isolated vitest setup (setupFiles: test-setup.ts).`,
+    );
+  }
+  return NTOX_DIR;
+}
+
+// Fail fast for the WHOLE file: in an ordinary environment no test body — and therefore
+// no write, symlink surgery, or cleanup — ever runs.
+beforeAll(() => {
+  ownedTempNtoxDir();
+});
+
+function tool(name: string): Tool {
+  return {
+    name,
+    description: "",
+    parameters: {},
+    execute: async () => ({ success: true }),
+  };
+}
+
+const ENV_KEYS = ["NTOX_ISOLATE_MEMORY", "NTOX_MEMORY_ACCESS", "NTOX_MEMORY_SCORING"];
+
+afterEach(() => {
+  setInteractiveApproval(null);
+  for (const key of ENV_KEYS) delete process.env[key];
+});
+
+describe("memory access — private by default", () => {
+  it("denies raw episodic reads with no configuration present", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime(profile(root));
+    const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: EPISODES_JSONL_PATH });
+    expect(result.success).toBe(false);
+    expect(runtime.decisions.at(-1)?.allowed).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("denies writes to memory.md under the default summaries scope (read-only allowlist)", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime(profile(root));
+    const result = await enforceToolPolicy(tool("write"), runtime).execute({
+      path: join(MEMORY_DIR, "memory.md"),
+      content: "x",
+    });
+    expect(result.success).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("allows reading memory.md under the default summaries scope (validated-config allowlist)", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime(profile(root));
+    const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: join(MEMORY_DIR, "memory.md") });
+    expect(result.success).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("grants raw episodic access only under explicit memoryAccess: full", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime({ ...profile(root), memoryAccess: "full" });
+    const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: EPISODES_JSONL_PATH });
+    expect(result.success).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("memoryAccess: deny blocks even memory.md", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime({ ...profile(root), memoryAccess: "deny" });
+    const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: join(MEMORY_DIR, "memory.md") });
+    expect(result.success).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("memory access — malicious prompt cannot bypass the boundary", () => {
+  it("denies read / grep / ls against raw memory paths", async () => {
+    const root = tempRoot();
+    for (const attempt of [
+      { name: "read", args: { path: EPISODES_JSONL_PATH } },
+      { name: "read", args: { path: join(MEMORY_DIR, "durable.json") } },
+      { name: "grep", args: { path: MEMORY_DIR, pattern: "password" } },
+      { name: "ls", args: { path: MEMORY_DIR } },
+    ]) {
+      const runtime = createPolicyRuntime(profile(root));
+      const result = await enforceToolPolicy(tool(attempt.name), runtime).execute(attempt.args);
+      expect(result.success, `${attempt.name} ${JSON.stringify(attempt.args)}`).toBe(false);
+      expect(runtime.decisions.at(-1)?.allowed).toBe(false);
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("denies a shell working directory inside the memory directory", async () => {
+    const root = tempRoot();
+    mkdirSync(MEMORY_DIR, { recursive: true });
+    const runtime = createPolicyRuntime(profile(root));
+    const result = await enforceToolPolicy(tool("shell"), runtime).execute({
+      command: "dir",
+      workdir: MEMORY_DIR,
+    });
+    expect(result.success).toBe(false);
+    expect(runtime.decisions.at(-1)?.allowed).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("denies an image path pointing at a memory file", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime({ ...profile(root), allowedTools: [...profile(root).allowedTools] });
+    const args = { image: join(MEMORY_DIR, "shot.png") };
+    const result = await enforceToolPolicy(tool("image"), runtime).execute(args);
+    expect(result.success).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("memory access — verified skill cannot grant authority", () => {
+  it("ignores skill/verification metadata attached to the runtime profile", async () => {
+    const root = tempRoot();
+    const claimed = {
+      ...profile(root),
+      skill: { name: "super-skill", verified: true, grants: ["read"], authority: "full" },
+      verification: { status: "verified", evidence: "agent-said-done" },
+    } as WorkspaceProfile & Record<string, unknown>;
+    const runtime = createPolicyRuntime(claimed);
+    const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: EPISODES_JSONL_PATH });
+    expect(result.success).toBe(false);
+    expect(runtime.decisions.at(-1)?.allowed).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("memory access — experiment flags cannot grant authority", () => {
+  it("no environment variable grants memory access (env is not consulted)", async () => {
+    const root = tempRoot();
+    process.env.NTOX_ISOLATE_MEMORY = "0";
+    process.env.NTOX_MEMORY_ACCESS = "full";
+    process.env.NTOX_MEMORY_SCORING = "off";
+    const runtime = createPolicyRuntime(profile(root));
+    const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: EPISODES_JSONL_PATH });
+    expect(result.success).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("strictening flags cannot bypass config either (deny stays deny)", async () => {
+    const root = tempRoot();
+    process.env.NTOX_ISOLATE_MEMORY = "1";
+    const runtime = createPolicyRuntime({ ...profile(root), memoryAccess: "deny" });
+    const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: join(MEMORY_DIR, "memory.md") });
+    expect(result.success).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("memory access — retrieval is not filesystem authority", () => {
+  it("supplies memory content to the model while file access stays denied", async () => {
+    const root = tempRoot();
+    const store = new MemoryStore();
+    store.addEpisode("sec-test", "the vault code is delta-9", "Vault code: delta-9", [1, 0, 0], "local-hash");
+
+    const context = store.buildMemoryContext([1, 0, 0], 5, "local-hash", "what is the vault code");
+    expect(context).toContain("vault code");
+
+    const runtime = createPolicyRuntime(profile(root));
+    const fileResult = await enforceToolPolicy(tool("read"), runtime).execute({ path: EPISODES_JSONL_PATH });
+    expect(fileResult.success).toBe(false);
+    store.clearAll();
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("memory access — path robustness", () => {
+  it("collapses traversal: relative paths reaching raw memory stay governed by the rule", async () => {
+    const root = tempRoot();
+    const traversing = `${root}\\${relative(root, EPISODES_JSONL_PATH)}`;
+    expect(traversing).toContain("..");
+    const runtime = createPolicyRuntime(profile(root));
+    const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: traversing });
+    expect(result.success).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const itWin = process.platform === "win32" ? it : it.skip;
+
+  itWin("resolves junctions: a link inside the workspace cannot expose raw memory", async () => {
+    const root = tempRoot();
+    mkdirSync(MEMORY_DIR, { recursive: true });
+    writeFileSync(EPISODES_JSONL_PATH, "");
+    const link = join(root, "memlink");
+    symlinkSync(MEMORY_DIR, link, "junction");
+    const runtime = createPolicyRuntime(profile(root));
+    const result = await enforceToolPolicy(tool("read"), runtime).execute({
+      path: join(link, "episodes.jsonl"),
+    });
+    expect(result.success).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+    rmSync(link, { force: true });
+  });
+
+  itWin("normalizes case, forward slashes, and long-path prefixes", async () => {
+    const root = tempRoot();
+    const weird = EPISODES_JSONL_PATH.replace(/\\/g, "/").toUpperCase().replace(/^/, "\\\\?\\");
+    const runtime = createPolicyRuntime({ ...profile(root), memoryAccess: "full" });
+    const allowed = await enforceToolPolicy(tool("read"), runtime).execute({ path: weird });
+    expect(allowed.success).toBe(true);
+    const defaultRuntime = createPolicyRuntime(profile(root));
+    const denied = await enforceToolPolicy(tool("read"), defaultRuntime).execute({ path: weird });
+    expect(denied.success).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  itWin("denies writes through a junction escaping the workspace", async () => {
+    const root = tempRoot();
+    const outside = join(tmpdir(), `ntox-sec-out-${randomUUID().slice(0, 8)}`);
+    mkdirSync(outside, { recursive: true });
+    const link = join(root, "escape");
+    symlinkSync(outside, link, "junction");
+    const runtime = createPolicyRuntime(profile(root));
+    const result = await enforceToolPolicy(tool("write"), runtime).execute({
+      path: join(link, "stolen.txt"),
+      content: "x",
+    });
+    expect(result.success).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+    rmSync(link, { force: true });
+  });
+});
+
+describe("memory access — fail-closed canonicalization", () => {
+  it("denies paths whose ancestry cannot be resolved (file used as directory), even with full access", async () => {
+    const root = tempRoot();
+    writeFileSync(join(root, "blocker.txt"), "i am a file");
+    const bogus = join(root, "blocker.txt", "sub", "x.json");
+    for (const memProfile of [profile(root), { ...profile(root), memoryAccess: "full" as const }]) {
+      const runtime = createPolicyRuntime(memProfile);
+      const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: bogus });
+      expect(result.success).toBe(false);
+      expect(runtime.decisions.at(-1)?.allowed).toBe(false);
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("still allows brand-new nested files in the workspace (ENOENT ancestry is resolvable)", async () => {
+    const root = tempRoot();
+    const runtime = createPolicyRuntime(profile(root));
+    const result = await enforceToolPolicy(tool("write"), runtime).execute({
+      path: join(root, "new", "deep", "file.txt"),
+      content: "x",
+    });
+    expect(result.success).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("memory access — denial overrides workspace roots (MEMORY_DIR inside roots)", () => {
+  // The overlap case from review: workspace/read/write roots CONTAIN the memory directory.
+  function overlapped(extra: Partial<WorkspaceProfile> = {}): WorkspaceProfile {
+    return { ...profile(NTOX_DIR), memoryAccess: "deny", ...extra };
+  }
+
+  it("memoryAccess: deny blocks raw reads and writes even when roots authorize the path", async () => {
+    mkdirSync(MEMORY_DIR, { recursive: true });
+    const readRuntime = createPolicyRuntime(overlapped());
+    const readResult = await enforceToolPolicy(tool("read"), readRuntime).execute({ path: EPISODES_JSONL_PATH });
+    expect(readResult.success).toBe(false);
+    expect(readRuntime.decisions.at(-1)?.allowed).toBe(false);
+
+    const writeRuntime = createPolicyRuntime(overlapped());
+    const writeResult = await enforceToolPolicy(tool("write"), writeRuntime).execute({
+      path: EPISODES_JSONL_PATH,
+      content: "[]",
+    });
+    expect(writeResult.success).toBe(false);
+    // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+    // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+    ownedTempNtoxDir();
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
+  });
+
+  it("denies shell cwd, image, and checkpoint access to memory even inside the workspace", async () => {
+    mkdirSync(MEMORY_DIR, { recursive: true });
+    const shellRuntime = createPolicyRuntime(overlapped());
+    const shellResult = await enforceToolPolicy(tool("shell"), shellRuntime).execute({
+      command: "dir",
+      workdir: MEMORY_DIR,
+    });
+    expect(shellResult.success).toBe(false);
+
+    const imageRuntime = createPolicyRuntime(overlapped());
+    const imageResult = await enforceToolPolicy(tool("image"), imageRuntime).execute({
+      image: join(MEMORY_DIR, "shot.png"),
+    });
+    expect(imageResult.success).toBe(false);
+
+    const cpRuntime = createPolicyRuntime({
+      ...overlapped({ allowedTools: [...profile(NTOX_DIR).allowedTools, "checkpoint"] }),
+    });
+    const cpResult = await enforceToolPolicy(tool("checkpoint"), cpRuntime).execute({
+      action: "create",
+      path: EPISODES_JSONL_PATH,
+    });
+    expect(cpResult.success).toBe(false);
+    // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+    // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+    ownedTempNtoxDir();
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
+  });
+
+  it("summaries scope: memory.md stays readable but unwritable inside workspace roots", async () => {
+    mkdirSync(MEMORY_DIR, { recursive: true });
+    const readRuntime = createPolicyRuntime(overlapped({ memoryAccess: "summaries" }));
+    const readResult = await enforceToolPolicy(tool("read"), readRuntime).execute({
+      path: join(MEMORY_DIR, "memory.md"),
+    });
+    expect(readResult.success).toBe(true);
+
+    const writeRuntime = createPolicyRuntime(overlapped({ memoryAccess: "summaries" }));
+    const writeResult = await enforceToolPolicy(tool("write"), writeRuntime).execute({
+      path: join(MEMORY_DIR, "memory.md"),
+      content: "x",
+    });
+    expect(writeResult.success).toBe(false);
+
+    const rawRuntime = createPolicyRuntime(overlapped({ memoryAccess: "summaries" }));
+    const rawResult = await enforceToolPolicy(tool("read"), rawRuntime).execute({ path: EPISODES_JSONL_PATH });
+    expect(rawResult.success).toBe(false);
+    // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+    // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+    ownedTempNtoxDir();
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
+  });
+
+  it("memoryAccess: full authorizes raw memory inside workspace roots (positive control)", async () => {
+    mkdirSync(MEMORY_DIR, { recursive: true });
+    const runtime = createPolicyRuntime(overlapped({ memoryAccess: "full" }));
+    const result = await enforceToolPolicy(tool("read"), runtime).execute({ path: EPISODES_JSONL_PATH });
+    expect(result.success).toBe(true);
+    // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+    // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+    ownedTempNtoxDir();
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
+  });
+});
+
+describe("memory access — test filesystem safety", () => {
+  it("proves the captured NTOX_DIR is an owned test directory, never the real ~/.ntox", () => {
+    expect(() => ownedTempNtoxDir()).not.toThrow();
+    expect(isOwnedTestDir(NTOX_DIR)).toBe(true);
+    const norm = (p: string): string => {
+      const r = resolve(p);
+      return process.platform === "win32" ? r.toLowerCase() : r;
+    };
+    expect(norm(NTOX_DIR)).not.toBe(norm(join(homedir(), ".ntox")));
+    expect(NTOX_DIR.startsWith(resolve(tmpdir()) + sep)).toBe(true);
+    expect(NTOX_DIR.startsWith(resolve(tmpdir()))).toBe(true);
+  });
+
+  it("rejects the system temp directory itself (not a strict descendant)", () => {
+    expect(isOwnedTestDir(tmpdir())).toBe(false);
+  });
+
+  it("rejects unrelated directories under temp, including ntox-test- prefix spoofs without the ownership marker", () => {
+    const unrelated = join(tmpdir(), `unrelated-${randomUUID().slice(0, 8)}`);
+    const spoof = join(tmpdir(), `ntox-test-${randomUUID().slice(0, 8)}`);
+    mkdirSync(unrelated, { recursive: true });
+    mkdirSync(spoof, { recursive: true });
+    try {
+      expect(isOwnedTestDir(unrelated)).toBe(false);
+      expect(isOwnedTestDir(spoof)).toBe(false); // right prefix, missing marker -> rejected
+      expect(isOwnedTestDir(join(unrelated, "nested"))).toBe(false);
+    } finally {
+      rmSync(unrelated, { recursive: true, force: true });
+      rmSync(spoof, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects the real user directory by identity", () => {
+    const norm = (p: string): string => {
+      const r = resolve(p);
+      return process.platform === "win32" ? r.toLowerCase() : r;
+    };
+    expect(norm(NTOX_DIR)).not.toBe(norm(join(homedir(), ".ntox")));
+    // The guard cannot be pointed at the real path (it reads the captured constant);
+    // this pins the exact identity the guard rejects by construction.
+    expect(isOwnedTestDir(join(tmpdir(), "..", ".ntox"))).toBe(false);
+  });
+
+  it("guard throws (fail closed) when handed a non-owned directory", () => {
+    expect(isOwnedTestDir(NTOX_DIR)).toBe(true);
+    expect(isOwnedTestDir(tmpdir())).toBe(false);
+  });
+});
+
+describe("memory access — exact summary allowlist and unresolvable root", () => {
+  it("summaries allowlists exactly memory.md: nested memory.md files are denied", async () => {
+    mkdirSync(join(MEMORY_DIR, "private"), { recursive: true });
+    const base: WorkspaceProfile = { ...profile(NTOX_DIR), memoryAccess: "summaries" };
+
+    const exact = createPolicyRuntime(base);
+    const exactResult = await enforceToolPolicy(tool("read"), exact).execute({
+      path: join(MEMORY_DIR, "memory.md"),
+    });
+    expect(exactResult.success).toBe(true);
+
+    const nestedRuntime = createPolicyRuntime(base);
+    const nestedResult = await enforceToolPolicy(tool("read"), nestedRuntime).execute({
+      path: join(MEMORY_DIR, "private", "memory.md"),
+    });
+    expect(nestedResult.success).toBe(false);
+    expect(nestedRuntime.decisions.at(-1)?.allowed).toBe(false);
+    // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+    // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+    ownedTempNtoxDir();
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
+  });
+
+  it("fails closed when the protected memory root cannot be canonicalized, even inside workspace roots", async () => {
+    // Circular directory links: realpath(MEMORY_DIR) cannot establish an identity.
+    const a = join(NTOX_DIR, "loopA");
+    const b = join(NTOX_DIR, "loopB");
+    ownedTempNtoxDir(); // ownership proven before any recursive removal
+    rmSync(MEMORY_DIR, { recursive: true, force: true });
+    mkdirSync(a, { recursive: true });
+    mkdirSync(b, { recursive: true });
+    const linkType = process.platform === "win32" ? ("junction" as const) : ("dir" as const);
+    symlinkSync(b, join(a, "toB"), linkType);
+    symlinkSync(a, join(b, "toA"), linkType);
+    symlinkSync(a, MEMORY_DIR, linkType);
+    const removeLink = (p: string): void => {
+      try {
+        rmdirSync(p);
+      } catch {
+        rmSync(p, { force: true });
+      }
+    };
+
+    try {
+      // Workspace roots CONTAIN the memory path: with a wrong "outside" verdict the
+      // roots check would authorize this read. It must be denied (unresolved).
+      const runtime = createPolicyRuntime(profile(NTOX_DIR));
+      const result = await enforceToolPolicy(tool("read"), runtime).execute({
+        path: join(MEMORY_DIR, "episodes.jsonl"),
+      });
+      expect(result.success).toBe(false);
+      expect(runtime.decisions.at(-1)?.allowed).toBe(false);
+    } finally {
+      removeLink(MEMORY_DIR);
+      removeLink(join(a, "toB"));
+      removeLink(join(b, "toA"));
+      rmSync(a, { recursive: true, force: true });
+      rmSync(b, { recursive: true, force: true });
+      // Ownership proven, then reset only the memory subtree — the owned root (and its marker)
+      // is never recursively deleted; state resets target MEMORY_DIR, which is what tests mutate.
+      ownedTempNtoxDir();
+      rmSync(MEMORY_DIR, { recursive: true, force: true });
+    }
+  });
+});

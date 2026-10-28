@@ -1,0 +1,50 @@
+{
+  "generatedAt": "2026-10-27T23:57:08.758Z",
+  "suitePath": "scripts/experiments/phase3-tasks.json",
+  "suiteSha256": "sha256:bb43dd6b1cf4a060b08add7c46b04732294a5eac38b8d772147c63e836cb4207",
+  "checks": [
+    {
+      "id": "P1-signer-isolation",
+      "title": "Signer not accessible to the agent",
+      "passed": true,
+      "detail": "no agent-surface module references signing; policy denies C:\\Users\\anton\\.ntox\\procedures (read/write) with no grant that opens it"
+    },
+    {
+      "id": "P2-version-binding",
+      "title": "Evidence is version-bound",
+      "passed": true,
+      "detail": "stale-version, cross-procedure, and content-drift evidence all rejected; bound evidence promotes"
+    },
+    {
+      "id": "P3-reuse-accounting",
+      "title": "Candidates can never count as verified reuse",
+      "passed": true,
+      "detail": "6 accounting cases hold (candidate→candidate-reuse, decoy never verified-reuse, replay→incorrect-reuse)"
+    },
+    {
+      "id": "P5-promotion-gate",
+      "title": "Promotion requires recorded procedural execution",
+      "passed": true,
+      "detail": "7 gate cases hold: applicability + executed steps + clean checks are ALL required — solving the task alone never promotes"
+    },
+    {
+      "id": "P6-policy-accounting",
+      "title": "Policy-bypass metric is derived and fail-closed",
+      "passed": true,
+      "detail": "5 accounting cases hold — the metric counts real events; missing policy evidence fails the gate instead of counting as safe"
+    },
+    {
+      "id": "P7-arm-comparability",
+      "title": "Paired C–B scoring and episodic-state control",
+      "passed": true,
+      "detail": "pairedCB scores matched transfer tasks only (C vs B, net 2); memory snapshot/restore round-trips byte-identical and never touches the procedure store"
+    },
+    {
+      "id": "P4-frozen-fixtures",
+      "title": "Frozen fixtures and checks present and valid",
+      "passed": true,
+      "detail": "6 families, 30 tasks, all checks compile (sha256:bb43dd6b1cf4a060b08add7c46b04732294a5eac38b8d772147c63e836cb4207)"
+    }
+  ],
+  "passed": true
+}
