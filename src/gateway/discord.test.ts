@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { createDiscordChannel } from "../discord.js";
+import { createDiscordChannel } from "./discord.js";
 
 describe("createDiscordChannel", () => {
   let fetchMock: ReturnType<typeof vi.fn>;

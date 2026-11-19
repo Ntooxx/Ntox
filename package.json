@@ -51,7 +51,7 @@
     "gateway:discord": "tsx src/index.ts gateway discord",
     "api": "tsx src/index.ts api",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/",
+    "lint": "eslint src/ scripts/ desktop/ integrations/deepseek-harness/src",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",

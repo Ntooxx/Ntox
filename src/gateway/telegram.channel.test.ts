@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { createTelegramChannel } from "../telegram.js";
+import { createTelegramChannel } from "./telegram.js";
 
 describe("createTelegramChannel", () => {
   let fetchMock: ReturnType<typeof vi.fn>;

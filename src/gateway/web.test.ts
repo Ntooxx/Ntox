@@ -2,8 +2,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdtempSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createWebChannel } from "../web.js";
-import { ConversationStore } from "../conversations.js";
+import { createWebChannel } from "./web.js";
+import { ConversationStore } from "./conversations.js";
 
 const tmp = mkdtempSync(join(tmpdir(), "ntox-web-test-"));
 const convPath = join(tmp, "conversations.json");

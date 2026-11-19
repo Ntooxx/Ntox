@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { createHmac } from "node:crypto";
-import { createWhatsAppChannel, verifyWhatsAppSignature } from "../whatsapp.js";
+import { createWhatsAppChannel, verifyWhatsAppSignature } from "./whatsapp.js";
 
 describe("verifyWhatsAppSignature", () => {
   const secret = "test-app-secret";

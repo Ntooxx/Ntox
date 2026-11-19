@@ -7,7 +7,7 @@
 
   [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
   [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](package.json)
-  [![tests](https://img.shields.io/badge/tests-1494%20passing-44cc11)](https://github.com/Ntooxx/Ntox/actions)
+  [![tests](https://github.com/Ntooxx/Ntox/actions/workflows/ci.yml/badge.svg)](https://github.com/Ntooxx/Ntox/actions/workflows/ci.yml)
   [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
 </div>
 
@@ -19,7 +19,7 @@ NTOX is a self-improving AI agent that runs locally. Unlike standard LLM tool lo
 
 **Core capabilities:**
 - **Learns from experience** — corrections outrank conflicting facts, patterns compile into reusable skills
-- **Remembers everything** — persistent episodic memory with cosine similarity search (local, no API key needed)
+- **Remembers everything** — persistent episodic memory with semantic search: remote embeddings when a provider is configured, local-hash fallback offline, every vector tagged with the embedding model that produced it
 - **Self-corrects** — detects shallow reasoning and retries with deeper analysis
 - **Works everywhere** — terminal REPL, Telegram, Discord, WhatsApp, Slack, Web UI, Desktop app
 - **Stays local** — runs on your machine, your data never leaves unless you configure a remote provider
@@ -88,12 +88,34 @@ ntox          # Start chatting
 | **10 LLM Providers** | OpenAI, Anthropic, Ollama, LM Studio, Groq, Together, Mistral, DeepSeek, OpenRouter, any OpenAI-compatible endpoint |
 | **Multi-Channel Gateway** | Telegram, Discord, WhatsApp, Slack, Web UI — all sharing one agent runtime |
 | **Cognitive Kernel** | Compresses queries to primitives, matches patterns in 8D vector space, auto-compiles frequent patterns |
-| **Persistent Memory** | Every exchange embedded and searchable. Corrections outrank conflicting facts. |
-| **Skill Library** | 107 reasoning skills across 17 categories, matched semantically at prompt time |
+| **Persistent Memory** | Every exchange embedded and searchable. Corrections outrank conflicting facts. Embeddings are remote-first with a local-hash fallback; provenance is tracked per vector. |
+| **Skill Library** | 103 reasoning skills across 18 categories, matched semantically at prompt time |
 | **MCP Bridge** | Use external MCP servers as tools, serve NTOX skills to any MCP host |
 | **Workspace Policy** | Profiles constrain reads/writes/shell paths. Auto-checkpoints before edits. |
 | **Docker Sandboxing** | Optional container isolation for shell commands |
 | **Inspectable** | `/trace` shows strategy, tokens, cost, policy decisions, checkpoints, calibration |
+
+---
+
+## Support Matrix
+
+| Surface | Tier | Notes |
+|---------|------|-------|
+| CLI REPL | Core | Full feature surface |
+| Telegram | Core | Voice, approvals, image pipelines |
+| Web UI | Core | Chat + static assets |
+| HTTP API | Core | REST/SSE server |
+| Discord | Best-effort | Community-maintained |
+| WhatsApp | Best-effort | Community-maintained |
+| Slack | Best-effort | Community-maintained |
+| Electron desktop | Best-effort | Thin client over the local API |
+| MCP bridge | Best-effort | External MCP servers as tools |
+| Marketplace | Best-effort | Skill distribution surface |
+
+Core surfaces gate every release. Best-effort surfaces merge only with tests,
+a README section, and a named owner. Non-shipping directories (`experiments/`,
+`glyphs/`, `site/`, `marketplace/`, `desktop/`) are sandboxed and excluded from
+the published npm package.
 
 ---
 
@@ -110,7 +132,7 @@ ntox          # Start chatting
 | `/approve` | Approve or deny risky shell commands |
 | `/new` | Reset conversation |
 
-Full command list: [README Commands](#commands)
+Full command list: run `/help` inside the REPL (or `ntox --help` for CLI flags).
 
 ---
 
@@ -129,7 +151,7 @@ ntox/
 │   ├── gateway/       Telegram, Discord, WhatsApp, Slack, Web UI
 │   ├── api/           HTTP/SSE server
 │   └── kernel/        Goals, subtasks, verifier
-├── skills/            107 bundled reasoning skill documents
+├── skills/            103 bundled reasoning skill documents
 ├── desktop/           Electron desktop app
 └── screenshots/       UI documentation
 ```
@@ -147,7 +169,7 @@ ntox/
 
 ```bash
 npm run verify:all    # Complete gate: lint, typecheck, tests, build
-npm test              # Run tests (1494 passing)
+npm test              # Run tests
 npm run typecheck     # TypeScript checks
 npm run build         # Build package
 ```
