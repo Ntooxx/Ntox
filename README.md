@@ -108,14 +108,14 @@ ntox          # Start chatting
 | Discord | Best-effort | Community-maintained |
 | WhatsApp | Best-effort | Community-maintained |
 | Slack | Best-effort | Community-maintained |
-| Electron desktop | Best-effort | Thin client over the local API |
+| Electron desktop | Best-effort | Thin client over the local API; auth/landscape smoke tests only, no UI render coverage |
 | MCP bridge | Best-effort | External MCP servers as tools |
-| Marketplace | Best-effort | Skill distribution surface |
+| Marketplace | Best-effort | Skill distribution surface; bundled index for offline lookup |
 
 Core surfaces gate every release. Best-effort surfaces merge only with tests,
 a README section, and a named owner. Non-shipping directories (`experiments/`,
-`glyphs/`, `site/`, `marketplace/`, `desktop/`) are sandboxed and excluded from
-the published npm package.
+`glyphs/`, `site/`, `desktop/`) are sandboxed and excluded from the published
+npm package; the `marketplace/` index is bundled for offline skill discovery.
 
 ---
 
@@ -125,7 +125,7 @@ the published npm package.
 |---------|-------------|
 | `/help` | Show all commands |
 | `/model` | Switch model (live OpenRouter catalog) |
-| `/trace` | Inspect last turn: strategy, tokens, cost, policy |
+| `/trace` | Inspect last turn: strategy, tokens, cost, policy, injection warnings |
 | `/memory` | Browse memory stats |
 | `/theories` | Inspect learned theories |
 | `/skills` | List/load skills |
@@ -156,6 +156,9 @@ ntox/
 └── screenshots/       UI documentation
 ```
 
+Non-shipping / sandboxed (not in `package.json.files`): `experiments/`, `glyphs/`,
+`site/`, `desktop/`. The `marketplace/` index ships so skill lookup works offline.
+
 ---
 
 ## Requirements
@@ -184,7 +187,7 @@ Defense-in-depth protections:
 - **Workspace policy**: Default profile confines read/write/shell to active workspace
 - **Web fetch**: Blocks `file://`, `localhost`, all private IP ranges
 - **Shell**: Regex blocklist for destructive commands + optional Docker sandboxing
-- **Prompt**: 14 injection pattern detectors (DAN, jailbreak, override, etc.)
+- **Prompt**: risk-tiered injection guard — structural markers block, jailbreak phrasings are stripped and warned
 - **Output**: Sanitizes API keys, tokens, private keys from responses
 - **Config**: Zod schema validation, `0600` file permissions
 
