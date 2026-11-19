@@ -34,6 +34,7 @@ import type {
   AgentTurnTrace,
 } from "../types/index.js";
 import { deleteSessionSnapshot, loadSessionSnapshot, saveSessionSnapshot } from "./session-store.js";
+import { detectPromptInjection } from "./guard.js";
 import { resetPolicyRuntime, type PolicyRuntime } from "./policy.js";
 
 import { Mind } from "../mind/mind.js";
@@ -343,6 +344,7 @@ export class Agent {
       policyDecisions: [],
       checkpointIds: [],
       retries: 0,
+      injectionWarnings: [],
     };
     if (this.cfg.policy) resetPolicyRuntime(this.cfg.policy);
   }
@@ -448,14 +450,31 @@ export class Agent {
     return runContextWindow(this.cfg, { messages: this.messages, tokenCache: this.messageTokenCache });
   }
 
-  async *run(userInput: string, callbacks: AgentCallbacks, options: AgentRunOptions = {}): AsyncGenerator<string> {
+  async *run(rawInput: string, callbacks: AgentCallbacks, options: AgentRunOptions = {}): AsyncGenerator<string> {
     const { cfg } = this;
     const turnStartedAt = Date.now();
     this.runtime.falseSuccessThisTurn = false;
     this.runtime.mindTurn = null;
     this.runtime.predictionAttempt = null;
     this.runtime.mindAlivePredictionId = null;
-    this.startTrace(userInput);
+    this.startTrace(rawInput);
+
+    // 0a. Prompt injection guard — before the user message enters history.
+    // Structural markers block outright; phrase phrasings are stripped and warned.
+    const guard = detectPromptInjection(rawInput);
+    if (guard.blocked) {
+      const msg = "[Security] Potential prompt injection blocked. Your message was not processed.";
+      if (this.currentTrace) this.currentTrace.blockedReason = guard.reason;
+      this.pushMessage({ role: "assistant", content: msg });
+      callbacks.onToken(msg);
+      this.lastAssistantResponse = msg;
+      this.lastUserMessage = rawInput;
+      this.finishTrace(msg);
+      yield msg;
+      return;
+    }
+    const userInput = guard.sanitizedInput ?? rawInput;
+    if (guard.warnings?.length && this.currentTrace) this.currentTrace.injectionWarnings = [...guard.warnings];
     this.runTurnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     this.cognitiveLayer.setStoreFlags({
       memoryEnabled: cfg.memoryEnabled,
@@ -469,8 +488,7 @@ export class Agent {
     callbacks.onPhase?.("thinking");
     this.pushMessage({ role: "user", content: userInput });
 
-    // 0a. Prompt injection guard
-    // 0a. Kernel routing ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â try kernel first for handleable modes
+    // 0a. Kernel routing — try kernel first for handleable modes
     const quickResult = await handleQuickPaths({
       userInput,
       cfg,

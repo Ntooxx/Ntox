@@ -2,7 +2,6 @@ import type { AgentTurnTrace, Message } from "../../types/index.js";
 import type { DecisionKernel } from "../../kernel/index.js";
 import type { AgentCallbacks, AgentConfig } from "../agent.js";
 import { classifyMode, type ResponseMode } from "../../meta/response-mode.js";
-import { detectPromptInjection } from "../guard.js";
 import { scoreEffectiveness } from "../../meta/effectiveness.js";
 import { classifyResponseStyle } from "../../meta/style-optimizer.js";
 import { scoreInteraction } from "../../meta/interaction-score.js";
@@ -29,19 +28,10 @@ export interface QuickHandlerContext {
 }
 
 export type QuickHandlerResult =
-  { kind: "blocked" | "kernel" | "quick"; text: string } | { kind: "continue"; responseMode: ResponseMode };
+  { kind: "kernel" | "quick"; text: string } | { kind: "continue"; responseMode: ResponseMode };
 
 export async function handleQuickPaths(ctx: QuickHandlerContext): Promise<QuickHandlerResult> {
   const { userInput, cfg } = ctx;
-  const injectionCheck = detectPromptInjection(userInput);
-  if (injectionCheck.blocked) {
-    const msg = "[Security] Potential prompt injection blocked. Your message was not processed.";
-    if (ctx.trace) ctx.trace.blockedReason = injectionCheck.reason;
-    ctx.pushMessage({ role: "assistant", content: msg });
-    ctx.onToken(msg);
-    return { kind: "blocked", text: msg };
-  }
-
   const responseMode = classifyMode(userInput);
   if (ctx.trace) ctx.trace.responseMode = responseMode;
 

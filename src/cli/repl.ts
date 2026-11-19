@@ -1680,6 +1680,12 @@ export class Repl {
       lines.push(`  ${chalk.dim("skill")}     ${trace.skill.name} (${(trace.skill.confidence * 100).toFixed(0)}%)`);
     if (trace.cognitiveSummary) lines.push(`  ${chalk.dim("cognition")} ${trace.cognitiveSummary}`);
     if (trace.retries > 0) lines.push(`  ${chalk.dim("retries")}   ${trace.retries}`);
+    if (trace.injectionWarnings.length > 0)
+      lines.push(
+        chalk.yellow(
+          `  ${chalk.dim("injection")}  ${trace.injectionWarnings.length} phrase(s) stripped: ${trace.injectionWarnings.join("; ")}`,
+        ),
+      );
     if (trace.blockedReason) lines.push(`  ${chalk.dim("blocked")}   ${trace.blockedReason}`);
     if (trace.error) lines.push(`  ${chalk.dim("error")}     ${trace.error}`);
     if (trace.finalResponseLength !== undefined)

@@ -459,6 +459,8 @@ export interface AgentTurnTrace {
   debateSkipped?: string;
   modelCritique?: { gaps: number; retried: boolean };
   retries: number;
+  /** Phrase-tier injection warnings; the stripped text still proceeds through the turn. */
+  injectionWarnings: string[];
   blockedReason?: string;
   error?: string;
   finalResponseLength?: number;

@@ -1,7 +1,15 @@
-const INJECTION_PATTERNS = [
-  /\[INST\]|<<SYS>>|<\/SYS>/i,
+/** Model/control markers: unambiguous injection payloads — always block. */
+export const STRUCTURAL_PATTERNS: readonly RegExp[] = [
+  /\[INST\]/i,
+  /<<SYS>>/i,
+  /<\/SYS>/i,
   /<\|system\|>/i,
-  /<\|im_start\|>system/i,
+  /<\|im_start\|>/i,
+  /\(system_message:.*\)/i,
+];
+
+/** Natural-language jailbreak phrasings: strip the matched span, warn, keep the message. */
+export const PHRASE_PATTERNS: readonly RegExp[] = [
   /\bignore (?:all )?previous (?:instructions?|prompts?|messages?)/i,
   /\byou are now (?:DAN|jailbroken|unfiltered)/i,
   /\bpretend (?:to be|you are) (?:an? )?(?:unfiltered|evil|malicious|unrestricted)/i,
@@ -10,7 +18,6 @@ const INJECTION_PATTERNS = [
   /\bdo not follow (?:your )?(?:guidelines|rules|instructions?|ethics)/i,
   /\bsimulate (?:an? )?(?:unrestricted|unfiltered|unethical)/i,
   /\bfor educational purposes only\b.*\b(?:hack|exploit|malware|weapon)/i,
-  /\(system_message:.*\)/i,
   /\brespond as if you (?:have|had) no (?:restrictions?|limitations?|safety|rules)\b/i,
   /\byou are a (?:developer|operator) mode\b/i,
   /\bno (?:need|requirement) (?:for|to follow) (?:safety|ethics|guidelines)\b/i,
@@ -34,20 +41,31 @@ const SECRET_PATTERNS = [
 export interface GuardResult {
   clean: boolean;
   blocked: boolean;
+  /** True when phrase patterns matched: the message proceeds with sanitized text. */
+  warn?: boolean;
   reason?: string;
+  warnings?: string[];
   sanitizedInput?: string;
   sanitizedOutput?: string;
 }
 
 export function detectPromptInjection(input: string): GuardResult {
-  for (const pattern of INJECTION_PATTERNS) {
+  for (const pattern of STRUCTURAL_PATTERNS) {
     if (pattern.test(input)) {
       return {
         clean: false,
         blocked: true,
-        reason: `Prompt injection pattern detected`,
+        reason: "Prompt injection pattern detected",
       };
     }
+  }
+  const warnings: string[] = [];
+  for (const pattern of PHRASE_PATTERNS) {
+    const match = pattern.exec(input);
+    if (match) warnings.push(`Injection phrase stripped: "${match[0]}"`);
+  }
+  if (warnings.length > 0) {
+    return { clean: false, blocked: false, warn: true, warnings, sanitizedInput: sanitizeInput(input) };
   }
   return { clean: true, blocked: false };
 }
@@ -61,11 +79,14 @@ export function sanitizeOutput(output: string): string {
 }
 
 export function sanitizeInput(input: string): string {
-  return input
+  let sanitized = input
     .replace(/<\|[^|]+\|>/g, "")
     .replace(/\[INST\].*?\[\/INST\]/gi, "")
-    .replace(/\(system[^)]*\)/gi, "")
-    .trim();
+    .replace(/\(system[^)]*\)/gi, "");
+  for (const pattern of PHRASE_PATTERNS) {
+    sanitized = sanitized.replace(new RegExp(pattern.source, `${pattern.flags}g`), "");
+  }
+  return sanitized.trim();
 }
 
 const PRIVATE_KEY_BEGIN = "-----BEGIN";

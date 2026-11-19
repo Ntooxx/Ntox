@@ -106,6 +106,7 @@ describe("last turn rendering", () => {
     policyDecisions: [],
     checkpointIds: ["cp_1"],
     retries: 0,
+    injectionWarnings: [],
     fileChanges: [{ path: "C:/repo/a.ts", action: "edit", timestamp: 200 }],
   };
 
