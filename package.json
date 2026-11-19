@@ -54,7 +54,7 @@
     "lint": "eslint src/ scripts/ desktop/ integrations/deepseek-harness/src",
     "test": "vitest run",
     "test:watch": "vitest",
-    "coverage": "vitest run --coverage",
+    "coverage": "vitest run --coverage --testTimeout=20000",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "verify:all": "node scripts/verify-all.mjs",

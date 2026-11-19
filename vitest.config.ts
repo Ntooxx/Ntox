@@ -11,9 +11,11 @@ export default defineConfig({
       reporter: ["text", "json-summary"],
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.test.ts", "src/**/__tests__/**"],
+      // Ratchet policy: set from the last measured coverage minus 2 points and
+      // NEVER lower these values to make a red gate pass.
       thresholds: {
-        lines: 40,
-        functions: 45,
+        lines: 62,
+        functions: 65,
       },
     },
   },

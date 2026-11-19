@@ -24,8 +24,12 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm run size:budget
       - run: npm test
       - run: npm run coverage
+      - name: npm audit (advisory)
+        continue-on-error: true
+        run: npm audit --audit-level=high
 
   benchmark:
     runs-on: ubuntu-latest
