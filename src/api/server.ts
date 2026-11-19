@@ -132,7 +132,16 @@ function createDefaultRuntime(): ApiRuntime {
     const agent = sessions.getOrCreate(id, createAgentConfig({ ...shared, ...infraFor(id) }, config, `api_${id}`));
     let output = "";
     try {
-      await runAgentStream(agent, prompt, { onToken: (token) => { output += token; } }, AbortSignal.timeout(120_000));
+      await runAgentStream(
+        agent,
+        prompt,
+        {
+          onToken: (token) => {
+            output += token;
+          },
+        },
+        AbortSignal.timeout(120_000),
+      );
     } catch (error) {
       const reason = `Scheduled "${job.name}" failed: ${redactError(error)}`;
       shared.alive.notify(reason);
@@ -151,7 +160,10 @@ function createDefaultRuntime(): ApiRuntime {
     shared,
     watchdog,
     agent: (sessionId: string): Agent =>
-      sessions.getOrCreate(sessionId, createAgentConfig({ ...shared, ...infraFor(sessionId) }, config, `api_${sessionId}`)),
+      sessions.getOrCreate(
+        sessionId,
+        createAgentConfig({ ...shared, ...infraFor(sessionId) }, config, `api_${sessionId}`),
+      ),
     commandContext: (sessionId: string): ChannelCommandContext => ({
       config,
       llm: shared.llm,
@@ -159,7 +171,10 @@ function createDefaultRuntime(): ApiRuntime {
       skills: shared.skillRegistry,
       memory: infraFor(sessionId).memory,
       policy: shared.policy,
-      agent: sessions.getOrCreate(sessionId, createAgentConfig({ ...shared, ...infraFor(sessionId) }, config, `api_${sessionId}`)),
+      agent: sessions.getOrCreate(
+        sessionId,
+        createAgentConfig({ ...shared, ...infraFor(sessionId) }, config, `api_${sessionId}`),
+      ),
       models: loadCachedModels() ?? [],
       sessionId,
       alive: shared.alive,

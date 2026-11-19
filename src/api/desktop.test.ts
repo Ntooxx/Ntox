@@ -177,7 +177,14 @@ describe("desktop settings API", () => {
 });
 
 describe("workflow tool modes", () => {
-  const catalog = [{ name: "read" }, { name: "shell" }, { name: "write" }, { name: "grep" }, { name: "search" }, { name: "subagent" }];
+  const catalog = [
+    { name: "read" },
+    { name: "shell" },
+    { name: "write" },
+    { name: "grep" },
+    { name: "search" },
+    { name: "subagent" },
+  ];
 
   it("restricts research workflows to read and search tools", () => {
     expect(workflowToolNames("research", catalog)).toEqual(["grep", "read", "search"]);
@@ -202,7 +209,13 @@ describe("desktop permissions API", () => {
       const res = await fetch(`${base}/api/desktop/permissions`);
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        profile: { id: string; allowedTools: string[]; readRoots: string[]; shellPolicy: string; networkPolicy: string };
+        profile: {
+          id: string;
+          allowedTools: string[];
+          readRoots: string[];
+          shellPolicy: string;
+          networkPolicy: string;
+        };
         defaultProfileId: string;
         tools: string[];
       };

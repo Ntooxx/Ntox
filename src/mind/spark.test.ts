@@ -219,7 +219,10 @@ describe("spark idle job", () => {
 
   it("does nothing without a spark engine or when disabled", () => {
     const bridge = new NtoxAliveBridge(new AliveEngine());
-    const noEngine = createIdleJobs({ mind: new Mind({ rootDir: mkdtempSync(join(tmpdir(), "ntox-spark-mind-")) }), alive: bridge });
+    const noEngine = createIdleJobs({
+      mind: new Mind({ rootDir: mkdtempSync(join(tmpdir(), "ntox-spark-mind-")) }),
+      alive: bridge,
+    });
     expect(noEngine.find((j) => j.name === "spark")!.run(ctx())).toBeNull();
 
     const disabled = createIdleJobs({

@@ -4,13 +4,7 @@ import { NTOX_DIR } from "../core/config.js";
 import { buildTimeContext, shouldSuppressProactive } from "../meta/time-adapter.js";
 import { clamp, dayKey } from "./util.js";
 
-export type SparkTrigger =
-  | "quiet-hours"
-  | "cooldown"
-  | "not-bored"
-  | "no-signal"
-  | "disabled"
-  | "sent";
+export type SparkTrigger = "quiet-hours" | "cooldown" | "not-bored" | "no-signal" | "disabled" | "sent";
 
 export interface SparkSignal {
   name: string;
@@ -103,10 +97,7 @@ const TEMPLATES: Record<string, string[]> = {
     "We left an open loop hanging. Want to close it?",
     "There's an unfinished thread from earlier. Pick it back up?",
   ],
-  "fresh-event": [
-    "Something just changed in the workspace. Worth a look.",
-    "A new event landed while you were away.",
-  ],
+  "fresh-event": ["Something just changed in the workspace. Worth a look.", "A new event landed while you were away."],
   default: ["Hey Antonio — Ntox here. Ping me when you're free."],
 };
 

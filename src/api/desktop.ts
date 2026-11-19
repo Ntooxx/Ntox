@@ -28,7 +28,9 @@ const RESEARCH_TOOLS = ["read", "glob", "ls", "grep", "search", "web_fetch", "we
 
 export function workflowToolNames(mode: WorkflowMode, tools: { name: string }[]): string[] {
   const allowed =
-    mode === "execute" ? tools.filter((tool) => tool.name !== "subagent") : tools.filter((tool) => RESEARCH_TOOLS.includes(tool.name));
+    mode === "execute"
+      ? tools.filter((tool) => tool.name !== "subagent")
+      : tools.filter((tool) => RESEARCH_TOOLS.includes(tool.name));
   return allowed.map((tool) => tool.name).sort();
 }
 
@@ -193,7 +195,12 @@ function parseRoots(value: unknown, field: string, errors: string[]): string[] |
   return [...new Set(roots)];
 }
 
-function parsePolicy<T extends string>(value: unknown, field: string, allowed: readonly T[], errors: string[]): T | null {
+function parsePolicy<T extends string>(
+  value: unknown,
+  field: string,
+  allowed: readonly T[],
+  errors: string[],
+): T | null {
   if (value === undefined) return null;
   if (typeof value !== "string" || !(allowed as readonly string[]).includes(value)) {
     errors.push(`${field} must be one of: ${allowed.join(", ")}.`);
@@ -444,7 +451,10 @@ export function createDesktopApi(options: DesktopApiOptions = {}) {
           })),
         };
         for (const task of workflow.tasks) {
-          const modeNote = mode === "execute" ? "\n\nYou may use every tool this runtime allows, including shell and file writes. Carry the goal out instead of only describing how to." : "";
+          const modeNote =
+            mode === "execute"
+              ? "\n\nYou may use every tool this runtime allows, including shell and file writes. Carry the goal out instead of only describing how to."
+              : "";
           const result = await subagentTool.execute({
             action: "spawn",
             task: `${task.prompt}\n\nOverall goal: ${goal}${modeNote}`,

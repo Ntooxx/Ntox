@@ -277,7 +277,9 @@ describe("createApiServer", () => {
         body: JSON.stringify({ message: "hi", sessionId: "desktop_spend" }),
       });
       const { events } = await readSse(res);
-      const usage = events.find((event) => event.event === "event" && (event.data as { type?: string }).type === "usage");
+      const usage = events.find(
+        (event) => event.event === "event" && (event.data as { type?: string }).type === "usage",
+      );
       expect(usage).toBeDefined();
       expect(loadCosts()).toMatchObject({ totalInputTokens: 10, totalOutputTokens: 5 });
     } finally {

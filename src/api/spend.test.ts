@@ -31,7 +31,7 @@ describe("recordUsage", () => {
   });
 
   it("prices tokens from the cached model card when the provider reports no cost", async () => {
-    saveCachedModels([modelCard("test-model", 0.003, 0.006)]);
+    saveCachedModels([modelCard("test-model", 0.000003, 0.000006)]);
     const recordUsage = await freshRecordUsage();
 
     recordUsage({ inputTokens: 1000, outputTokens: 500, cost: 0 }, { model: "test-model" });

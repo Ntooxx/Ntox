@@ -29,8 +29,17 @@ export function listNotifications(limit = 20): NtoxNotification[] {
   }
 }
 
-export function pushNotification(input: { kind: string; reason: string; detail?: Record<string, unknown> }): NtoxNotification {
-  const entry: NtoxNotification = { id: `ntf_${randomUUID().slice(0, 12)}`, kind: input.kind, reason: input.reason.slice(0, 2000), at: Date.now() };
+export function pushNotification(input: {
+  kind: string;
+  reason: string;
+  detail?: Record<string, unknown>;
+}): NtoxNotification {
+  const entry: NtoxNotification = {
+    id: `ntf_${randomUUID().slice(0, 12)}`,
+    kind: input.kind,
+    reason: input.reason.slice(0, 2000),
+    at: Date.now(),
+  };
   if (input.detail) entry.detail = input.detail;
   try {
     const dir = getNtoxDir();

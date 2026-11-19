@@ -49,7 +49,10 @@ describe("ApprovalBridge", () => {
     bridge.subscribe((payload) => received.push(payload));
 
     expect(await bridge.ask("shell", "git push")).toBeNull();
-    expect(received).toEqual([expect.objectContaining({ command: "git push" }), { id: expect.any(String), expired: true }]);
+    expect(received).toEqual([
+      expect.objectContaining({ command: "git push" }),
+      { id: expect.any(String), expired: true },
+    ]);
     expect(bridge.list()).toHaveLength(0);
   });
 

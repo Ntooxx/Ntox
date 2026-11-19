@@ -18,7 +18,9 @@ export function createNotifyTool(alive: NtoxAliveBridge): Tool {
       required: ["message"],
     },
     async execute(args): Promise<ToolResult> {
-      const message = String(args.message || "").trim().slice(0, MAX_MESSAGE);
+      const message = String(args.message || "")
+        .trim()
+        .slice(0, MAX_MESSAGE);
       if (!message) return { success: false, error: "message is required" };
       const rawLevel = String(args.level || "info").toLowerCase();
       const level = LEVELS.includes(rawLevel) ? rawLevel : "info";

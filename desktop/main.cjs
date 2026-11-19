@@ -430,7 +430,7 @@ async function sendMessage(event, payload) {
     const { value, done } = await reader.read();
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
     const blocks = buffer.split("\n\n");
-    buffer = blocks.pop() || "";
+    buffer = done ? "" : blocks.pop() || "";
     for (const block of blocks) {
       const eventName = block.match(/^event:\s*(.+)$/m)?.[1];
       const dataLine = block.match(/^data:\s*(.+)$/m)?.[1];

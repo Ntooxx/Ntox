@@ -27,7 +27,10 @@ function summarize(job: CronJob): Record<string, unknown> {
 
 function render(jobs: CronJob[], prefix = ""): string {
   if (jobs.length === 0) return `${prefix}No scheduled jobs. Use action "add" to create one.`;
-  const lines = jobs.map((job) => `- ${job.id} ${job.name} · ${job.schedule} · ${job.enabled ? "on" : "off"} · next ${when(job.nextRun)} · runs ${job.runCount}`);
+  const lines = jobs.map(
+    (job) =>
+      `- ${job.id} ${job.name} · ${job.schedule} · ${job.enabled ? "on" : "off"} · next ${when(job.nextRun)} · runs ${job.runCount}`,
+  );
   return `${prefix}${lines.join("\n")}`;
 }
 
@@ -42,7 +45,8 @@ export const scheduleTool: Tool = {
       name: { type: "string", description: "Short job name, required for add" },
       schedule: {
         type: "string",
-        description: "When to run: 'every 5m', 'every hour', 'every morning', 'daily', or a cron expression like '0 9 * * *'",
+        description:
+          "When to run: 'every 5m', 'every hour', 'every morning', 'daily', or a cron expression like '0 9 * * *'",
       },
       prompt: { type: "string", description: "The prompt to run each time, required for add" },
       jobId: { type: "string", description: "Job id from list, required for remove and toggle" },
@@ -59,9 +63,13 @@ export const scheduleTool: Tool = {
     }
 
     if (action === "add") {
-      const name = String(args.name || "").trim().slice(0, MAX_NAME);
+      const name = String(args.name || "")
+        .trim()
+        .slice(0, MAX_NAME);
       const schedule = String(args.schedule || "").trim();
-      const prompt = String(args.prompt || "").trim().slice(0, MAX_PROMPT);
+      const prompt = String(args.prompt || "")
+        .trim()
+        .slice(0, MAX_PROMPT);
       if (!name) return { success: false, error: "name is required for add" };
       if (!schedule) return { success: false, error: "schedule is required for add" };
       if (!prompt) return { success: false, error: "prompt is required for add" };
@@ -74,7 +82,10 @@ export const scheduleTool: Tool = {
       }
       return {
         success: true,
-        data: { job: summarize(job), summary: `Scheduled "${job.name}" (${job.schedule}), next run ${when(job.nextRun)}.\n${render([job])}` },
+        data: {
+          job: summarize(job),
+          summary: `Scheduled "${job.name}" (${job.schedule}), next run ${when(job.nextRun)}.\n${render([job])}`,
+        },
       };
     }
 
@@ -84,12 +95,18 @@ export const scheduleTool: Tool = {
     if (action === "toggle") {
       const job = cron.toggleJob(jobId);
       if (!job) return { success: false, error: `No scheduled job ${jobId}` };
-      return { success: true, data: { job: summarize(job), summary: `${job.name} is now ${job.enabled ? "on" : "off"}.` } };
+      return {
+        success: true,
+        data: { job: summarize(job), summary: `${job.name} is now ${job.enabled ? "on" : "off"}.` },
+      };
     }
 
     if (action === "remove") {
       const removed = cron.removeJob(jobId);
-      return { success: true, data: { removed, summary: removed ? `Removed ${jobId}.` : `No scheduled job ${jobId}.` } };
+      return {
+        success: true,
+        data: { removed, summary: removed ? `Removed ${jobId}.` : `No scheduled job ${jobId}.` },
+      };
     }
 
     return { success: false, error: `Unknown action: ${action}` };

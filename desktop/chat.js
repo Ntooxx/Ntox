@@ -235,7 +235,7 @@
     try {
       if (!window.ntoxDesktop?.sendMessage) throw new Error("Open this workspace through the NTOX Desktop app to connect its local agent.");
       const response = await window.ntoxDesktop.sendMessage({ requestId, sessionId: `desktop_${conversation.id}`, message });
-      if (!assistantMessage.content) assistantMessage.content = response;
+      if (typeof response === "string" && response.length > assistantMessage.content.length) assistantMessage.content = response;
     } catch (error) {
       const stopped = error.name === "AbortError" || document.getElementById("desktop-stop").classList.contains("desktop-stop-pending");
       const detail = stopped ? "" : cleanIpcError(error);
@@ -270,6 +270,7 @@
     const assistantMessage = conversation?.messages.at(-1);
     if (!assistantMessage || assistantMessage.role !== "assistant") return;
     if (payload.event === "approval") showApproval(payload.data || {}, conversation, assistantMessage);
+    if (payload.event === "done" && typeof payload.data?.response === "string" && payload.data.response.length > assistantMessage.content.length) assistantMessage.content = payload.data.response;
     if (payload.event === "token") assistantMessage.content += payload.data?.text || "";
     if (payload.event === "event") {
       const data = payload.data || {};

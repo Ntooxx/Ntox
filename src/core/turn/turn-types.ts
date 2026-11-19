@@ -1,0 +1,82 @@
+import type { Message, AgentTurnTrace } from "../../types/index.js";
+import type { ContextKind, MindTurnHandle } from "../../mind/types.js";
+import type { Mind } from "../../mind/mind.js";
+import type { LLMPredictor, PredictionAttempt } from "../../mind/llm-predictor.js";
+import type { TheoryMemory } from "../../memory/theory-memory.js";
+import type { NtoxCognitiveLayer } from "../../cognition/layer.js";
+import type { CognitiveKernel } from "../../cognition/kernel.js";
+import type { NtoxAliveBridge } from "../../alive/ntox.js";
+import type { AlivePulse } from "../../alive/engine.js";
+import type { ResponseMode } from "../../meta/response-mode.js";
+import type { AgentCallbacks, AgentConfig } from "../agent.js";
+
+export interface TurnRuntime {
+  mindTurn: MindTurnHandle | null;
+  predictionAttempt: PredictionAttempt | null;
+  mindAlivePredictionId: string | null;
+  lastCognitiveResult: ReturnType<CognitiveKernel["process"]> | null;
+  falseSuccessThisTurn: boolean;
+  falseSuccessRetriesThisSession: number;
+  skillProposalTurn: number;
+  lastSkillProposalTurn: number | null;
+  skillProposalsThisSession: number;
+  surpriseNotesThisSession: number;
+  surpriseReflectionsThisSession: number;
+}
+
+export type PendingContextRecord = {
+  section: string;
+  kind: ContextKind;
+  id: string;
+  text: string;
+  relevance: number;
+};
+
+export type TurnContext = {
+  cfg: AgentConfig;
+  callbacks: AgentCallbacks;
+  userInput: string;
+  responseMode: ResponseMode;
+  messages: Message[];
+  currentTrace: AgentTurnTrace | null;
+  mind?: Mind;
+  runTurnId: string;
+  mindTurn: MindTurnHandle | null;
+  llmPredictor?: LLMPredictor;
+  predictionAttempt: PredictionAttempt | null;
+  alive?: NtoxAliveBridge;
+  mindAlivePredictionId: string | null;
+  correctionsThisSession: number;
+  theoryMemory: TheoryMemory;
+  cognitiveLayer: NtoxCognitiveLayer;
+  findLastAssistantMessage: () => string | null;
+  resolveSearchContext: (input: string) => Promise<string>;
+  strategyPrompt: string;
+  wasCorrection: boolean;
+  mentalModelContext: string;
+  executiveContext: string;
+  mistakesContext: string;
+  memoryContext: string;
+  theoryContext: string;
+  recoveryContext: string;
+  searchContext: string;
+  queryEmbedding: number[] | null;
+  embeddingModel: string | undefined;
+  pendingContextRecords: PendingContextRecord[];
+  sessionGuidance: string;
+  timeGuidance: string;
+  styleGuidance: string;
+  pushMessage: (msg: Message) => void;
+  finishTrace: (response?: string, error?: string) => void;
+  publishAliveActions: (pulse: AlivePulse, callbacks: AgentCallbacks) => void;
+  lastCognitiveResult: ReturnType<CognitiveKernel["process"]> | null;
+  lastAssistantResponse: string | null;
+  lastUserMessage: string | null;
+  cognitiveContext: string;
+  userContext: string;
+  planContext: string;
+  narrativeContext: string;
+  skillContext: string;
+  libraryFrameworkContext: string;
+  aliveContext: string;
+};

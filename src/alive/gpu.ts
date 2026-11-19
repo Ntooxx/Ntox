@@ -147,7 +147,9 @@ export async function sampleGpu(): Promise<GpuSample | null> {
   return { utilizationPercent: utilization, temperatureC: temperature, memoryUsedMiB: used, memoryTotalMiB: total };
 }
 
-async function describeProcesses(pids: number[]): Promise<Map<number, { name: string; cpuSeconds: number; ramMiB: number; hasWindow: boolean }>> {
+async function describeProcesses(
+  pids: number[],
+): Promise<Map<number, { name: string; cpuSeconds: number; ramMiB: number; hasWindow: boolean }>> {
   const found = new Map<number, { name: string; cpuSeconds: number; ramMiB: number; hasWindow: boolean }>();
   const list = pids.filter((pid) => Number.isFinite(pid) && pid > 0).join(",");
   if (!list) return found;
@@ -289,7 +291,12 @@ export function buildAdvice(sample: GpuSample, consumers: GpuConsumer[]): { mess
     lines.push("Everything else is yours to judge:", ...others.slice(0, 6).map(describeGroup));
   }
   if (system.length > 0) {
-    lines.push(`Windows and driver components, not worth touching: ${system.slice(0, 8).map((group) => group.name).join(", ")}`);
+    lines.push(
+      `Windows and driver components, not worth touching: ${system
+        .slice(0, 8)
+        .map((group) => group.name)
+        .join(", ")}`,
+    );
   }
 
   return { message: lines.join("\n"), closeCommand };
