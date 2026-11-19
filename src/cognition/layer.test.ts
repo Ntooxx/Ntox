@@ -284,4 +284,82 @@ describe("NtoxCognitiveLayer", () => {
     expect(stored?.text).toBe("harbor=navy-ember");
     expect(stored?.provenance).toBe("user correction");
   });
+
+  it("tags stored episodes with the producing embedding model", async () => {
+    const layer = new NtoxCognitiveLayer({ cognitionEnabled: false, theoryEnabled: false }, { memory, mistakes });
+
+    await layer.afterTurn({
+      sessionId: "session-emb",
+      turnId: "turn-emb",
+      userMessage: "the deploy token is cedar-4",
+      assistantResponse: "ok",
+      embedding: [1, 0, 0],
+      embeddingModel: "remote:test/model",
+    });
+
+    const episode = memory.getAll().find((e) => e.userMessage === "the deploy token is cedar-4");
+    expect(episode?.embeddingModel).toBe("remote:test/model");
+    expect(episode?.embedding).toEqual([1, 0, 0]);
+  });
+
+  it("tags provided vectors without a model tag as local-hash", async () => {
+    const layer = new NtoxCognitiveLayer({ cognitionEnabled: false, theoryEnabled: false }, { memory, mistakes });
+
+    await layer.afterTurn({
+      sessionId: "session-emb2",
+      turnId: "turn-emb2",
+      userMessage: "the deploy token is cedar-5",
+      assistantResponse: "ok",
+      embedding: [1, 0, 0],
+    });
+
+    const episode = memory.getAll().find((e) => e.userMessage === "the deploy token is cedar-5");
+    expect(episode?.embeddingModel).toBe("local-hash");
+  });
+
+  it("tags fallback-embedded episodes as local-hash", async () => {
+    const layer = new NtoxCognitiveLayer(
+      {
+        cognitionEnabled: false,
+        theoryEnabled: false,
+        mistakesEnabled: false,
+        embed: async () => {
+          throw new Error("provider unavailable");
+        },
+      },
+      { memory },
+    );
+
+    await layer.afterTurn({
+      sessionId: "session-emb3",
+      userMessage: "the deploy token is cedar-6",
+      assistantResponse: "ok",
+    });
+
+    const episode = memory.getAll().find((e) => e.userMessage === "the deploy token is cedar-6");
+    expect(episode?.embedding.length).toBeGreaterThan(0);
+    expect(episode?.embeddingModel).toBe("local-hash");
+  });
+
+  it("still accepts legacy bare-vector embedders", async () => {
+    const layer = new NtoxCognitiveLayer(
+      {
+        cognitionEnabled: false,
+        theoryEnabled: false,
+        mistakesEnabled: false,
+        embed: async () => [1, 0, 0],
+      },
+      { memory },
+    );
+
+    await layer.afterTurn({
+      sessionId: "session-legacy",
+      userMessage: "legacy embedder still works",
+      assistantResponse: "ok",
+    });
+
+    const episode = memory.getAll().find((e) => e.userMessage === "legacy embedder still works");
+    expect(episode?.embedding).toEqual([1, 0, 0]);
+    expect(episode?.embeddingModel).toBe("local-hash");
+  });
 });

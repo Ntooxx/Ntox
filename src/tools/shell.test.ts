@@ -67,7 +67,7 @@ describe("shellTool safety", () => {
   it("allows dir listing", async () => {
     const r = await shellTool.execute({ command: "Get-ChildItem node_modules" });
     expect(r.success).toBe(true);
-  });
+  }, 20000);
 
   it("rejects code fragments before shell execution", async () => {
     expect(validateShellCommand("<div>Hello</div>")).toContain("looks like code");

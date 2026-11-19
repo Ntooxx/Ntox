@@ -15,6 +15,7 @@ Usage:
   ntox mcp          Serve NTOX skills to MCP hosts over stdio (Claude Desktop, Cursor, ...)
   ntox setup        Interactive setup wizard
   ntox doctor       Check config, provider, browser, sandbox, and workspace health
+  ntox memory reembed  Re-embed stored memories against the active embedding model
   ntox --help       Show this help
   ntox --version    Show version
 
@@ -79,6 +80,45 @@ async function main(): Promise<void> {
   } else if (arg === "doctor") {
     const { default: runDoctor } = await import("./doctor.js");
     await runDoctor();
+  } else if (arg === "memory") {
+    const sub = process.argv[3];
+    if (sub !== "reembed") {
+      console.error("Usage: ntox memory reembed [--model <id>] [--batch <n>] [--dry-run] [--force]");
+      process.exit(1);
+    }
+    const rest = process.argv.slice(4);
+    const options: { model?: string; batch?: number; dryRun?: boolean; force?: boolean } = {};
+    for (let i = 0; i < rest.length; i++) {
+      const flag = rest[i];
+      if (flag === "--dry-run") {
+        options.dryRun = true;
+      } else if (flag === "--force") {
+        options.force = true;
+      } else if (flag === "--model" || flag === "--batch") {
+        const value = rest[++i];
+        if (value === undefined) {
+          console.error(`${flag} requires a value`);
+          process.exit(1);
+        }
+        if (flag === "--model") {
+          options.model = value;
+        } else {
+          const batch = Number(value);
+          if (!Number.isInteger(batch) || batch <= 0) {
+            console.error("--batch requires a positive integer");
+            process.exit(1);
+          }
+          options.batch = batch;
+        }
+      } else {
+        console.error(`Unknown option: ${flag}`);
+        process.exit(1);
+      }
+    }
+    const { runReembed, formatReembedReport } = await import("./memory/reembed.js");
+    const report = await runReembed(options);
+    console.log(formatReembedReport(report));
+    if (report.failed > 0 && !report.dryRun) process.exit(1);
   } else if (arg === "sessions") {
     const { listSessionSnapshots } = await import("./core/session-store.js");
     const sessions = listSessionSnapshots(20);

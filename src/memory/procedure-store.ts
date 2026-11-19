@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { createHash, createPublicKey, randomUUID, verify } from "node:crypto";
 import { dirname, join } from "node:path";
 import { NTOX_DIR, PROCEDURES_DIR } from "../core/config.js";
+import { LOCAL_HASH_TAG } from "./embedding-service.js";
 import { cosineSimilarity } from "../utils/math.js";
 
 /**
@@ -327,6 +328,15 @@ export class ProcedureStore {
     } catch {
       this.procedures = [];
     }
+    // Legacy rows predate provenance tagging; untagged vectors are backfilled `local-hash`.
+    let backfilled = false;
+    for (const p of this.procedures) {
+      if (p.embedding && p.embedding.length > 0 && !p.embeddingModel) {
+        p.embeddingModel = LOCAL_HASH_TAG;
+        backfilled = true;
+      }
+    }
+    if (backfilled) this.save();
   }
 
   private save(): void {

@@ -168,6 +168,9 @@ export interface Episode {
   summary: string;
   embedding: number[];
   embeddingModel?: string;
+  /** Target model of the last reembed pass; keeps migration idempotent when the
+   *  embedder falls back to a different model (e.g. `local-hash`). */
+  reembedTargetModel?: string;
 }
 
 export interface MemoryQueryResult {

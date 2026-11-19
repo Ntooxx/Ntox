@@ -192,7 +192,7 @@ const QUERIES: { q: string; target: string }[] = [
   { q: "which email address do I receive the most messages from?", target: "ep_54d3e0cb" },
 ];
 // dedupe accidental double-target with different text is allowed; verify ids exist
-for (const qq of QUERIES) episodes.find((e) => e.id === qq.target) || (() => { throw new Error(`missing target ${qq.target}`); })();
+for (const qq of QUERIES) { if (!episodes.find((e) => e.id === qq.target)) throw new Error(`missing target ${qq.target}`); }
 console.log(`queries: ${QUERIES.length} authored paraphrases`);
 
 // lexical overlap of query vs relevant-set text (for disjoint/overlap buckets)

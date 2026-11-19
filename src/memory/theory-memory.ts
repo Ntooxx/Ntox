@@ -5,7 +5,7 @@ import {
   loadTheoryStore,
   makeTheoryPrediction,
 } from "../research/theory-store.js";
-import { localEmbed } from "../core/local-embed.js";
+import { localEmbedder } from "./embedding-service.js";
 import { cosineSimilarity } from "../utils/math.js";
 import type { Episode } from "../types/index.js";
 
@@ -74,14 +74,17 @@ export class TheoryMemory {
   buildTheoryItems(query: string): TheoryPromptItem[] {
     if (!this.initialized) return [];
     const hierarchy = getTheoryHierarchy();
-    const queryEmbedding = localEmbed(query);
+    const queryEmbedding = localEmbedder.embedSync(query).vector;
     const items: TheoryPromptItem[] = [];
 
     const confirmed = hierarchy.theories
       .filter((t) => t.confirmed)
       .map((t) => ({
         t,
-        sim: cosineSimilarity(queryEmbedding, t.embedding || localEmbed(t.name + " " + t.explanation)),
+        sim: cosineSimilarity(
+          queryEmbedding,
+          t.embedding || localEmbedder.embedSync(t.name + " " + t.explanation).vector,
+        ),
       }))
       .filter((s) => s.sim >= THEORY_MATCH_MIN_SIM)
       .sort((a, b) => b.sim - a.sim)
@@ -112,7 +115,7 @@ export class TheoryMemory {
       const scored = hierarchy.patterns
         .map((p) => ({
           p,
-          sim: cosineSimilarity(queryEmbedding, p.embedding || localEmbed(p.generalization)),
+          sim: cosineSimilarity(queryEmbedding, p.embedding || localEmbedder.embedSync(p.generalization).vector),
         }))
         .filter((s) => s.sim >= PATTERN_MATCH_MIN_SIM)
         .sort((a, b) => b.sim - a.sim)

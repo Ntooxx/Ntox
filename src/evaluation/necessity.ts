@@ -6,7 +6,7 @@ import { CognitiveKernel } from "../cognition/kernel.js";
 import { PatternStore } from "../cognition/patterns.js";
 import { CognitiveSpace } from "../cognition/cognitive-space.js";
 import { SkillRegistry } from "../skills/registry.js";
-import { localEmbed } from "../core/local-embed.js";
+import { localEmbedder } from "../memory/embedding-service.js";
 import { checkForSurfaceReasoning, detectFalseSuccess } from "../research/false-success.js";
 import { getTheoryHierarchy, getTheoryStats, recordObservation, resetTheoryStore } from "../research/theory-store.js";
 import type { CognitiveTrace, CritiqueResult, ThinkingMetrics } from "../types/index.js";
@@ -55,7 +55,7 @@ const traceTemplate: CognitiveTrace = {
 
 async function memoryGating(): Promise<NecessityCheckResult> {
   const message = "the quarterly planning codename is navy-ember";
-  const embedding = localEmbed(message);
+  const { vector: embedding, model: embeddingModel } = localEmbedder.embedSync(message);
   const memory = new MemoryStore();
   memory.clearAll();
   memory.addDurableMemory("fact", message, "necessity", 0.95);
@@ -81,8 +81,18 @@ async function memoryGating(): Promise<NecessityCheckResult> {
     { memory: new MemoryStore() },
   );
 
-  const onContext = await enabled.beforeStep({ sessionId: "necessity-memory-on", userMessage: message, embedding });
-  const offContext = await disabled.beforeStep({ sessionId: "necessity-memory-off", userMessage: message, embedding });
+  const onContext = await enabled.beforeStep({
+    sessionId: "necessity-memory-on",
+    userMessage: message,
+    embedding,
+    embeddingModel,
+  });
+  const offContext = await disabled.beforeStep({
+    sessionId: "necessity-memory-off",
+    userMessage: message,
+    embedding,
+    embeddingModel,
+  });
 
   const onHasMemory = onContext.diagnostics.memoryIncluded && onContext.prompt.includes("navy-ember");
   const offHasMemory = offContext.diagnostics.memoryIncluded || offContext.prompt.includes("navy-ember");
@@ -98,7 +108,7 @@ async function memoryGating(): Promise<NecessityCheckResult> {
 
 async function correctionPrecedence(): Promise<NecessityCheckResult> {
   const query = "What is the harbor token? Remind me.";
-  const embedding = localEmbed(query);
+  const { vector: embedding, model: embeddingModel } = localEmbedder.embedSync(query);
   const memory = new MemoryStore();
   memory.clearAll();
   memory.addDurableMemory("fact", "harbor token is blue-ember", "necessity", 0.95);
@@ -127,8 +137,18 @@ async function correctionPrecedence(): Promise<NecessityCheckResult> {
     { memory, mistakes: new MistakeJournal() },
   );
 
-  const onContext = await enabled.beforeStep({ sessionId: "necessity-corr-on", userMessage: query, embedding });
-  const offContext = await disabled.beforeStep({ sessionId: "necessity-corr-off", userMessage: query, embedding });
+  const onContext = await enabled.beforeStep({
+    sessionId: "necessity-corr-on",
+    userMessage: query,
+    embedding,
+    embeddingModel,
+  });
+  const offContext = await disabled.beforeStep({
+    sessionId: "necessity-corr-off",
+    userMessage: query,
+    embedding,
+    embeddingModel,
+  });
 
   const correctionAt = onContext.prompt.indexOf("Previous Corrections");
   const memoryAt = onContext.prompt.indexOf("Relevant Past Memories");

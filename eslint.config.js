@@ -16,6 +16,7 @@ const jsDowngradeRules = {
   "no-useless-escape": "warn",
   "no-useless-catch": "warn",
   "no-control-regex": "off",
+  "@typescript-eslint/no-require-imports": "off",
 };
 
 const sharedGlobals = {

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { NTOX_DIR } from "../core/config.js";
-import { localEmbed } from "../core/local-embed.js";
+import { localEmbedder } from "../memory/embedding-service.js";
 import { cosineSimilarity } from "../utils/math.js";
 import { detectDomain } from "./theory-store.js";
 import { clamp } from "../mind/util.js";
@@ -13,6 +13,7 @@ export interface TransferTheoryView {
   confidence: number;
   confirmed: boolean;
   embedding?: number[];
+  embeddingModel?: string;
   domain?: string;
 }
 
@@ -68,7 +69,7 @@ const DEFAULT_MIN_LIFT = 0.1;
 const MAX_HYPOTHESES = 100;
 
 function theoryEmbedding(t: TransferTheoryView): number[] {
-  return t.embedding ?? localEmbed(`${t.name} ${t.explanation}`);
+  return t.embedding ?? localEmbedder.embedSync(`${t.name} ${t.explanation}`).vector;
 }
 
 function theoryDomain(t: TransferTheoryView): string {

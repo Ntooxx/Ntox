@@ -88,7 +88,7 @@ ntox          # Start chatting
 | **10 LLM Providers** | OpenAI, Anthropic, Ollama, LM Studio, Groq, Together, Mistral, DeepSeek, OpenRouter, any OpenAI-compatible endpoint |
 | **Multi-Channel Gateway** | Telegram, Discord, WhatsApp, Slack, Web UI — all sharing one agent runtime |
 | **Cognitive Kernel** | Compresses queries to primitives, matches patterns in 8D vector space, auto-compiles frequent patterns |
-| **Persistent Memory** | Every exchange embedded and searchable. Corrections outrank conflicting facts. Embeddings are remote-first with a local-hash fallback; provenance is tracked per vector. |
+| **Persistent Memory** | Every exchange embedded and searchable. Corrections outrank conflicting facts. Embeddings are remote-first with a local-hash fallback; every vector is tagged with the model that produced it, and `ntox memory reembed` migrates older entries onto the active model. |
 | **Skill Library** | 103 reasoning skills across 18 categories, matched semantically at prompt time |
 | **MCP Bridge** | Use external MCP servers as tools, serve NTOX skills to any MCP host |
 | **Workspace Policy** | Profiles constrain reads/writes/shell paths. Auto-checkpoints before edits. |

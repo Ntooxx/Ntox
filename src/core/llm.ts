@@ -331,6 +331,7 @@ async function* streamOpenAICompatible(
             reasoning?: string;
             tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[];
           };
+          finish_reason?: string | null;
         }[];
         usage?: { prompt_tokens: number; completion_tokens: number };
       };
@@ -338,6 +339,13 @@ async function* streamOpenAICompatible(
       if (parsed.error) {
         const code = parsed.error.code ? `[${parsed.error.code}] ` : "";
         throw new StreamError(`Stream error ${code}${parsed.error.message || "unknown error"}`, parsed.error.code);
+      }
+
+      const finishReason = parsed.choices?.[0]?.finish_reason;
+      if (finishReason && !["stop", "end_turn", "tool_calls", "function_call"].includes(finishReason)) {
+        console.error(
+          `[llm] stream ended with finish_reason=${finishReason} (model=${body.model}) — the response may be incomplete`,
+        );
       }
 
       const delta = parsed.choices?.[0]?.delta;
@@ -818,6 +826,11 @@ export class LLMClient {
     return resolveProvider(this.configuredProvider, this.modelId);
   }
 
+  /** Provenance tag for vectors this client aims to produce; matches `embedWithMeta` result tags. */
+  getEmbeddingModelTag(): string {
+    return `remote:${this.getProvider()}/${this.embeddingModelId}`;
+  }
+
   private getProviderInfo(): ProviderConfig {
     const provider = this.getProvider();
     return getProviderConfig(provider) || PROVIDERS.openrouter;
@@ -857,6 +870,10 @@ export class LLMClient {
     if (remaining() >= MIN_FALLBACK_BUDGET_MS) {
       console.error("[embed] API embedding unavailable, using local fallback");
       this.embeddingFallbacks++;
+      // Kept deliberately: last-resort fallback keeps retrieval alive when no remote
+      // embedder is reachable within the budget. Tagged `local-hash` below so the
+      // model-mismatch skip in episodic retrieval excludes it from remote-model
+      // queries instead of silently comparing across embedding spaces.
       const local = localEmbed(text);
       if (this.embedCache.size > 100) {
         const first = this.embedCache.keys().next().value;

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { localEmbed } from "../core/local-embed.js";
+import { LOCAL_HASH_TAG, localEmbedder, type EmbeddedVector } from "../memory/embedding-service.js";
 import { MemoryStore } from "../memory/episodic.js";
 import { TheoryMemory } from "../memory/theory-memory.js";
 import { MistakeJournal } from "../meta/mistakes.js";
@@ -8,7 +8,12 @@ import { SkillRegistry } from "../skills/registry.js";
 import type { Episode, PrimitiveRepresentation, QueryType } from "../types/index.js";
 import { CognitiveKernel } from "./kernel.js";
 
-export type CognitiveEmbedder = (text: string) => number[] | Promise<number[]>;
+/**
+ * Backward compatible: the original `CognitiveEmbedder` returned a bare `number[]`
+ * (implicitly the local-hash space). New embedders may return a tagged `EmbeddedVector`.
+ */
+export type CognitiveEmbedderResult = EmbeddedVector | number[] | null;
+export type CognitiveEmbedder = (text: string) => CognitiveEmbedderResult | Promise<CognitiveEmbedderResult>;
 
 export interface CognitiveStepInput {
   sessionId: string;
@@ -158,7 +163,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
       memoryRetrievalCount: Math.max(1, options.memoryRetrievalCount ?? 5),
       maxToolOutcomesPerTurn: Math.max(1, options.maxToolOutcomesPerTurn ?? 20),
     };
-    this.embed = options.embed ?? localEmbed;
+    this.embed = options.embed ?? ((text) => localEmbedder.embedSync(text));
     const registry = services.skillRegistry ?? new SkillRegistry();
     this.kernel = services.kernel ?? new CognitiveKernel(registry);
     this.memory = services.memory ?? new MemoryStore();
@@ -187,7 +192,8 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     const errors: string[] = [];
     const sections: CognitiveContextSection[] = [];
     const queryType = classifyQuery(input.userMessage);
-    const embedding = await this.resolveEmbedding(input.userMessage, input.embedding, errors);
+    const embedded = await this.resolveEmbedding(input.userMessage, input.embedding, input.embeddingModel, errors);
+    const embedding = embedded?.vector ?? null;
     let primitive: PrimitiveRepresentation | undefined;
     let patternCount = 0;
 
@@ -235,7 +241,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
         const context = this.memory.buildMemoryContext(
           embedding,
           this.options.memoryRetrievalCount,
-          input.embeddingModel,
+          embedded?.model,
           input.userMessage,
         );
         if (context.trim()) {
@@ -263,7 +269,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     this.pendingSteps.set(turnKey(input.sessionId, input.turnId), {
       userMessage: input.userMessage,
       embedding,
-      embeddingModel: input.embeddingModel,
+      embeddingModel: embedded?.model,
     });
 
     return {
@@ -297,9 +303,10 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     const pending = this.pendingSteps.get(key);
     const errors: string[] = [];
     const userMessage = turn.userMessage || pending?.userMessage || "";
-    const embedding = await this.resolveEmbedding(
+    const embedded = await this.resolveEmbedding(
       userMessage,
       turn.embedding === undefined ? pending?.embedding : turn.embedding,
+      turn.embeddingModel ?? pending?.embeddingModel,
       errors,
     );
     let episode: Episode | undefined;
@@ -311,13 +318,12 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
 
     if (this.options.memoryEnabled && this.options.storeEnabled) {
       try {
-        const storedModel = turn.embeddingModel ?? pending?.embeddingModel;
         episode = this.memory.addEpisode(
           turn.sessionId,
           userMessage,
           turn.assistantResponse,
-          embedding ?? [],
-          storedModel,
+          embedded?.vector ?? [],
+          embedded?.model,
         );
         memoryId = episode.id;
       } catch (error) {
@@ -327,7 +333,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
 
     if (this.options.theoryEnabled && this.options.storeEnabled) {
       try {
-        const learningEpisode = episode ?? this.createEpisode(turn, userMessage, embedding);
+        const learningEpisode = episode ?? this.createEpisode(turn, userMessage, embedded);
         this.theoryMemory.processEpisode(learningEpisode);
         theoryUpdated = true;
       } catch (error) {
@@ -391,19 +397,25 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
   private async resolveEmbedding(
     text: string,
     provided: number[] | null | undefined,
+    providedModel: string | undefined,
     errors: string[],
-  ): Promise<number[] | null> {
+  ): Promise<EmbeddedVector | null> {
     if (!this.options.storeEnabled || (!this.options.memoryEnabled && !this.options.theoryEnabled)) return null;
-    if (provided !== undefined) return provided;
+    if (provided !== undefined) {
+      return provided === null ? null : { vector: provided, model: providedModel ?? LOCAL_HASH_TAG };
+    }
     try {
-      return await this.embed(text);
+      const result = await this.embed(text);
+      if (result === null) return null;
+      // Legacy bare-vector embedders produce local-hash vectors; preserve their space.
+      return Array.isArray(result) ? { vector: result, model: LOCAL_HASH_TAG } : result;
     } catch (error) {
       errors.push(errorMessage("embedding", error));
-      return localEmbed(text);
+      return localEmbedder.embedSync(text);
     }
   }
 
-  private createEpisode(turn: CognitiveTurnResult, userMessage: string, embedding: number[] | null): Episode {
+  private createEpisode(turn: CognitiveTurnResult, userMessage: string, embedded: EmbeddedVector | null): Episode {
     return {
       id: `turn_${randomUUID().slice(0, 8)}`,
       timestamp: Date.now(),
@@ -411,7 +423,8 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
       userMessage,
       assistantResponse: turn.assistantResponse,
       summary: userMessage.replace(/\s+/g, " ").trim().slice(0, 120),
-      embedding: embedding ?? [],
+      embedding: embedded?.vector ?? [],
+      ...(embedded ? { embeddingModel: embedded.model } : {}),
     };
   }
 

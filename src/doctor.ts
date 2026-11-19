@@ -2,7 +2,8 @@ import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadConfig, CONFIG_PATH, NTOX_DIR, validateConfig } from "./core/config.js";
-import { detectLocalProviders, providerRequiresKey } from "./core/llm.js";
+import { detectLocalProviders, providerRequiresKey, LLMClient } from "./core/llm.js";
+import { MemoryStore } from "./memory/episodic.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -182,7 +183,43 @@ export async function runDoctorChecks(): Promise<DoctorCheck[]> {
       : pass("web-auth", "Web UI auth", exposed ? "access token enabled" : "local-only binding"),
   );
 
+  checks.push(checkMemoryEmbeddings(config));
+
   return checks;
+}
+
+function checkMemoryEmbeddings(config: ReturnType<typeof loadConfig>): DoctorCheck {
+  try {
+    const llm = new LLMClient(
+      config.apiKey,
+      config.model,
+      config.embeddingModel,
+      config.maxTokens,
+      config.temperature,
+      config.apiBaseUrl,
+      config.provider,
+    );
+    const activeModel = llm.getEmbeddingModelTag();
+    const stats = new MemoryStore().getEmbeddingStats(activeModel, config.embeddingDimensions);
+    const byModel = Object.entries(stats.byModel)
+      .map(([model, count]) => `${model} × ${count}`)
+      .join(", ");
+    const detail =
+      `active ${activeModel}${stats.activeDim !== undefined ? ` (${stats.activeDim}d${stats.dimInferred ? ", inferred" : ""})` : ""} · ` +
+      `${stats.withVector} vectors · ` +
+      `by model: ${byModel || "none"} · ` +
+      `skipped by model: ${stats.skippedByModel}, by dim: ${stats.skippedByDim}`;
+    return stats.skippedByModel > 0
+      ? warn(
+          "memory-embeddings",
+          "Memory embeddings",
+          detail,
+          "Run `ntox memory reembed` to migrate mismatched vectors to the active model.",
+        )
+      : pass("memory-embeddings", "Memory embeddings", detail);
+  } catch (e) {
+    return warn("memory-embeddings", "Memory embeddings", e instanceof Error ? e.message : String(e));
+  }
 }
 
 async function checkBrowser(): Promise<DoctorCheck> {

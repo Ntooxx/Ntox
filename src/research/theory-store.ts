@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { NTOX_DIR } from "../core/config.js";
-import { localEmbed } from "../core/local-embed.js";
+import { LOCAL_HASH_TAG, localEmbedder } from "../memory/embedding-service.js";
 import { cosineSimilarity } from "../utils/math.js";
 
 interface Observation {
@@ -11,6 +11,7 @@ interface Observation {
   confidence: number;
   timestamp: number;
   embedding?: number[];
+  embeddingModel?: string;
 }
 interface StoredPattern {
   id: string;
@@ -20,6 +21,7 @@ interface StoredPattern {
   confidence: number;
   timestamp: number;
   embedding?: number[];
+  embeddingModel?: string;
 }
 interface StoredPrimitive {
   id: string;
@@ -61,6 +63,7 @@ interface Theory {
   confidence: number;
   timestamp: number;
   embedding?: number[];
+  embeddingModel?: string;
   evidence?: TheoryEvidence[];
   outcomeLog?: TheoryPrediction[];
 }
@@ -179,6 +182,16 @@ export function loadTheoryStore(): void {
     nextTheoryId = data.nextTheoryId || 1;
     nextMetaId = data.nextMetaId || 1;
     nextPredictionId = data.nextPredictionId || 1;
+    // Legacy rows predate provenance tagging; the historical producer was the local
+    // hash embedder, so untagged vectors are backfilled `local-hash` and persisted.
+    let backfilled = false;
+    for (const row of [...observations, ...patterns, ...theories]) {
+      if (row.embedding && row.embedding.length > 0 && !row.embeddingModel) {
+        row.embeddingModel = LOCAL_HASH_TAG;
+        backfilled = true;
+      }
+    }
+    if (backfilled) persist();
   } catch {
     /* corrupt file, start fresh */
   }
@@ -187,7 +200,7 @@ export function loadTheoryStore(): void {
 export function recordObservation(description: string, domain: string, confidence: number = 0.3): Observation {
   const existing = observations.find((o) => o.description === description);
   if (existing) return existing;
-  const embedding = localEmbed(description);
+  const { vector: embedding, model: embeddingModel } = localEmbedder.embedSync(description);
   const obs: Observation = {
     id: `obs_${nextObsId++}`,
     description,
@@ -195,6 +208,7 @@ export function recordObservation(description: string, domain: string, confidenc
     confidence,
     timestamp: Date.now(),
     embedding,
+    embeddingModel,
   };
   observations.push(obs);
   if (observations.length > 500) observations.splice(0, observations.length - 500);
@@ -214,8 +228,11 @@ function reevaluateTheories(domain: string): void {
 
   for (const t of theories) {
     if (t.confirmed) continue;
-    const theoryEmbed = t.embedding || localEmbed(t.name + " " + t.explanation);
-    if (!t.embedding) t.embedding = theoryEmbed;
+    const theoryEmbed = t.embedding || localEmbedder.embedSync(t.name + " " + t.explanation).vector;
+    if (!t.embedding) {
+      t.embedding = theoryEmbed;
+      t.embeddingModel = LOCAL_HASH_TAG;
+    }
     const sim = cosineSimilarity(avgEmbedding, theoryEmbed);
     if (sim >= 0.3) {
       t.confidence = Math.min(1, t.confidence + sim * 0.2);
@@ -254,7 +271,7 @@ function tryGeneralize(): StoredPattern | null {
       return existing;
     }
     const generalization = recent.map((o) => o.description).join("; ");
-    const embedding = localEmbed(generalization);
+    const { vector: embedding, model: embeddingModel } = localEmbedder.embedSync(generalization);
     const p: StoredPattern = {
       id: `pat_${nextPatId++}`,
       name,
@@ -263,6 +280,7 @@ function tryGeneralize(): StoredPattern | null {
       confidence: 0.3,
       timestamp: Date.now(),
       embedding,
+      embeddingModel,
     };
     patterns.push(p);
     if (patterns.length > 100) patterns.splice(0, patterns.length - 100);
@@ -279,8 +297,8 @@ function tryAbstract(): void {
   if (top.length >= 2) {
     const sorted = findSharedByEmbedding(top);
     const sim = cosineSimilarity(
-      sorted[0].embedding || localEmbed(sorted[0].generalization),
-      sorted[1].embedding || localEmbed(sorted[1].generalization),
+      sorted[0].embedding || localEmbedder.embedSync(sorted[0].generalization).vector,
+      sorted[1].embedding || localEmbedder.embedSync(sorted[1].generalization).vector,
     );
     if (sim >= 0.2) {
       const words = findShared(top.map((p) => p.generalization));
@@ -309,6 +327,7 @@ function tryAbstract(): void {
 
 function buildTheory(prim: StoredPrimitive): void {
   const explanation = `Observation of ${prim.abstraction} suggests a recurring reasoning structure`;
+  const { vector: embedding, model: embeddingModel } = localEmbedder.embedSync(prim.name + " " + explanation);
   const theory: Theory = {
     id: `theory_${nextTheoryId++}`,
     name: `Theory: ${prim.name.replace("Primitive:", "explains")}`,
@@ -322,7 +341,8 @@ function buildTheory(prim: StoredPrimitive): void {
     confirmed: false,
     confidence: 0.2,
     timestamp: Date.now(),
-    embedding: localEmbed(prim.name + " " + explanation),
+    embedding,
+    embeddingModel,
     evidence: [],
   };
   theories.push(theory);
@@ -384,7 +404,10 @@ function findShared(texts: string[]): string[] {
 function findSharedByEmbedding(patterns: StoredPattern[]): StoredPattern[] {
   if (patterns.length < 2) return patterns;
   const embeddings = patterns.map((p) => {
-    if (!p.embedding) p.embedding = localEmbed(p.generalization);
+    if (!p.embedding) {
+      p.embedding = localEmbedder.embedSync(p.generalization).vector;
+      p.embeddingModel = LOCAL_HASH_TAG;
+    }
     return p.embedding;
   });
   const center = averageEmbedding(embeddings);
@@ -477,11 +500,14 @@ export function resolvePrediction(
 export function penalizeTheoriesForFalseSuccess(text: string, summary: string, limit: number = 2): string[] {
   const payload = text.trim();
   if (!payload) return [];
-  const embedding = localEmbed(payload.slice(0, 400));
+  const embedding = localEmbedder.embedSync(payload.slice(0, 400)).vector;
   const candidates = theories
     .map((t) => {
       const pending = (t.outcomeLog || []).filter((p) => p.outcome === "pending").length;
-      const sim = cosineSimilarity(embedding, t.embedding || localEmbed(t.name + " " + t.explanation));
+      const sim = cosineSimilarity(
+        embedding,
+        t.embedding || localEmbedder.embedSync(t.name + " " + t.explanation).vector,
+      );
       return { t, sim, pending };
     })
     .filter(({ sim, pending }) => pending > 0 || sim >= 0.5)

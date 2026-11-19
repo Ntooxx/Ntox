@@ -87,6 +87,7 @@ import {
   renderConfig,
   renderCosts,
   renderMemoryStats,
+  renderEmbeddingStats,
   renderMetaStats,
   renderMistakeList,
   renderUserPrompt,
@@ -285,6 +286,7 @@ export class Repl {
     this.infra.aliveHosts?.start();
     this.startCron();
     this.printOpenLoopReminders();
+    this.printEmbeddingModelHint();
     if (this.config.idleEnabled === true) {
       try {
         this.wireIdleJobs();
@@ -880,6 +882,11 @@ export class Repl {
       case "": {
         const stats = this.memory.getStats();
         console.log(renderMemoryStats(stats));
+        console.log(
+          renderEmbeddingStats(
+            this.memory.getEmbeddingStats(this.llm.getEmbeddingModelTag(), this.config.embeddingDimensions),
+          ),
+        );
         const durable = this.memory.listDurableMemories();
         if (durable.length > 0) {
           console.log(chalk.bold("\nDurable memories:"));
@@ -1929,6 +1936,22 @@ export class Repl {
     }
   }
 
+  /** Non-blocking hint when a meaningful share of stored vectors can't serve the active model. */
+  private printEmbeddingModelHint(): void {
+    try {
+      const stats = this.memory.getEmbeddingStats(this.llm.getEmbeddingModelTag(), this.config.embeddingDimensions);
+      if (stats.withVector > 0 && stats.skippedByModel / stats.withVector > 0.1) {
+        console.log(
+          chalk.yellow(
+            `[memory] ${stats.skippedByModel} of ${stats.withVector} episode embeddings don't match the active model — run 'ntox memory reembed' to migrate.`,
+          ),
+        );
+      }
+    } catch {
+      /* hint only — never block startup */
+    }
+  }
+
   private wireIdleJobs(): void {
     const mind = this.infra.mind;
     if (!mind) return;
@@ -2791,9 +2814,7 @@ export class Repl {
       writer.startLine();
       if (this.thinkingChars > 0) {
         const secs = Math.max(1, Math.round((Date.now() - this.turnStartedAtMs) / 1000));
-        emitTag(
-          renderInlineTag(`reasoned ${formatTokenCount(this.thinkingChars)} chars in ${secs}s`, chalk.dim),
-        );
+        emitTag(renderInlineTag(`reasoned ${formatTokenCount(this.thinkingChars)} chars in ${secs}s`, chalk.dim));
         this.thinkingChars = 0;
       }
     };

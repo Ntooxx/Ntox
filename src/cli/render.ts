@@ -11,6 +11,7 @@ import type {
   AgentTurnTrace,
 } from "../types/index.js";
 import type { Briefing } from "../meta/briefing.js";
+import type { EmbeddingStats } from "../memory/episodic.js";
 import { getCommandGroups } from "./commands.js";
 import {
   accents,
@@ -306,6 +307,36 @@ export function renderMemoryStats(stats: MemoryStats): string {
     `  ${chalk.dim("size")}     ${(stats.memorySizeBytes / 1024).toFixed(1)} KB`,
     hintLine(`  /memory search <q>  /memory last <n>  /memory clear`),
   ].join("\n");
+}
+
+export function renderEmbeddingStats(stats: EmbeddingStats): string {
+  const lines: string[] = [];
+  lines.push(
+    `  ${chalk.dim("vectors")}   ${stats.withVector} embedded (${stats.totalEpisodes - stats.withVector} unembedded)`,
+  );
+  lines.push(`  ${chalk.dim("active")}    ${stats.activeModel ?? "unknown model"}`);
+  if (stats.activeDim !== undefined) {
+    lines.push(
+      `  ${chalk.dim("query dim")} ${stats.activeDim}d${stats.dimInferred ? chalk.dim(" (inferred from stored vectors)") : ""}`,
+    );
+  }
+  for (const [model, count] of Object.entries(stats.byModel)) {
+    const skipped = stats.activeModel && model !== stats.activeModel ? chalk.yellow(" [skipped]") : "";
+    lines.push(`  ${chalk.dim("model")}     ${model} × ${count}${skipped}`);
+  }
+  const dims = Object.entries(stats.byDim)
+    .map(([dim, n]) => `${dim}d × ${n}`)
+    .join(", ");
+  if (dims) lines.push(`  ${chalk.dim("dims")}      ${dims}`);
+  if (stats.activeModel && stats.skippedByModel > 0) {
+    lines.push(
+      chalk.yellow(
+        `  ${stats.skippedByModel} of ${stats.withVector} vectors mismatch the active model` +
+          `${stats.activeDim !== undefined ? ` (${stats.skippedByDim} also differ in dimension)` : ""} — run 'ntox memory reembed'`,
+      ),
+    );
+  }
+  return lines.join("\n");
 }
 
 export function renderMetaStats(

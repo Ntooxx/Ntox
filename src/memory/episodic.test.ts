@@ -350,3 +350,82 @@ describe("MemoryStore", () => {
     expect(newFact?.confidence).toBeLessThan(0.5);
   });
 });
+
+describe("embedding provenance and skip stats", () => {
+  afterEach(() => {
+    if (existsSync(EPISODES_PATH)) unlinkSync(EPISODES_PATH);
+    if (existsSync(EPISODES_JSONL_PATH)) unlinkSync(EPISODES_JSONL_PATH);
+    if (existsSync(DURABLE_MEMORY_PATH)) unlinkSync(DURABLE_MEMORY_PATH);
+  });
+
+  it("tags untagged inserted vectors as local-hash and leaves empty embeddings untagged", () => {
+    const store = new MemoryStore();
+    store.addEpisode("s1", "untagged write", "ok", [1, 0, 0]);
+    store.addEpisode("s1", "explicit write", "ok", [1, 0, 0], "remote:test/model");
+    store.addEpisode("s1", "no vector", "ok", []);
+
+    const rows = store.getAll();
+    expect(rows.find((e) => e.userMessage === "untagged write")?.embeddingModel).toBe("local-hash");
+    expect(rows.find((e) => e.userMessage === "explicit write")?.embeddingModel).toBe("remote:test/model");
+    expect(rows.find((e) => e.userMessage === "no vector")?.embeddingModel).toBeUndefined();
+  });
+
+  it("backfills and persists local-hash on legacy rows without a tag", () => {
+    writeFileSync(
+      EPISODES_JSONL_PATH,
+      JSON.stringify({
+        id: "ep_legacy",
+        timestamp: 1,
+        sessionId: "s1",
+        userMessage: "legacy row",
+        assistantResponse: "ok",
+        summary: "legacy row",
+        embedding: [0.5, 0.5, 0.5],
+      }) + "\n",
+    );
+
+    const store = new MemoryStore();
+    expect(store.getAll()[0].embeddingModel).toBe("local-hash");
+
+    const persisted = readFileSync(EPISODES_JSONL_PATH, "utf-8");
+    expect(persisted).toContain('"embeddingModel":"local-hash"');
+  });
+
+  it("reports per-model counts, dims, and skip totals", () => {
+    const store = new MemoryStore();
+    store.addEpisode("s1", "a", "r", [1, 0, 0], "remote:model-a");
+    store.addEpisode("s1", "b", "r", [0, 1, 0], "remote:model-a");
+    store.addEpisode("s1", "c", "r", [1, 0], "local-hash");
+    store.addEpisode("s1", "d", "r", [0, 1]);
+
+    const stats = store.getEmbeddingStats("remote:model-a", 3);
+    expect(stats.totalEpisodes).toBe(4);
+    expect(stats.withVector).toBe(4);
+    expect(stats.byModel).toEqual({ "remote:model-a": 2, "local-hash": 2 });
+    expect(stats.byDim).toEqual({ 3: 2, 2: 2 });
+    expect(stats.skippedByModel).toBe(2);
+    expect(stats.skippedByDim).toBe(2);
+    expect(stats.mismatchRatio).toBeCloseTo(0.5);
+
+    const none = store.getEmbeddingStats();
+    expect(none.skippedByModel).toBe(0);
+    expect(none.skippedByDim).toBe(0);
+  });
+
+  it("infers the query dimension from stored active-model vectors", () => {
+    const store = new MemoryStore();
+    store.addEpisode("s1", "a", "r", [1, 0, 0], "remote:model-a");
+    store.addEpisode("s1", "b", "r", [0, 1, 0], "remote:model-a");
+    store.addEpisode("s1", "c", "r", [1, 0], "local-hash");
+
+    const inferred = store.getEmbeddingStats("remote:model-a");
+    expect(inferred.activeDim).toBe(3);
+    expect(inferred.dimInferred).toBe(true);
+    expect(inferred.skippedByDim).toBe(1);
+
+    const explicit = store.getEmbeddingStats("remote:model-a", 2);
+    expect(explicit.activeDim).toBe(2);
+    expect(explicit.dimInferred).toBeUndefined();
+    expect(explicit.skippedByDim).toBe(2);
+  });
+});

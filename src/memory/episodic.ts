@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import { getMemoryDir, EPISODES_PATH, EPISODES_JSONL_PATH, DURABLE_MEMORY_PATH } from "../core/config.js";
 import { cosineSimilarity } from "../utils/math.js";
 import { localEmbed } from "../core/local-embed.js";
+import { embeddingStats, LOCAL_HASH_TAG, type EmbeddingStats } from "./embedding-service.js";
 import type { DurableMemory, Episode, MemoryLane, MemoryQueryResult, MemoryStats } from "../types/index.js";
 
 export { cosineSimilarity };
+export type { EmbeddingStats };
 
 const EPISODES_COMPACT_THRESHOLD = 1200;
 const EPISODES_KEEP_AFTER_COMPACT = 1000;
@@ -221,12 +223,15 @@ export class MemoryStore {
     this.loaded = true;
     if (existsSync(EPISODES_JSONL_PATH)) {
       this.episodes = this.loadJsonl();
+      const backfilled = this.backfillEmbeddingModels();
       if (this.episodes.length > EPISODES_COMPACT_THRESHOLD) this.compact();
+      else if (backfilled) this.save();
       return;
     }
     if (existsSync(EPISODES_PATH)) {
       try {
         this.episodes = JSON.parse(readFileSync(EPISODES_PATH, "utf-8"));
+        this.backfillEmbeddingModels();
         this.save();
       } catch {
         this.episodes = [];
@@ -234,6 +239,20 @@ export class MemoryStore {
       return;
     }
     this.episodes = [];
+  }
+
+  /** Legacy rows predate provenance tagging; the historical producer was the local
+   *  hash embedder, so untagged vectors are backfilled `local-hash`. Run
+   *  `ntox memory reembed` to migrate them to the active embedding model. */
+  private backfillEmbeddingModels(): boolean {
+    let changed = false;
+    for (const episode of this.episodes) {
+      if (episode.embedding && episode.embedding.length > 0 && !episode.embeddingModel) {
+        episode.embeddingModel = LOCAL_HASH_TAG;
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   private loadJsonl(): Episode[] {
@@ -303,7 +322,8 @@ export class MemoryStore {
       assistantResponse,
       summary: generateSummary(userMessage),
       embedding,
-      ...(embeddingModel ? { embeddingModel } : {}),
+      // Every stored vector carries its provenance; untagged writes count as local-hash.
+      ...(embedding.length > 0 ? { embeddingModel: embeddingModel ?? LOCAL_HASH_TAG } : {}),
     };
     this.episodes.push(episode);
     if (this.episodes.length > 1000) {
@@ -378,6 +398,13 @@ export class MemoryStore {
       newestTimestamp: timestamps.length > 0 ? Math.max(...timestamps) : null,
       memorySizeBytes: Buffer.byteLength(JSON.stringify(this.episodes)),
     };
+  }
+
+  /** Per-model provenance counts + the skip totals the model/dim guards would incur
+   *  for `activeModel`/`activeDim` (mirrors the skip logic in `retrieve`/`buildMemoryItems`). */
+  getEmbeddingStats(activeModel?: string, activeDim?: number): EmbeddingStats {
+    this.load();
+    return embeddingStats(this.episodes, activeModel, activeDim);
   }
 
   addDurableMemory(
@@ -550,6 +577,9 @@ export class MemoryStore {
     const recent = [...this.episodes].reverse().slice(0, recentLimit);
     if (recent.length < 2) return report;
 
+    // Kept deliberately: consolidation re-embeds episode summaries in the local-hash
+    // space purely to cluster them against each other (same-space comparison, never
+    // persisted), so the deterministic local embedder is self-consistent here.
     const vectors = recent.map((episode) => localEmbed(episode.summary));
     const parent = recent.map((_, index) => index);
     const find = (index: number): number => {
