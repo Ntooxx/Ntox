@@ -286,4 +286,51 @@ describe("createApiServer", () => {
       await running.stop();
     }
   });
+
+  it("exposes per-session spend and supports live model switching from chat", async () => {
+    saveCosts({ totalInputTokens: 0, totalOutputTokens: 0, totalCost: 0 });
+    const api = createApiServer({
+      port: 4000,
+      host: "127.0.0.1",
+      agentFactory: () => mockAgent(["ok"]),
+    });
+    const running = await api.start();
+    const base = `http://${running.host}:${running.port}`;
+    try {
+      const res = await fetch(`${base}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "hi", sessionId: "desktop_meta" }),
+      });
+      const { events } = await readSse(res);
+      const usage = events.find(
+        (event) => event.event === "event" && (event.data as { type?: string }).type === "usage",
+      )?.data as { cost: number; sessionCost: number };
+      expect(typeof usage.cost).toBe("number");
+      expect(typeof usage.sessionCost).toBe("number");
+
+      const meta = (await (await fetch(`${base}/api/chat/meta?sessionId=desktop_meta`)).json()) as {
+        model: string;
+        provider: string;
+        session: { cost: number };
+      };
+      expect(typeof meta.model).toBe("string");
+      expect(typeof meta.provider).toBe("string");
+      expect(meta.session.cost).toBe(usage.sessionCost);
+
+      const switched = (await (
+        await fetch(`${base}/api/chat/model`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "openai/gpt-4o-mini" }),
+        })
+      ).json()) as { ok: boolean; model: string };
+      expect(switched).toMatchObject({ ok: true, model: "openai/gpt-4o-mini" });
+
+      const after = (await (await fetch(`${base}/api/chat/meta`)).json()) as { model: string };
+      expect(after.model).toBe("openai/gpt-4o-mini");
+    } finally {
+      await running.stop();
+    }
+  });
 });

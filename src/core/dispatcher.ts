@@ -33,6 +33,8 @@ import { MistakeJournal } from "../meta/mistakes.js";
 import { SkillExecutor } from "../skills/executor.js";
 import { SkillRegistry } from "../skills/registry.js";
 import { SkillLibrary } from "../skills/library.js";
+import { SkillSemanticIndex } from "../skills/semantic-index.js";
+import { EmbeddingService } from "../memory/embedding-service.js";
 import { Analytics } from "../meta/analytics.js";
 import { ProactiveEngine, type ProactiveSuggestion } from "../meta/proactive.js";
 import { ObservationEngine } from "../meta/observation.js";
@@ -169,7 +171,8 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
   }
 
   const skillRegistry = new SkillRegistry();
-  const skillLibrary = new SkillLibrary();
+  const skillSemanticIndex = new SkillSemanticIndex(new EmbeddingService(llm));
+  const skillLibrary = new SkillLibrary(undefined, skillSemanticIndex);
   const skillExecutor = new SkillExecutor(skillRegistry, skillLibrary, true);
   const aliveHosts = new NtoxAliveHostAdapters({
     bridge: alive,
@@ -249,6 +252,8 @@ export function createAgentConfig(
     mistakesEnabled: config.metaMistakesEnabled,
     minConfidence: config.metaMinConfidence,
     skillAutoLearn: config.skillAutoLearnEnabled,
+    skillSemanticMatchEnabled: config.skillSemanticMatchEnabled,
+    skillAutoAuthorEnabled: config.skillAutoAuthorEnabled,
     skillRegistry: infra.skillRegistry,
     maxContextMessages: 120,
     contextTokenBudget: 300_000,

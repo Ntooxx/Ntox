@@ -1,5 +1,5 @@
 import { loadCachedModels, recordCosts, saveCachedModels } from "../core/config.js";
-import { estimateCost } from "../core/llm.js";
+import { usageCost } from "../core/llm.js";
 import type { CostUsage, ModelInfo } from "../types/index.js";
 
 export interface SpendSource {
@@ -26,12 +26,13 @@ function requestModels(source: SpendSource): void {
     });
 }
 
-export function recordUsage(usage: CostUsage, source: SpendSource): void {
+export function recordUsage(usage: CostUsage, source: SpendSource): number {
   const inputTokens = Math.max(0, usage?.inputTokens || 0);
   const outputTokens = Math.max(0, usage?.outputTokens || 0);
-  if (inputTokens === 0 && outputTokens === 0) return;
+  if (inputTokens === 0 && outputTokens === 0) return 0;
   const models = cachedModels();
   if (models.length === 0) requestModels(source);
-  const cost = usage.cost > 0 ? usage.cost : estimateCost(source.model, inputTokens, outputTokens, models);
+  const cost = usageCost(usage, source.model);
   recordCosts({ inputTokens, outputTokens, cost });
+  return cost;
 }

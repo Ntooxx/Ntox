@@ -478,6 +478,11 @@ button { font-family: inherit; }
   white-space: nowrap;
 }
 
+#cost-pill {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
 .avatar-top {
   width: 28px;
   height: 28px;

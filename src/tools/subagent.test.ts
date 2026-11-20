@@ -3,7 +3,15 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SubagentRun } from "./subagent.js";
-import { getSubagentRuns, subagentTool } from "./subagent.js";
+import {
+  assessDecomposition,
+  buildSubagentTask,
+  getQueueSnapshot,
+  parseStructuredOutput,
+  parseVerdict,
+  subagentTool,
+  getSubagentRuns,
+} from "./subagent.js";
 
 let dir = "";
 const baseDir = process.env.NTOX_DIR!;
@@ -93,5 +101,58 @@ describe("subagent tool", () => {
   it("returns persisted runs through getSubagentRuns", () => {
     seed([run()]);
     expect(getSubagentRuns(5)).toHaveLength(1);
+  });
+});
+
+describe("subagent handoff", () => {
+  it("rejects a monolithic task in the decomposition gate", () => {
+    const assessment = assessDecomposition("Write the single HTML file prova.html", []);
+    expect(assessment.recommendation).toBe("direct");
+    expect(assessment.reasons.join(" ")).toContain("single context");
+    expect(assessment.suggestedRoles).toEqual([]);
+  });
+
+  it("accepts explicit independent workstreams and suggests a verifier", () => {
+    const assessment = assessDecomposition("1. Review the dispatcher\n2. Review the registry\n3. Report separately", [
+      "read",
+      "grep",
+    ]);
+    expect(assessment.recommendation).toBe("parallel");
+    expect(assessment.suggestedRoles).toContain("verifier");
+    expect(assessment.checklist.join(" ")).toContain("ownership");
+  });
+
+  it("prepends authoritative parent context to the task", () => {
+    expect(buildSubagentTask("Check the result", "Only modules A and B changed")).toBe(
+      "Context from parent (authoritative, do not re-derive):\nOnly modules A and B changed\n\nTask:\nCheck the result",
+    );
+    expect(buildSubagentTask("Check the result", "  ")).toBe("Check the result");
+  });
+
+  it("parses a verifier verdict and its findings", () => {
+    const verdict = parseVerdict(
+      "Looks mostly fine.\nVERDICT: FAIL\nFINDINGS:\n- missing null check\n- no test for empty input",
+    );
+    expect(verdict).toEqual({ outcome: "fail", findings: ["missing null check", "no test for empty input"] });
+    expect(parseVerdict("no verdict here")).toBeUndefined();
+  });
+
+  it("parses structured JSON with or without code fences", () => {
+    expect(parseStructuredOutput('```json\n{"ok": true}\n```')).toEqual({ ok: true });
+    expect(parseStructuredOutput('{"ok": false}')).toEqual({ ok: false });
+    expect(parseStructuredOutput("not json")).toBeUndefined();
+  });
+
+  it("exposes a plan action that does not spawn", async () => {
+    const result = await subagentTool.execute({
+      action: "plan",
+      task: "1. Inspect the repo\n2. Inspect the tests\n3. Report separately",
+      tools: "read,grep",
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as { recommendation: string; suggestedRoles: string[] };
+    expect(data.recommendation).toBe("parallel");
+    expect(data.suggestedRoles).toContain("verifier");
+    expect(getQueueSnapshot()).toEqual({ active: 0, capacity: 3, queued: 0 });
   });
 });

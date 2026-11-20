@@ -30,6 +30,17 @@ describe("recordUsage", () => {
     expect(loadCosts()).toEqual({ totalInputTokens: 2000, totalOutputTokens: 500, totalCost: 0 });
   });
 
+  it("returns the cost it recorded so callers can report actual spend", async () => {
+    saveCachedModels([modelCard("test-model", 0.000003, 0.000006)]);
+    const recordUsage = await freshRecordUsage();
+
+    const cost = recordUsage({ inputTokens: 1000, outputTokens: 500, cost: 0 }, { model: "test-model" });
+
+    expect(cost).toBeCloseTo(0.000003 * 1000 + 0.000006 * 500, 8);
+    expect(loadCosts().totalCost).toBeCloseTo(cost, 8);
+    expect(recordUsage({ inputTokens: 0, outputTokens: 0, cost: 0 }, { model: "test-model" })).toBe(0);
+  });
+
   it("prices tokens from the cached model card when the provider reports no cost", async () => {
     saveCachedModels([modelCard("test-model", 0.000003, 0.000006)]);
     const recordUsage = await freshRecordUsage();

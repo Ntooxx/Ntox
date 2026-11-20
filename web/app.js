@@ -26,6 +26,7 @@
   const phasePill = document.getElementById("phase-pill");
   const memoryPill = document.getElementById("memory-pill");
   const usagePill = document.getElementById("usage-pill");
+  const costPill = document.getElementById("cost-pill");
   const statusDot = document.getElementById("status-dot");
   const statusTitle = document.getElementById("status-title");
   const modelLabel = document.getElementById("modelLabel");
@@ -49,6 +50,7 @@
   const tokenError = document.getElementById("tokenError");
 
   let sessionId = localStorage.getItem("ntox_session_id") || "";
+  let sessionCost = 0;
   let chats = [];
   let pending = false;
   let current = null;
@@ -330,6 +332,34 @@
     if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
     if (n >= 1000) return (n / 1000).toFixed(1) + "k";
     return String(n);
+  }
+
+  function fmtCost(n) {
+    const amount = Number(n) || 0;
+    if (amount <= 0) return "$0.00";
+    if (amount < 0.01) return "$" + amount.toFixed(4);
+    return "$" + amount.toFixed(3);
+  }
+
+  const costKey = function () { return "ntox_session_cost_" + sessionId; };
+
+  function renderCost() {
+    costPill.hidden = sessionCost <= 0;
+    costPill.textContent = fmtCost(sessionCost);
+    costPill.title = "Estimated spend in this session · " + sessionCost.toFixed(6) + " USD";
+  }
+
+  function syncCost() {
+    sessionCost = Number(localStorage.getItem(costKey())) || 0;
+    renderCost();
+  }
+
+  function addSessionCost(amount) {
+    const delta = Number(amount) || 0;
+    if (!delta) return;
+    sessionCost += delta;
+    localStorage.setItem(costKey(), String(sessionCost));
+    renderCost();
   }
 
   function pct(n) {
@@ -742,6 +772,7 @@
   function joinSession(id) {
     sessionId = id;
     localStorage.setItem("ntox_session_id", sessionId);
+    syncCost();
     if (socket.connected) socket.emit("join", { sessionId: sessionId });
   }
 
@@ -1992,6 +2023,13 @@
     if (event.type === "usage") {
       usagePill.hidden = false;
       usagePill.textContent = fmtTokens(event.inputTokens || 0) + "↑ " + fmtTokens(event.outputTokens || 0) + "↓";
+      if (typeof event.sessionCost === "number") {
+        sessionCost = event.sessionCost;
+        localStorage.setItem(costKey(), String(sessionCost));
+        renderCost();
+      } else {
+        addSessionCost(event.cost);
+      }
     }
     if (event.type === "tool_call") addToolCard(event.name, event.args);
     if (event.type === "tool_result") resolveToolCard(event.name, event.success, event.error);
@@ -2225,5 +2263,6 @@
   setStatus("connecting", "Connecting");
   renderChatList();
   ensureSessionId();
+  syncCost();
   autosize();
 })();

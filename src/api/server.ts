@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { loadCachedModels, loadConfig } from "../core/config.js";
+import { loadCachedModels, loadConfig, saveCachedModels, saveConfig } from "../core/config.js";
 import { redactError } from "../core/redact.js";
 import { stripAnsi } from "../cli/theme.js";
 import {
@@ -65,8 +65,7 @@ function readBody(req: IncomingMessage): Promise<string> {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if ((size += chunk.length) > MAX_BODY_BYTES) {
         reject(new Error("Request body too large"));
         req.destroy();
         return;
@@ -79,9 +78,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 }
 
 function authorized(req: IncomingMessage, authToken: string): boolean {
-  if (!authToken) return true;
-  const header = req.headers.authorization || "";
-  return header === `Bearer ${authToken}`;
+  return !authToken || req.headers.authorization === `Bearer ${authToken}`;
 }
 
 const COMMAND_HELP: Record<string, string> = {
@@ -100,10 +97,19 @@ const COMMAND_HELP: Record<string, string> = {
 };
 
 function helpText(): string {
-  const lines = ["NTOX commands:"];
-  for (const name of UNIFIED_COMMANDS) lines.push(`  /${name} — ${COMMAND_HELP[name] ?? ""}`);
+  const lines = ["NTOX commands:", ...UNIFIED_COMMANDS.map((name) => `  /${name} — ${COMMAND_HELP[name] ?? ""}`)];
   lines.push("  /new — start a fresh conversation", "  /reset — forget this conversation", "  /help — this list");
   return lines.join("\n");
+}
+
+interface SessionSpend {
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+}
+
+function emptySpend(): SessionSpend {
+  return { inputTokens: 0, outputTokens: 0, cost: 0 };
 }
 
 interface ApiRuntime {
@@ -132,16 +138,7 @@ function createDefaultRuntime(): ApiRuntime {
     const agent = sessions.getOrCreate(id, createAgentConfig({ ...shared, ...infraFor(id) }, config, `api_${id}`));
     let output = "";
     try {
-      await runAgentStream(
-        agent,
-        prompt,
-        {
-          onToken: (token) => {
-            output += token;
-          },
-        },
-        AbortSignal.timeout(120_000),
-      );
+      await runAgentStream(agent, prompt, { onToken: (token) => (output += token) }, AbortSignal.timeout(120_000));
     } catch (error) {
       const reason = `Scheduled "${job.name}" failed: ${redactError(error)}`;
       shared.alive.notify(reason);
@@ -191,6 +188,15 @@ export function createApiServer(options: ApiServerOptions = {}): {
   let server: ReturnType<typeof createServer> | null = null;
   let runtime: ApiRuntime | null = null;
   const sessions = new SessionManager();
+  const sessionSpend = new Map<string, SessionSpend>();
+  const spendFor = (sessionId: string): SessionSpend => {
+    let spend = sessionSpend.get(sessionId);
+    if (!spend) {
+      spend = emptySpend();
+      sessionSpend.set(sessionId, spend);
+    }
+    return spend;
+  };
   let desktopApi: ReturnType<typeof createDesktopApi> | null = null;
 
   const getRuntime = (): ApiRuntime => (runtime ??= createDefaultRuntime());
@@ -216,6 +222,7 @@ export function createApiServer(options: ApiServerOptions = {}): {
     if (head === "/help") return helpText();
     if (head === "/new" || head === "/reset") {
       getFactory()(sessionId).resetConversation();
+      sessionSpend.delete(sessionId);
       return "Fresh start. Go ahead.";
     }
     const ctx = commandContextFor(sessionId);
@@ -233,9 +240,7 @@ export function createApiServer(options: ApiServerOptions = {}): {
     let model = "unknown";
     let provider = "unknown";
     try {
-      const config = loadConfig();
-      model = config.model;
-      provider = config.provider;
+      ({ model, provider } = loadConfig());
     } catch {
       /* defaults */
     }
@@ -310,12 +315,17 @@ export function createApiServer(options: ApiServerOptions = {}): {
           onMemoryStore: () => sse(res, "event", { type: "memory", action: "stored", count: 1 }),
           onStrategy: (strategy) => sse(res, "event", { type: "strategy", strategy }),
           onUsage: (usage) => {
-            recordUsage(usage, spendSource);
+            const cost = recordUsage(usage, spendSource);
+            const spend = spendFor(sessionId);
+            spend.inputTokens += usage.inputTokens || 0;
+            spend.outputTokens += usage.outputTokens || 0;
+            spend.cost += cost;
             sse(res, "event", {
               type: "usage",
               inputTokens: usage.inputTokens,
               outputTokens: usage.outputTokens,
-              cost: usage.cost,
+              cost,
+              sessionCost: spend.cost,
             });
           },
         },
@@ -334,6 +344,7 @@ export function createApiServer(options: ApiServerOptions = {}): {
           timedOut: result.timedOut,
           inputTokens: result.totalInputTokens,
           outputTokens: result.totalOutputTokens,
+          sessionCost: spendFor(sessionId).cost,
         });
       }
     } catch (e) {
@@ -344,6 +355,60 @@ export function createApiServer(options: ApiServerOptions = {}): {
       unsubscribeApprovals();
       sessions.unlock(sessionId);
       if (!res.destroyed && !res.writableEnded) res.end();
+    }
+  };
+
+  const handleChatMeta = (req: IncomingMessage, res: ServerResponse): void => {
+    const url = new URL(req.url || "/", "http://localhost");
+    const sessionId = (url.searchParams.get("sessionId") || "default").slice(0, 128);
+    const config = loadConfig();
+    json(res, 200, {
+      ok: true,
+      model: config.model,
+      provider: config.provider,
+      models: loadCachedModels() ?? [],
+      session: { ...(sessionSpend.get(sessionId) ?? emptySpend()) },
+    });
+  };
+
+  const handleSetChatModel = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    let payload: { model?: unknown; provider?: unknown } = {};
+    try {
+      payload = JSON.parse(await readBody(req)) as typeof payload;
+    } catch {
+      json(res, 400, { error: "Invalid JSON body" });
+      return;
+    }
+    const model = typeof payload.model === "string" ? payload.model.trim() : "";
+    if (!model || model.length > 200) {
+      json(res, 400, { error: "Model must be a non-empty string of 200 characters or fewer." });
+      return;
+    }
+    const provider = typeof payload.provider === "string" ? payload.provider.trim() : "";
+    const config = loadConfig();
+    config.model = model;
+    if (provider) config.provider = provider;
+    saveConfig(config);
+    if (runtime) {
+      runtime.config.model = model;
+      if (provider) runtime.config.provider = provider;
+      runtime.shared.llm.updateModel(model);
+      if (provider) runtime.shared.llm.updateProvider(provider);
+    }
+    json(res, 200, { ok: true, model, provider: config.provider });
+  };
+
+  const handleRefreshModels = async (res: ServerResponse): Promise<void> => {
+    try {
+      const models = runtime ? await runtime.shared.llm.fetchModels() : [];
+      if (models.length) saveCachedModels(models);
+      json(res, 200, {
+        ok: true,
+        models: models.length ? models : (loadCachedModels() ?? []),
+        refreshed: models.length > 0,
+      });
+    } catch (error) {
+      json(res, 500, { error: redactError(error) });
     }
   };
 
@@ -361,6 +426,7 @@ export function createApiServer(options: ApiServerOptions = {}): {
         ? payload.sessionId.trim().slice(0, 128)
         : "default";
     getFactory()(sessionId).resetConversation();
+    sessionSpend.delete(sessionId);
     json(res, 200, { ok: true, sessionId });
   };
 
@@ -383,6 +449,21 @@ export function createApiServer(options: ApiServerOptions = {}): {
 
         if (!authorized(req, authToken)) {
           json(res, 401, { error: "Unauthorized — send Authorization: Bearer <token>" });
+          return;
+        }
+
+        if (path === "/api/chat/meta" && req.method === "GET") {
+          handleChatMeta(req, res);
+          return;
+        }
+
+        if (path === "/api/chat/model" && req.method === "POST") {
+          void handleSetChatModel(req, res);
+          return;
+        }
+
+        if (path === "/api/models/refresh" && req.method === "POST") {
+          void handleRefreshModels(res);
           return;
         }
 
@@ -456,6 +537,9 @@ export function createApiServer(options: ApiServerOptions = {}): {
           endpoints: [
             "/api/health",
             "/api/chat",
+            "/api/chat/meta",
+            "/api/chat/model",
+            "/api/models/refresh",
             "/api/session/reset",
             "/api/desktop/bootstrap",
             "/api/agents",
@@ -482,10 +566,7 @@ export function createApiServer(options: ApiServerOptions = {}): {
         host,
         stop: () =>
           new Promise<void>((resolve) => {
-            if (!server) {
-              resolve();
-              return;
-            }
+            if (!server) return resolve();
             server.close(() => resolve());
             server = null;
           }),

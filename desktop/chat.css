@@ -1057,3 +1057,26 @@ body:has(.desktop-chat:not(.chat-visible)) {
 .desktop-approval-actions .approval-deny{border-color:#4a3f3f;color:#d8bfbf}
 .desktop-approval-actions .approval-deny:hover:not(:disabled){border-color:#8a6a6a;background:#1d1414}
 .desktop-approval small{color:#8b9090;font-size:10px;line-height:1.5}
+
+.desktop-conversation-head > .desktop-session-meta{display:flex;align-items:center;gap:8px;flex:none;grid-template-columns:none;margin:0}
+.desktop-model-wrap{position:relative}
+.desktop-conversation-head .desktop-model-chip{display:inline-flex;align-items:center;gap:7px;min-width:0;max-width:260px;min-height:30px;padding:0 9px;border:1px solid #34403b;border-radius:7px;background:#101614;color:#cfe0d7;font:11px/1 var(--console-mono);cursor:pointer}
+.desktop-conversation-head .desktop-model-chip i{width:6px;height:6px;border-radius:50%;background:#7fb99a;flex:none}
+.desktop-conversation-head .desktop-model-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.desktop-conversation-head .desktop-model-chip:hover:not(:disabled){border-color:#5e7569;background:#141d19}
+.desktop-conversation-head .desktop-model-chip:disabled{opacity:.6;cursor:wait}
+.desktop-conversation-head .desktop-cost-chip{padding:6px 9px;border:1px solid #333939;border-radius:7px;background:#0d1010;color:#a9c5b6;font:11px/1 var(--console-mono);white-space:nowrap}
+.desktop-model-menu{position:absolute;right:0;top:calc(100% + 8px);z-index:40;width:320px;max-height:380px;display:flex;flex-direction:column;padding:8px;border:1px solid #333939;border-radius:10px;background:#0d0f0f;box-shadow:0 18px 40px rgba(0,0,0,.5)}
+.desktop-model-menu[hidden]{display:none}
+.desktop-model-search{display:flex;align-items:center;gap:6px;padding:0 8px;border:1px solid #2d3232;border-radius:6px;background:#121515;color:#8b9494}
+.desktop-model-search input{flex:1;min-width:0;padding:7px 0;border:0;outline:0;background:transparent;color:#e6eaea;font:12px var(--console-mono)}
+.desktop-model-options{overflow:auto;margin:8px 0;min-height:40px;max-height:280px}
+.desktop-conversation-head .desktop-model-option{display:flex;width:100%;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;min-height:0;padding:7px 9px;border:1px solid transparent;border-radius:6px;background:transparent;color:#dfe4e4;text-align:left;cursor:pointer}
+.desktop-conversation-head .desktop-model-option:hover,.desktop-conversation-head .desktop-model-option.active{background:#151a19;border-color:#33423b}
+.desktop-conversation-head .desktop-model-option span{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.desktop-conversation-head .desktop-model-option small{font:10px var(--console-mono);color:#838d8d;overflow-wrap:anywhere}
+.desktop-model-empty{padding:10px;color:#8b9494;font-size:11px}
+.desktop-conversation-head .desktop-model-refresh{width:100%;min-width:0;min-height:0;padding:8px;border:1px solid #333939;border-radius:6px;background:#121515;color:#b9c4c4;font-size:11px;cursor:pointer}
+.desktop-conversation-head .desktop-model-refresh:hover:not(:disabled){border-color:#5e7569}
+.desktop-conversation-head .desktop-model-refresh:disabled{opacity:.6;cursor:wait}
+@media (max-width:760px){.desktop-conversation-head > .desktop-session-meta .desktop-cost-chip{display:none}.desktop-conversation-head .desktop-model-chip{max-width:140px}.desktop-model-menu{width:min(320px,calc(100vw - 28px))}}

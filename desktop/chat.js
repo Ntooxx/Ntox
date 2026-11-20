@@ -11,6 +11,17 @@
   let activeRequestId = "";
   let activeRequestConversation = null;
   let saveTimer = 0;
+  let currentModel = "";
+  let currentProvider = "";
+  let availableModels = [];
+  let modelQuery = "";
+  let modelMenuOpen = false;
+  let sessionCost = 0;
+  const modelChip = document.getElementById("desktop-model-chip");
+  const modelName = document.getElementById("desktop-model-name");
+  const modelMenu = document.getElementById("desktop-model-menu");
+  const costChip = document.getElementById("desktop-session-cost");
+  const sessionIdFor = conversation => "desktop_" + conversation.id;
   const restored = window.ntoxDesktop?.loadConversations().then(saved => { if (Array.isArray(saved)) conversations = saved; }).catch(() => {});
 
   document.addEventListener("ntox:runtime-update", ({ detail }) => {
@@ -82,6 +93,120 @@
     .trim()
     .slice(0, 400);
 
+  const fmtCost = value => {
+    const amount = Number(value) || 0;
+    if (amount <= 0) return "$0.00";
+    if (amount < 0.01) return "$" + amount.toFixed(4);
+    return "$" + amount.toFixed(3);
+  };
+  const showCost = value => {
+    sessionCost = Number(value) || 0;
+    costChip.textContent = fmtCost(sessionCost);
+    costChip.title = `Estimated spend in this session · ${sessionCost.toFixed(6)} USD`;
+  };
+
+  async function loadMeta(conversation = active()) {
+    if (!conversation || !window.ntoxDesktop?.request) return;
+    const sid = sessionIdFor(conversation);
+    try {
+      const meta = await window.ntoxDesktop.request({ route: "/api/chat/meta?sessionId=" + encodeURIComponent(sid), method: "GET" });
+      if (active()?.id !== conversation.id) return;
+      currentModel = meta?.model || currentModel;
+      currentProvider = meta?.provider || currentProvider;
+      availableModels = Array.isArray(meta?.models) ? meta.models : [];
+      modelName.textContent = currentModel || "Model unavailable";
+      modelChip.title = `Current model: ${currentModel || "unknown"}${currentProvider ? " · " + currentProvider : ""} — click to switch`;
+      showCost(meta?.session?.cost || 0);
+      if (modelMenuOpen) renderModelMenu();
+    } catch {
+      modelName.textContent = currentModel || "Model unavailable";
+    }
+  }
+
+  function renderModelList() {
+    const options = modelMenu.querySelector(".desktop-model-options");
+    if (!options) return;
+    const query = modelQuery.trim().toLowerCase();
+    const matches = availableModels
+      .filter(model => `${model.id} ${model.name || ""}`.toLowerCase().includes(query))
+      .slice(0, 300);
+    options.innerHTML = matches.length
+      ? matches.map(model => `<button type="button" role="menuitem" class="desktop-model-option ${model.id === currentModel ? "active" : ""}" data-model="${escapeHtml(model.id)}" data-provider="${escapeHtml(model.provider || "")}"><span>${escapeHtml(model.name || model.id)}</span><small>${escapeHtml(model.id)}</small></button>`).join("")
+      : `<div class="desktop-model-empty">${availableModels.length ? "No matching models" : "No cached models. Refresh the catalog below."}</div>`;
+    options.querySelectorAll("[data-model]").forEach(button => button.addEventListener("click", () => void applyModel(button.dataset.model, button.dataset.provider)));
+  }
+
+  function renderModelMenu() {
+    modelMenu.innerHTML = `<label class="desktop-model-search"><span>⌕</span><input type="search" placeholder="Filter models" value="${escapeHtml(modelQuery)}" aria-label="Filter models"></label><div class="desktop-model-options"></div><button type="button" class="desktop-model-refresh" data-refresh-models>↻ Refresh model catalog</button>`;
+    const searchInput = modelMenu.querySelector("input");
+    searchInput?.addEventListener("input", () => { modelQuery = searchInput.value; renderModelList(); });
+    modelMenu.querySelector("[data-refresh-models]")?.addEventListener("click", () => void refreshModels());
+    renderModelList();
+  }
+
+  async function refreshModels() {
+    const button = modelMenu.querySelector("[data-refresh-models]");
+    if (button) { button.disabled = true; button.textContent = "Refreshing…"; }
+    try {
+      const result = await window.ntoxDesktop.request({ route: "/api/models/refresh", method: "POST", body: {} });
+      availableModels = Array.isArray(result?.models) ? result.models : availableModels;
+      modelQuery = "";
+      renderModelMenu();
+    } catch (error) {
+      const note = modelMenu.querySelector(".desktop-model-empty");
+      if (note) note.textContent = `Could not refresh models: ${cleanIpcError(error)}`;
+      if (button) { button.disabled = false; button.textContent = "↻ Refresh model catalog"; }
+    }
+  }
+
+  async function applyModel(model, provider) {
+    if (!model || pending) return;
+    const previous = currentModel;
+    currentModel = model;
+    if (provider) currentProvider = provider;
+    modelName.textContent = model;
+    closeModelMenu();
+    modelChip.disabled = true;
+    try {
+      const result = await window.ntoxDesktop.request({ route: "/api/chat/model", method: "POST", body: { model, provider: provider || undefined } });
+      if (result?.model) currentModel = result.model;
+      if (result?.provider) currentProvider = result.provider;
+      modelName.textContent = currentModel;
+      modelChip.title = `Current model: ${currentModel}${currentProvider ? " · " + currentProvider : ""} — click to switch`;
+    } catch (error) {
+      currentModel = previous;
+      modelName.textContent = previous || "Model unavailable";
+      window.alert(`Could not switch model: ${cleanIpcError(error)}`);
+    } finally {
+      modelChip.disabled = false;
+    }
+  }
+
+  function openModelMenu() {
+    modelMenuOpen = true;
+    modelMenu.hidden = false;
+    modelChip.setAttribute("aria-expanded", "true");
+    renderModelMenu();
+  }
+
+  function closeModelMenu() {
+    modelMenuOpen = false;
+    modelMenu.hidden = true;
+    modelChip.setAttribute("aria-expanded", "false");
+  }
+
+  modelChip.addEventListener("click", event => {
+    event.stopPropagation();
+    if (modelMenuOpen) closeModelMenu();
+    else openModelMenu();
+  });
+  document.addEventListener("click", event => {
+    if (modelMenuOpen && !event.target.closest(".desktop-model-wrap")) closeModelMenu();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && modelMenuOpen) closeModelMenu();
+  });
+
   function syncChatControls(conversation) {
     const conversationPending = pending && activeRequestConversation === conversation;
     const generationStatus = document.getElementById("desktop-generation-status");
@@ -95,16 +220,19 @@
     const conversation = { id: crypto.randomUUID(), title: "New conversation", updatedAt: Date.now(), messages: [] };
     conversations.unshift(conversation);
     activeId = conversation.id;
+    closeModelMenu();
+    showCost(0);
     save();
     render();
     input.focus();
+    void loadMeta();
   }
 
   function renderList() {
     const query = search.value.trim().toLowerCase();
     const filtered = conversations.filter(conversation => `${conversation.title} ${conversation.messages.map(message => message.content).join(" ")}`.toLowerCase().includes(query));
     list.innerHTML = filtered.length ? filtered.map(conversation => `<button class="desktop-conversation-item ${conversation.id === activeId ? "active" : ""}" data-conversation="${escapeHtml(conversation.id)}" aria-current="${conversation.id === activeId ? "true" : "false"}"><span>${escapeHtml(conversation.title)}</span><small>${new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(conversation.updatedAt)}</small></button>`).join("") : `<div class="desktop-empty-list" role="status">${query ? "No matching conversations" : "No conversations yet"}</div>`;
-    list.querySelectorAll("[data-conversation]").forEach(button => button.addEventListener("click", () => { activeId = button.dataset.conversation; render(); }));
+    list.querySelectorAll("[data-conversation]").forEach(button => button.addEventListener("click", () => { activeId = button.dataset.conversation; closeModelMenu(); render(); void loadMeta(); }));
   }
 
   function renderMessages() {
@@ -270,11 +398,18 @@
     const assistantMessage = conversation?.messages.at(-1);
     if (!assistantMessage || assistantMessage.role !== "assistant") return;
     if (payload.event === "approval") showApproval(payload.data || {}, conversation, assistantMessage);
-    if (payload.event === "done" && typeof payload.data?.response === "string" && payload.data.response.length > assistantMessage.content.length) assistantMessage.content = payload.data.response;
+    if (payload.event === "done") {
+      if (typeof payload.data?.response === "string" && payload.data.response.length > assistantMessage.content.length) assistantMessage.content = payload.data.response;
+      if (typeof payload.data?.sessionCost === "number") showCost(payload.data.sessionCost);
+    }
     if (payload.event === "token") assistantMessage.content += payload.data?.text || "";
     if (payload.event === "event") {
       const data = payload.data || {};
-      const label = data.type === "tool_call" ? `Using ${data.name}` : data.type === "tool_result" ? `${data.name}: ${data.success ? "complete" : "failed"}` : data.type === "phase" ? `Phase: ${data.phase}` : data.type === "memory" ? `Memory ${data.action}` : data.type === "usage" ? `Tokens: ${data.inputTokens || 0} in · ${data.outputTokens || 0} out` : "";
+      const label = data.type === "tool_call" ? `Using ${data.name}` : data.type === "tool_result" ? `${data.name}: ${data.success ? "complete" : "failed"}` : data.type === "phase" ? `Phase: ${data.phase}` : data.type === "memory" ? `Memory ${data.action}` : data.type === "usage" ? `Tokens: ${data.inputTokens || 0} in · ${data.outputTokens || 0} out · ${fmtCost(data.cost || 0)}` : "";
+      if (data.type === "usage") {
+        if (typeof data.sessionCost === "number") showCost(data.sessionCost);
+        else showCost(sessionCost + (Number(data.cost) || 0));
+      }
       if (label) { assistantMessage.events ||= []; assistantMessage.events.push(label); }
       if (label && activeId === conversation.id) document.getElementById("desktop-generation-status").lastChild.textContent = ` ${label}`;
     }
@@ -291,5 +426,5 @@
   input.addEventListener("input", () => { input.style.height = "42px"; input.style.height = `${Math.min(input.scrollHeight, 180)}px`; });
   input.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(input.value); } });
   document.addEventListener("keydown", event => { if (document.getElementById("desktop-chat").classList.contains("chat-visible") && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newConversation(); } });
-  void Promise.resolve(restored).finally(() => { if (conversations.length) activeId = conversations[0].id; else newConversation(); render(); });
+  void Promise.resolve(restored).finally(() => { if (conversations.length) activeId = conversations[0].id; else newConversation(); render(); void loadMeta(); });
 })();

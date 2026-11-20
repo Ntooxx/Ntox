@@ -460,13 +460,13 @@ export function createDesktopApi(options: DesktopApiOptions = {}) {
             task: `${task.prompt}\n\nOverall goal: ${goal}${modeNote}`,
             tools: safeTools.join(","),
           });
-          const data = result.data as { runId?: string } | undefined;
+          const data = result.data as { runId?: string; status?: string } | undefined;
           if (!result.success || !data?.runId) {
             task.status = "failed";
             task.error = result.error || "Unable to start agent run";
           } else {
             task.runId = data.runId;
-            task.status = "running";
+            task.status = data.status === "queued" ? "queued" : "running";
           }
         }
         refreshWorkflow(workflow);
@@ -501,8 +501,8 @@ export function createDesktopApi(options: DesktopApiOptions = {}) {
               task: `${task.prompt}\n\nOverall goal: ${workflow.goal}`,
               tools: "read,glob,ls,grep,search,web_fetch,web_read",
             });
-            const data = result.data as { runId?: string } | undefined;
-            task.status = result.success && data?.runId ? "running" : "failed";
+            const data = result.data as { runId?: string; status?: string } | undefined;
+            task.status = result.success && data?.runId ? (data.status === "queued" ? "queued" : "running") : "failed";
             task.runId = data?.runId;
             task.error = result.success ? undefined : result.error;
           }
