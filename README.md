@@ -102,7 +102,9 @@ ntox          # Start chatting
 
 | Surface | Tier | Notes |
 |---------|------|-------|
-| CLI REPL | Core | Full feature surface |
+| CLI REPL | Core | Full feature surface; `/mic`, `/speak`, `/voice` and `/voice live on` |
+| Voice (REPL) | Core | Configurable STT/TTS providers, identity-driven timbre, mic + playback |
+| Voice (live) | Experimental | Realtime speech-to-speech with barge-in; local VAD pipeline fallback |
 | Telegram | Core | Voice, approvals, image pipelines |
 | Web UI | Core | Chat + static assets |
 | HTTP API | Core | REST/SSE server |

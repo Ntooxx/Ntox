@@ -1,10 +1,10 @@
 import { readFileSync, existsSync } from "node:fs";
 import type { Tool, ToolResult } from "../types/index.js";
-import { loadConfig } from "../core/config.js";
+import { resolveAudioFromConfig } from "../audio/index.js";
 
 export const sttTool: Tool = {
   name: "stt",
-  description: "Transcribe audio to text using OpenAI Whisper API. Accepts base64-encoded audio or a file path.",
+  description: "Transcribe audio to text using the configured STT provider. Accepts base64-encoded audio or a file path.",
   parameters: {
     type: "object",
     properties: {
@@ -16,11 +16,6 @@ export const sttTool: Tool = {
   async execute(args): Promise<ToolResult> {
     const audioInput = String(args.audio);
     if (!audioInput) return { success: false, error: "Audio input is required" };
-
-    const config = loadConfig();
-    if (!config.apiKey) {
-      return { success: false, error: "No API key configured. Set apiKey in config to use STT." };
-    }
 
     let audioBuffer: Buffer;
     let filename = "audio.mp3";
@@ -39,29 +34,12 @@ export const sttTool: Tool = {
     }
 
     try {
-      const uint8 = new Uint8Array(audioBuffer);
-      const blob = new Blob([uint8], { type: "audio/mpeg" });
-      const form = new FormData();
-      form.append("file", blob, filename);
-      form.append("model", "whisper-1");
-
-      const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-        },
-        body: form,
-      });
-
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => "");
-        return { success: false, error: `STT API error ${res.status}: ${errBody.slice(0, 300)}` };
-      }
-
-      const result = (await res.json()) as { text: string };
-      return { success: true, data: { text: result.text } };
+      const { stt } = resolveAudioFromConfig();
+      const result = await stt.transcribe(new Uint8Array(audioBuffer), { filename });
+      return { success: true, data: { text: result.text, model: result.model } };
     } catch (e) {
-      return { success: false, error: `STT error: ${e instanceof Error ? e.message : String(e)}` };
+      const message = e instanceof Error ? e.message : String(e);
+      return { success: false, error: message.includes("No API key") ? message : `STT error: ${message}` };
     }
   },
 };

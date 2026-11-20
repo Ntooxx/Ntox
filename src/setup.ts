@@ -67,6 +67,27 @@ export default async function setup(): Promise<void> {
   }
   console.log("");
 
+  // Audio (optional) — independent from the LLM provider.
+  console.log("  2a. Audio (optional)");
+  const useAudio = await ask("     Configure voice input/output? [y/N]");
+  if (useAudio.toLowerCase().startsWith("y")) {
+    const stt = await ask(`     STT provider (openai|groq|local) [${config.sttProvider}]`);
+    if (stt) config.sttProvider = stt as typeof config.sttProvider;
+    const tts = await ask(`     TTS provider (openai|openrouter|local) [${config.ttsProvider}]`);
+    if (tts) config.ttsProvider = tts as typeof config.ttsProvider;
+    const voice = await ask(`     TTS voice [${config.ttsVoice}]`);
+    if (voice) config.ttsVoice = voice;
+    const sttKey = await ask("     Dedicated STT API key (Enter to reuse the main key)");
+    if (sttKey) config.sttApiKey = sttKey;
+    const ttsKey = await ask("     Dedicated TTS API key (Enter to reuse the main key)");
+    if (ttsKey) config.ttsApiKey = ttsKey;
+    if (config.sttProvider === "local" || config.ttsProvider === "local") {
+      const base = await ask(`     Local audio base URL [${config.audioBaseUrl}]`);
+      if (base) config.audioBaseUrl = base;
+    }
+  }
+  console.log("");
+
   // Step 3: Telegram bot
   console.log("  3. Telegram Bot (optional)");
   console.log("     To chat with NTOX on Telegram:");

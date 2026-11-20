@@ -16,7 +16,7 @@
  *   E  BM25 only       : zero-embedding ablation baseline
  *   F  Recent-50       : no retrieval — inject the 50 most recent memories (proposal's "instead of 50")
  */
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -335,10 +335,9 @@ const isDisjoint = (q: string) => overlapOf(q) < 0.04;
 
 // ---------- arm F: inject 50 most recent (no retrieval) ----------
 const recent50 = new Set([...episodes].slice(-50).map((e) => e.id));
-let fHit = 0, fRel = 0;
+let fHit = 0;
 for (const qq of QUERIES) {
   const rel = relevantFor(qq.target);
-  fRel += rel.size;
   if (rel.some((id) => recent50.has(id))) fHit++;
 }
 

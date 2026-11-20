@@ -70,7 +70,7 @@ async function benchImport(label, modulePath) {
 
 const cold = await bench("cold start (--version)", ["--version"]);
 const replLoad = await benchImport("repl module load", fileURLToPath(new URL("../dist/cli/repl.js", import.meta.url)));
-const agentLoad = await benchImport("agent module load", fileURLToPath(new URL("../dist/core/agent.js", import.meta.url)));
+await benchImport("agent module load", fileURLToPath(new URL("../dist/core/agent.js", import.meta.url)));
 
 if (BUDGET_MS > 0 && cold > BUDGET_MS) {
   console.error(`\nFAIL: cold start ${cold.toFixed(0)}ms exceeds budget ${BUDGET_MS}ms`);

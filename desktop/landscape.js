@@ -19,7 +19,7 @@
       alpha: false,
       powerPreference: 'high-performance'
     });
-  } catch (_) { gl = null; }
+  } catch { gl = null; }
   if (!gl) { fallback(); return; }
 
   /* ============================ shaders ============================ */

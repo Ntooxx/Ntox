@@ -46,7 +46,7 @@ export function validateOpenTarget(target: string): string | null {
   }
   const abs = resolve(target);
   if (!existsSync(abs)) return `Path does not exist: ${abs}`;
-  let isDir = false;
+  let isDir: boolean;
   try {
     isDir = statSync(abs).isDirectory();
   } catch {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -118,7 +118,7 @@ async function runWorker(args) {
             if (attempt < maxRetries - 1 && isTransient) {
               const wait = (attempt + 1) * 5000;
               console.log(`  !! retry ${attempt + 1}/${maxRetries} in ${wait / 1000}s: ${msg.slice(0, 80)}`);
-              await new Promise((resolve) => setTimeout(resolve, wait));
+              await new Promise((resolve) => { setTimeout(resolve, wait); });
               continue;
             }
             throw error;

@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint";
 
 const jsDowngradeRules = {
   "no-undef": "warn",
-  "no-unused-vars": "warn",
+  "no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", destructuredArrayIgnorePattern: "^_" }],
   "no-constant-condition": "warn",
   "no-async-promise-executor": "warn",
   "no-promise-executor-return": "warn",
@@ -83,6 +83,12 @@ const sharedGlobals = {
   scrollX: "readonly",
   scrollY: "readonly",
   scrollTo: "readonly",
+  innerWidth: "readonly",
+  innerHeight: "readonly",
+  devicePixelRatio: "readonly",
+  addEventListener: "readonly",
+  removeEventListener: "readonly",
+  CSS: "readonly",
 };
 
 export default tseslint.config(

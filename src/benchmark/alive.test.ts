@@ -131,6 +131,7 @@ function passingRun(): AliveRun {
       calibrationEce: 0.1,
       autonomyYield: 0.2,
       identityDivergence: 0.55,
+      audioIdentificationRate: null,
       costPerSolvedTask: 0.01,
       ncbOverall: 50,
     },

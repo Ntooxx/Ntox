@@ -8,6 +8,7 @@ import type { OutcomeRow } from "../mind/types.js";
 import { clamp } from "../mind/util.js";
 import type { TransferStats } from "../research/transfer.js";
 import type { VoiceABStats } from "./voice-ab.js";
+import type { AudioVoiceABResult } from "./audio-voice-ab.js";
 
 export interface AliveMetrics {
   learningSlope: number | null;
@@ -16,6 +17,7 @@ export interface AliveMetrics {
   calibrationEce: number | null;
   autonomyYield: number | null;
   identityDivergence: number | null;
+  audioIdentificationRate: number | null;
   costPerSolvedTask: number | null;
   ncbOverall: number | null;
 }
@@ -43,6 +45,7 @@ export interface AliveRunDeps {
   skills?: string[];
   ncbOverall?: number | null;
   voiceStats?: VoiceABStats | null;
+  audioVoiceStats?: AudioVoiceABResult | null;
   now?: () => number;
 }
 
@@ -121,6 +124,7 @@ export function collectAliveRun(deps: AliveRunDeps): AliveRun {
     calibrationEce: deps.calibration && deps.calibration.count > 0 ? deps.calibration.ece : null,
     autonomyYield: deps.idle && deps.idle.totalCycles > 0 ? deps.idle.yieldPerKToken : null,
     identityDivergence: divergence,
+    audioIdentificationRate: deps.audioVoiceStats?.audioIdentificationRate ?? null,
     costPerSolvedTask: deps.rows ? costPerSolvedTask(deps.rows) : null,
     ncbOverall: deps.ncbOverall ?? null,
   };

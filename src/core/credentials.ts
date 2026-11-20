@@ -47,6 +47,8 @@ export interface CredentialStatus {
 
 export const CONFIG_SECRET_FIELDS = [
   "apiKey",
+  "sttApiKey",
+  "ttsApiKey",
   "telegramToken",
   "discordToken",
   "whatsappToken",

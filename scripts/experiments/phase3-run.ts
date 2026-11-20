@@ -11,7 +11,6 @@
  */
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -92,20 +91,6 @@ function seedStateDir(
     : {};
   Object.assign(config, knobs, armConfig);
   writeFileSync(configPath, JSON.stringify(config, null, 2));
-}
-
-interface TrialOutcome {
-  taskId: string;
-  arm: string;
-  rep: number;
-  passed: boolean;
-  usage: TrialUsage;
-  policyDecisions: unknown[];
-  injected: boolean;
-  procedure: { id: string; state: string; version: number } | null;
-  applicability: unknown;
-  literalViolations: string[];
-  error?: string;
 }
 
 function runTrialWorker(opts: {

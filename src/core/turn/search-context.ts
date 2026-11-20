@@ -35,7 +35,7 @@ export async function resolveSearchContext(userInput: string, state: SearchState
       const url = lines.find((line) => /^https?:\/\//i.test(line));
       if (!url || seenUrls.has(url)) return [];
       seenUrls.add(url);
-      let host = "";
+      let host: string;
       try {
         host = new URL(url).hostname.toLowerCase();
       } catch {

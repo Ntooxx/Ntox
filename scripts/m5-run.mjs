@@ -196,7 +196,7 @@ async function main() {
 
   const { runVoiceAB, saveVoiceAB, loadVoiceABStats } = await import(dist("benchmark", "voice-ab.js"));
   const voiceResult = await runVoiceAB(judge, pairs, { rng: mulberry32(42) });
-  const voiceStats = saveVoiceAB(voiceResult);
+  saveVoiceAB(voiceResult);
   console.log(`\nVoice A/B: ${voiceResult.correctPicks}/${voiceResult.clearPicks} clear picks correct (${(voiceResult.identificationRate * 100).toFixed(1)}%)`);
   for (const trial of voiceResult.trials) {
     console.log(`  ${trial.correct ? "hit " : "miss"} ${trial.presentedOrder} pick=${trial.pick} :: ${trial.query}`);

@@ -60,7 +60,8 @@ import { storeApprovalDecision } from "../tools/approval.js";
 import { createSettingsService } from "./settings.js";
 import { suggestWorkspacePaths } from "./paths.js";
 import { audioFilenameFor, clampTtsText } from "./voice.js";
-import { handleVoiceCommand, resolveVoiceReply, voiceReplyText } from "./voice-mode.js";
+import { handleVoiceCommand, resolveVoiceReply, voiceReplyText, getVoiceSettings } from "./voice-mode.js";
+import { resolveAudioProviders, resolveTtsInstructions } from "../audio/index.js";
 import type { WebVoiceHandlers } from "./web.js";
 import { processAtReferences } from "../cli/at-refs.js";
 import type { GatewayChannel } from "./types.js";
@@ -466,10 +467,35 @@ export async function runGateway(channel?: string): Promise<void> {
     return result.success && data?.text ? data.text : null;
   };
 
-  const synthesizeSpeech = async (text: string): Promise<string | null> => {
+  const synthesizeSpeech = async (text: string, chatId?: string): Promise<string | null> => {
+    const spokenText = clampTtsText(text);
+    const settings = getVoiceSettings(channel ?? "repl", chatId ?? "repl");
+    const profileVoice = settings.style === "profile" ? shared.mind?.cognitiveProfile()?.voice : undefined;
+    const instructions = resolveTtsInstructions(config, profileVoice);
+    const ttsEngine = settings.engine === "groq" ? config.ttsProvider : settings.engine;
+
+    if (ttsEngine !== config.ttsProvider) {
+      const { tts } = resolveAudioProviders({
+        ...config,
+        ttsProvider: ttsEngine,
+        ttsVoice: settings.voice || config.ttsVoice,
+      });
+      const result = await tts.synthesize(spokenText, {
+        format: "opus",
+        voice: settings.voice,
+        instructions,
+      });
+      return `data:${result.mimeType};base64,${Buffer.from(result.bytes).toString("base64")}`;
+    }
+
     const tool = shared.tools.get("tts");
     if (!tool) return null;
-    const result = await tool.execute({ text: clampTtsText(text), format: "opus" });
+    const result = await tool.execute({
+      text: spokenText,
+      format: "opus",
+      ...(settings.voice ? { voice: settings.voice } : {}),
+      ...(instructions ? { instructions } : {}),
+    });
     const data = result.data as { audio?: string } | undefined;
     return result.success && data?.audio ? data.audio : null;
   };
@@ -639,7 +665,7 @@ export async function runGateway(channel?: string): Promise<void> {
     const voiceSender = channelVoiceSenders.get(channel);
     if (!voiceSender) return;
     try {
-      const spoken = await synthesizeSpeech(voiceReplyText(message));
+      const spoken = await synthesizeSpeech(voiceReplyText(message), chatId);
       if (spoken) await voiceSender(chatId, spoken);
     } catch (e) {
       console.error(`[cron] voice delivery to ${channel} failed: ${e instanceof Error ? e.message : e}`);

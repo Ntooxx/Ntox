@@ -277,7 +277,7 @@ async function startApi() {
       throw new Error(`NTOX API stopped before it became ready. Build NTOX and check the local runtime configuration.${apiLogPath ? ` Runtime log: ${apiLogPath}` : ""}`);
     }
     if (await apiIsReady()) return;
-    await new Promise(resolve => setTimeout(resolve, 250));
+    await new Promise(resolve => { setTimeout(resolve, 250); });
   }
   throw new Error(`NTOX API did not become ready on port ${apiPort}.${apiLogPath ? ` Runtime log: ${apiLogPath}` : ""}`);
 }
@@ -290,7 +290,7 @@ async function restartApi() {
   ownsApi = false;
   ownedToken = null;
   apiStartup = null;
-  await new Promise(resolve => setTimeout(resolve, 400));
+  await new Promise(resolve => { setTimeout(resolve, 400); });
   await ensureApi();
 }
 

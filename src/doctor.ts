@@ -184,8 +184,48 @@ export async function runDoctorChecks(): Promise<DoctorCheck[]> {
   );
 
   checks.push(checkMemoryEmbeddings(config));
+  checks.push(checkAudioProviders(config));
 
   return checks;
+}
+
+function checkAudioProviders(config: ReturnType<typeof loadConfig>): DoctorCheck {
+  const sttKey = config.sttApiKey || (config.sttProvider === "groq" ? process.env.GROQ_API_KEY : undefined);
+  const ttsKey = config.ttsApiKey;
+  if (config.sttProvider !== "local" && !sttKey && config.provider === "openrouter") {
+    return fail(
+      "audio-providers",
+      "Audio providers",
+      "STT is configured for OpenAI/Groq but only an OpenRouter key is available.",
+      "Run ntox setup and enter a dedicated STT API key (or choose a local provider).",
+    );
+  }
+  if (config.ttsProvider !== "local" && !ttsKey && config.provider === "openrouter") {
+    return fail(
+      "audio-providers",
+      "Audio providers",
+      "TTS is configured for OpenAI/OpenRouter but no dedicated TTS key is available.",
+      "Run ntox setup and enter a dedicated TTS API key (or choose a local provider).",
+    );
+  }
+  if (
+    (config.sttProvider === "local" || config.ttsProvider === "local") &&
+    !config.audioBaseUrl &&
+    !process.env.NTOX_LOCAL_STT_URL &&
+    !process.env.NTOX_LOCAL_TTS_URL
+  ) {
+    return warn(
+      "audio-providers",
+      "Audio providers",
+      "Local audio selected but no local endpoint configured.",
+      "Set audioBaseUrl or NTOX_LOCAL_STT_URL / NTOX_LOCAL_TTS_URL.",
+    );
+  }
+  return pass(
+    "audio-providers",
+    "Audio providers",
+    `STT ${config.sttProvider}/${config.sttModel}, TTS ${config.ttsProvider}/${config.ttsModel}`,
+  );
 }
 
 function checkMemoryEmbeddings(config: ReturnType<typeof loadConfig>): DoctorCheck {

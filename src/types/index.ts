@@ -103,6 +103,15 @@ export interface NtoxConfig {
   model: string;
   provider: string;
   apiBaseUrl: string;
+  sttProvider: "openai" | "groq" | "local";
+  sttModel: string;
+  ttsProvider: "openai" | "openrouter" | "local";
+  ttsModel: string;
+  ttsVoice: string;
+  ttsStyle: "none" | "profile";
+  audioBaseUrl: string;
+  sttApiKey: string;
+  ttsApiKey: string;
   maxTokens: number;
   temperature: number;
   systemPrompt: string;

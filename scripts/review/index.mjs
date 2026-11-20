@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, resolve, dirname, relative, extname, sep } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
+import { join, resolve, dirname, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { PROBES } from "./probes.mjs";
@@ -723,7 +723,7 @@ function actionPlan(dims) {
   return all.sort((a, b) => b.gain - a.gain).slice(0, 10);
 }
 
-function render({ rubric, metrics: m, runtime: rt, npm, probes, claims, dims, competitors, adoption, overall, findings, plan, generatedAt }) {
+function render({ rubric, metrics: m, runtime: rt, npm: _npm, probes, claims, dims, competitors, adoption, overall, findings, plan, generatedAt }) {
   const L = [];
   const push = (...xs) => L.push(...xs);
 

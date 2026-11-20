@@ -17,3 +17,5 @@ export {
 export type { AliveRun, AliveMetrics, AliveRunDeps, M5Assessment, M5Criterion, AliveCurvePoint } from "./alive.js";
 export { runVoiceAB, heuristicVoicePick, saveVoiceAB, loadVoiceABStats } from "./voice-ab.js";
 export type { VoicePair, VoiceTrial, VoiceABResult, VoiceABStats, VoiceJudge } from "./voice-ab.js";
+export { runAudioVoiceAB } from "./audio-voice-ab.js";
+export type { AudioVoiceABResult, AudioVoiceJudge, AudioVoicePair } from "./audio-voice-ab.js";

@@ -28,6 +28,10 @@ import { MistakeJournal } from "../meta/mistakes.js";
 import { SkillRegistry } from "../skills/registry.js";
 import { SkillLibrary } from "../skills/library.js";
 import { learnSkillFromDescription } from "../skills/learner.js";
+import { handleVoiceCommand, voiceReplyText, getVoiceSettings } from "../gateway/voice-mode.js";
+import { resolveAudioProviders, resolveTtsInstructions, createRealtimeSession, assertAudioToolAllowed, type RealtimeSession } from "../audio/index.js";
+import { startRecorder, type RecorderSession } from "./voice-input.js";
+import { playDataUrlAudio } from "./voice-output.js";
 import { renderSkillProposal } from "../skills/auto-learner.js";
 import { installSkillFromSource, renderSkillInstallResult } from "../skills/installer.js";
 import { createMarketplace, renderMarketplaceList, type SkillMarketplace } from "../skills/marketplace.js";
@@ -140,6 +144,11 @@ export class Repl {
   private pendingSkillProposal: SkillDefinition | null = null;
   private skillMarketplaceInstance: SkillMarketplace | null = null;
   private skillMarketplaceSource: string | null = null;
+  private voiceRecorder: RecorderSession | null = null;
+  private liveSession: RealtimeSession | null = null;
+  private speakEnabled = false;
+  private voiceReplyBuffer = "";
+
   private thinkingChars = 0;
   private turnStartedAtMs = 0;
 
@@ -529,6 +538,7 @@ export class Repl {
       try {
         const trimmed = input.trim();
         if (!trimmed) {
+          if (this.voiceRecorder) await this.captureVoiceTurn();
           this.loop();
           return;
         }
@@ -554,8 +564,10 @@ export class Repl {
         process.stdout.write("\n");
         await sweepDivider(termWidth(), this.config.animationLevel !== "off");
         this.isProcessing = true;
+        this.voiceReplyBuffer = "";
         await this.handleMessage(trimmed);
         this.isProcessing = false;
+        await this.speakLastReply();
         this.loop();
       } catch (err) {
         this.isProcessing = false;
@@ -565,12 +577,128 @@ export class Repl {
     });
   }
 
+  private async syncLiveSession(): Promise<void> {
+    const settings = getVoiceSettings("repl", this.sessionId);
+    if (!settings.live) {
+      this.liveSession?.close();
+      this.liveSession = null;
+      return;
+    }
+    if (this.liveSession) return;
+    try {
+      const profileVoice = this.infra.mind?.cognitiveProfile()?.voice;
+      const session = createRealtimeSession(this.config, {
+        voice: settings.voice,
+        instructions: resolveTtsInstructions(this.config, profileVoice),
+      });
+      session.onAudio(async (bytes) => {
+        const dataUrl = `data:audio/mpeg;base64,${Buffer.from(bytes).toString("base64")}`;
+        const played = await playDataUrlAudio(dataUrl);
+        if (!played.ok) console.log(chalk.yellow(`[voice] ${played.error}`));
+      });
+      await session.ready;
+      this.liveSession = session;
+      console.log("[voice] live conversation ready");
+    } catch (e) {
+      console.log(chalk.yellow(`[voice] live unavailable: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  }
+
+  private async speakLastReply(): Promise<void> {
+    if (!this.speakEnabled || !this.voiceReplyBuffer.trim()) return;
+    try {
+      assertAudioToolAllowed(this.config, "tts");
+      const profileVoice = this.infra.mind?.cognitiveProfile()?.voice;
+      const { tts } = resolveAudioProviders(this.config);
+      const result = await tts.synthesize(voiceReplyText(this.voiceReplyBuffer), {
+        instructions: resolveTtsInstructions(this.config, profileVoice),
+        format: "mp3",
+      });
+      const dataUrl = `data:${result.mimeType};base64,${Buffer.from(result.bytes).toString("base64")}`;
+      const played = await playDataUrlAudio(dataUrl);
+      if (!played.ok) console.log(chalk.yellow(`[voice] playback failed: ${played.error}`));
+    } catch (e) {
+      console.log(chalk.yellow(`[voice] ${e instanceof Error ? e.message : String(e)}`));
+    }
+  }
+
+  private async captureVoiceTurn(): Promise<void> {
+    const recorder = this.voiceRecorder;
+    if (!recorder) return;
+    this.voiceRecorder = null;
+    try {
+      const bytes = await recorder.stop();
+      if (this.liveSession) {
+        this.liveSession.sendAudio(bytes);
+        this.liveSession.commitAudio();
+        this.liveSession.requestResponse();
+        return;
+      }
+      const { stt } = resolveAudioProviders(this.config);
+      const transcript = (await stt.transcribe(bytes, { filename: "audio.wav" })).text.trim();
+      if (!transcript) {
+        console.log(chalk.yellow("[mic] no speech detected"));
+        return;
+      }
+      console.log(chalk.cyan(`[mic] ${transcript}`));
+      this.isProcessing = true;
+      this.voiceReplyBuffer = "";
+      await this.handleMessage(transcript);
+      this.isProcessing = false;
+      await this.speakLastReply();
+    } catch (e) {
+      this.isProcessing = false;
+      console.error(chalk.red(`[mic] ${e instanceof Error ? e.message : String(e)}`));
+    }
+  }
+
+  private handleMicCommand(arg: string): void {
+    const mode = arg.toLowerCase();
+    if (mode === "off") {
+      this.voiceRecorder?.cancel();
+      this.voiceRecorder = null;
+      console.log("[mic] off");
+      return;
+    }
+    if (mode !== "on" && mode !== "auto") {
+      console.log(chalk.yellow("Usage: /mic on|off|auto"));
+      return;
+    }
+    try {
+      assertAudioToolAllowed(this.config, "stt");
+      this.voiceRecorder = startRecorder();
+      console.log(`[mic] ${mode} — press Enter when finished speaking`);
+    } catch (e) {
+      console.log(chalk.yellow(`[mic] ${e instanceof Error ? e.message : String(e)}`));
+    }
+  }
+
+  private handleSpeakCommand(arg: string): void {
+    const mode = arg.toLowerCase();
+    if (mode !== "on" && mode !== "off") {
+      console.log(chalk.yellow("Usage: /speak on|off"));
+      return;
+    }
+    this.speakEnabled = mode === "on";
+    console.log(`[speak] ${mode}`);
+  }
+
   private async handleCommand(input: string): Promise<void> {
     const [rawCmd, ...args] = input.slice(1).split(/\s+/);
     const cmd = normalizeCommandName(rawCmd);
     const arg = args.join(" ");
 
     switch (cmd) {
+      case "mic":
+        this.handleMicCommand(arg);
+        break;
+      case "speak":
+        this.handleSpeakCommand(arg);
+        break;
+      case "voice":
+        console.log(handleVoiceCommand(input, "repl", this.sessionId) ?? "Voice command failed");
+        await this.syncLiveSession();
+        break;
       case "ask":
       case "help":
         console.log(renderHelp());
@@ -2844,6 +2972,7 @@ export class Repl {
           if (token) {
             blockBuffer.write(token);
             visibleChars += token.length;
+            if (this.speakEnabled) this.voiceReplyBuffer += token;
           }
           outputTokenCount++;
           if (!hasStarted && outputTokenCount % 20 === 0) {
