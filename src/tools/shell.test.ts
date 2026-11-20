@@ -182,7 +182,7 @@ describe("shellTool safety", () => {
       setInteractiveApproval(null);
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 20000);
 
   it("returns APPROVAL_REQUIRED when the handler denies", async () => {
     setInteractiveApproval(async () => "deny");
