@@ -51,6 +51,7 @@ export class PatternStore {
           // Normalize legacy patterns to new schema
           p.compileCount = p.compileCount || 0;
           p.compiledTemplate = p.compiledTemplate || "";
+          p.objectiveHits = p.objectiveHits || 0;
           this.patterns.set(p.id, p);
         }
         if (raw.coOccurrenceCounts) this.coOccurrenceCounts = new Map(Object.entries(raw.coOccurrenceCounts));
@@ -263,6 +264,27 @@ export class PatternStore {
       pattern.strength = Math.max(0, pattern.strength - delta);
       this.persist();
     }
+  }
+
+  /**
+   * Record a meaningful objective outcome for a pattern. Only positive evidence
+   * increments `objectiveHits`; negative evidence does not erase past hits but
+   * is excluded from promotion (promotion is gated on objectiveHits elsewhere).
+   */
+  recordObjective(patternId: string, score: number): CognitivePattern | null {
+    this.load();
+    const pattern = this.patterns.get(patternId);
+    if (!pattern) return null;
+    if (score >= 0) {
+      pattern.objectiveHits = (pattern.objectiveHits ?? 0) + 1;
+    }
+    this.persist();
+    return pattern;
+  }
+
+  getAll(): CognitivePattern[] {
+    this.load();
+    return Array.from(this.patterns.values());
   }
 
   getCompilationStats(): { total: number; compiled: number; abstract: number; seed: number } {

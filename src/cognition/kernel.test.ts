@@ -67,6 +67,30 @@ describe("CognitiveKernel", () => {
     expect(review.shouldRetry).toBe(false);
   });
 
+  it("adapts the cognitive space from processed queries", () => {
+    kernel.setEnabled(true);
+    const before = kernel.getSpace().getDomainRelationships("rust")["design"];
+    for (let i = 0; i < 5; i++) kernel.process("rust design notes");
+    expect(kernel.getSpace().getDomainRelationships("rust")["design"]).toBeGreaterThan(before);
+  });
+
+  it("records objective evidence on the primary pattern", () => {
+    kernel.setEnabled(true);
+    kernel.process("rust design notes", "a design doc", 0.9);
+    const target = kernel
+      .getPatterns()
+      .getAll?.()
+      .find((p) => p.name.includes("rust") || p.name.includes("design"));
+    expect(kernel.getRequireEvidenceForPromotion()).toBe(true);
+    if (target) expect((target.objectiveHits ?? 0)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("exposes the evidence-required flag", () => {
+    expect(kernel.getRequireEvidenceForPromotion()).toBe(true);
+    kernel.setRequireEvidenceForPromotion(false);
+    expect(kernel.getRequireEvidenceForPromotion()).toBe(false);
+  });
+
   it("exposes sub-components", () => {
     expect(kernel.getSpace()).toBeDefined();
     expect(kernel.getPatterns()).toBeDefined();

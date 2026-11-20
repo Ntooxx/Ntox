@@ -15,6 +15,7 @@ import { InterventionEngine } from "../meta/intervention.js";
 import { DisagreementEngine } from "../meta/disagreement.js";
 import { CognitiveKernel } from "../cognition/kernel.js";
 import { NtoxCognitiveLayer } from "../cognition/layer.js";
+import type { ProcedureStore } from "../memory/procedure-store.js";
 import { StyleOptimizer } from "../meta/style-optimizer.js";
 import { RelationshipTracker } from "../memory/relationship.js";
 import { SelfReflector } from "../meta/self-reflection.js";
@@ -112,6 +113,8 @@ export interface AgentConfig {
   skillSemanticMatchEnabled?: boolean;
   skillAutoAuthorEnabled?: boolean;
   skillRegistry?: SkillRegistry;
+  procedureStore?: ProcedureStore;
+  proceduralMemoryEnabled?: boolean;
   alive?: NtoxAliveBridge;
   mind?: Mind;
 }
@@ -130,6 +133,7 @@ export interface AgentCallbacks {
   onCorrectionDetected?: (topicKey: string, correction: string) => void;
   onSkillTriggered?: (skillName: string, confidence: number) => void;
   onSkillProposal?: (skill: SkillDefinition) => void;
+  onProcedureCandidate?: (procedureId: string) => void;
   onProactiveSuggestion?: (suggestion: ProactiveSuggestion) => void;
   onCognitive?: (summary: string) => void;
   onStyleGuidance?: (guidance: string) => void;
@@ -214,6 +218,7 @@ export class Agent {
         theoryEnabled: cfg.theoryEnabled ?? true,
         mistakesEnabled: cfg.mistakesEnabled,
         storeEnabled: true,
+        proceduresEnabled: cfg.proceduralMemoryEnabled === true && cfg.procedureStore !== undefined,
         memoryRetrievalCount: cfg.memoryRetrievalCount,
         embed: async () => [],
       },
@@ -221,6 +226,7 @@ export class Agent {
         memory: cfg.memory,
         theoryMemory: this.theoryMemory,
         mistakes: cfg.mistakes,
+        procedureStore: cfg.procedureStore,
       },
     );
   }
@@ -557,6 +563,7 @@ export class Agent {
       memoryContext: "",
       theoryContext: "",
       recoveryContext: "",
+      procedureContext: "",
       searchContext: "",
       queryEmbedding: null,
       embeddingModel: undefined,

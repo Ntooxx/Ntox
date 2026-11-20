@@ -18,6 +18,25 @@ export interface ToolCallRecord {
   argsHash?: string;
 }
 
+export type EvidenceEvaluator =
+  | "exact"
+  | "containsAll"
+  | "factRecall"
+  | "constraints"
+  | "numeric"
+  | "command"
+  | "model-judge";
+
+export interface EvidenceProvenance {
+  /** Which evaluator produced the objective score. */
+  evaluator: EvidenceEvaluator;
+  /** Reference to the artifact that backs the claim: test, command, citation, id. */
+  artifactRef?: string;
+  /** Environment fingerprint the evidence was produced under. */
+  envFingerprint?: string;
+  timestamp?: number;
+}
+
 export interface TurnSignals {
   corrected: boolean;
   rephrased: boolean;
@@ -26,6 +45,8 @@ export interface TurnSignals {
   falseSuccess: boolean;
   toolFailure: boolean;
   objectiveScore?: number;
+  /** External provenance for `objectiveScore` when it is available. */
+  evidence?: EvidenceProvenance;
 }
 
 export interface Prediction {

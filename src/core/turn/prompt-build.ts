@@ -132,6 +132,7 @@ export async function buildTurnPhase1to5(ctx: TurnContext): Promise<void> {
   let memoryContext = "";
   let theoryContext = "";
   let recoveryContext = "";
+  let procedureContext = "";
   const pendingContextRecords: {
     section: string;
     kind: ContextKind;
@@ -166,6 +167,7 @@ export async function buildTurnPhase1to5(ctx: TurnContext): Promise<void> {
       if (section.name === "memory") memoryContext = section.content;
       if (section.name === "theories") theoryContext = section.content;
       if (section.name === "recovery") recoveryContext = section.content;
+      if (section.name === "procedures") procedureContext = section.content;
     }
     if (memoryContext && callbacks.onMemoryRecall) {
       const recalled = memoryContext.split("\n").filter((l) => l.startsWith("[")).length;
@@ -265,6 +267,7 @@ export async function buildTurnPhase1to5(ctx: TurnContext): Promise<void> {
   ctx.memoryContext = memoryContext;
   ctx.theoryContext = theoryContext;
   ctx.recoveryContext = recoveryContext;
+  ctx.procedureContext = procedureContext;
   ctx.searchContext = searchContext;
   ctx.queryEmbedding = queryEmbedding;
   ctx.embeddingModel = embeddingModel;

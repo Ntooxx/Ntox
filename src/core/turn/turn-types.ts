@@ -62,6 +62,7 @@ export type TurnContext = {
   memoryContext: string;
   theoryContext: string;
   recoveryContext: string;
+  procedureContext: string;
   searchContext: string;
   queryEmbedding: number[] | null;
   embeddingModel: string | undefined;

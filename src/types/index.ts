@@ -115,6 +115,8 @@ export interface NtoxConfig {
   /** Episodic retrieval ranking: "cosine" (pure cosine — default, best measured recall)
    *  or "hybrid" (legacy 0.6·cos + 0.4·BM25 with a 0.3 threshold). */
   memoryScoring: "cosine" | "hybrid";
+  /** Prefer a local semantic embedder when remote embedding is unavailable. */
+  localSemanticEnabled: boolean;
   /** Phase 3 experimental: verified procedural memory (procedure store + applicability
    *  checking + reuse). Disabled by default; additive to episodic memory, never replacing it. */
   proceduralMemoryEnabled: boolean;
@@ -498,6 +500,8 @@ export interface CognitivePattern {
   compiledTemplate: string;
   lastActivated: number;
   created: number;
+  /** Number of turns with meaningful objective evidence backing this pattern. */
+  objectiveHits?: number;
 }
 
 export interface CritiqueResult {

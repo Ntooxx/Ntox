@@ -779,6 +779,7 @@ export class LLMClient {
   private temperature: number;
   private apiBaseUrl: string;
   private configuredProvider: string;
+  private localSemanticEnabled: boolean;
   private embedCache = new Map<string, { vector: number[]; model: string }>();
 
   inputTokens = 0;
@@ -794,6 +795,7 @@ export class LLMClient {
     temperature: number,
     apiBaseUrl: string = "",
     configuredProvider: string = "",
+    localSemanticEnabled: boolean = false,
   ) {
     this.apiKey = apiKey;
     this.modelId = modelId;
@@ -802,6 +804,7 @@ export class LLMClient {
     this.temperature = temperature;
     this.apiBaseUrl = apiBaseUrl;
     this.configuredProvider = configuredProvider;
+    this.localSemanticEnabled = localSemanticEnabled;
   }
 
   get activeModel(): string {
@@ -870,7 +873,10 @@ export class LLMClient {
       }
     }
 
-    if (remaining() >= MIN_FALLBACK_BUDGET_MS && process.env.NTOX_EMBED_LOCAL_MINILM === "1") {
+    if (
+      remaining() >= MIN_FALLBACK_BUDGET_MS &&
+      (this.localSemanticEnabled || process.env.NTOX_EMBED_LOCAL_MINILM === "1")
+    ) {
       const { createLocalSemanticEmbedder } = await import("../memory/local-semantic-embedder.js");
       const semantic = createLocalSemanticEmbedder({ force: true });
       const result = (await semantic.available()) ? await semantic.embed(text) : null;

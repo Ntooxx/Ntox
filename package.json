@@ -51,7 +51,7 @@
     "gateway:discord": "tsx src/index.ts gateway discord",
     "api": "tsx src/index.ts api",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/ scripts/ desktop/ integrations/deepseek-harness/src",
+    "lint": "eslint src/ scripts/ desktop/ integrations/deepseek-harness/src harness/ntox-harness/src",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage --testTimeout=20000",
@@ -73,7 +73,12 @@
     "eval:scorecard": "npm run build && node scripts/experiments/scorecard/run.mjs",
     "e2e:live": "npm run build && node scripts/e2e-live.mjs --all",
     "scorecard": "node scripts/verify-scorecard.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "harness:build": "npm run build && npm run build --prefix harness/ntox-harness",
+    "harness:test": "npm run harness:build && npm run test --prefix harness/ntox-harness",
+    "harness:cli": "node harness/ntox-harness/dist/cli.js",
+    "eval:dsh-proof": "npm run build --prefix integrations/deepseek-harness && node integrations/deepseek-harness/scripts/run-proof.mjs",
+    "eval:dsh-proof-local": "npm run build --prefix integrations/deepseek-harness && node integrations/deepseek-harness/scripts/run-local-proof.mjs"
   },
   "keywords": [
     "ai",
@@ -92,7 +97,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Ntooxx/Ntox"
+    "url": "git+https://github.com/Ntooxx/Ntox.git"
   },
   "bugs": {
     "url": "https://github.com/Ntooxx/Ntox/issues"
@@ -127,5 +132,6 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.10"
-  }
+  },
+  "types": "./dist/index.d.ts"
 }

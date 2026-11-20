@@ -20,7 +20,7 @@ import {
   hashProcedureVersion,
   type StoredProcedure,
 } from "../../src/memory/procedure-store.js";
-import { signEvidence } from "../../src/memory/procedure-harness.js";
+import { verifyAndPromoteProcedure } from "../../src/memory/procedure-harness.js";
 import { renderPreflightMarkdown, runPreflight } from "./phase3/preflight.js";
 import {
   addUsage,
@@ -413,32 +413,29 @@ async function main(): Promise<void> {
             paired.push({ key: `rep${rep}/${family.id}/${task.id}`, taskClass: task.class, arm, passed });
 
             if (gate.ok) {
-              const current = currentVersionOf(verifiedProcedure);
-              const content = {
+              const checkOutputs = [
+                ...checks,
+                {
+                  target: "procedure",
+                  type: "mechanical-reuse",
+                  passed: true,
+                  detail: `outcome=${reuse.outcome}; executedSteps=${stepRecords.map((s) => s.stepId).join(",")}; bindings=${Object.keys(bindings ?? {}).join(",")}`,
+                },
+              ];
+              const verification = verifyAndPromoteProcedure({
+                store,
                 procedureId: verifiedProcedure.id,
-                procedureVersion: verifiedProcedure.currentVersion,
-                procedureHash: hashProcedureVersion(current),
                 taskId: task.id,
                 envFingerprint: envFingerprint(task.env.id, checks),
-                checkOutputs: [
-                  ...checks,
-                  {
-                    target: "procedure",
-                    type: "mechanical-reuse",
-                    passed: true,
-                    detail: `outcome=${reuse.outcome}; executedSteps=${stepRecords.map((s) => s.stepId).join(",")}; bindings=${Object.keys(bindings ?? {}).join(",")}`,
-                  },
-                ],
+                checkOutputs,
                 timestamps: [Date.now()],
-              };
-              const evidence = { ...content, harnessSignature: signEvidence(content, store.keyDir) };
-              const promotion = store.promoteWithEvidence(verifiedProcedure.id, evidence);
+              });
               audit.record("evidence", {
                 arm,
                 rep,
                 family: family.id,
-                evidence,
-                promotion,
+                verification,
+                checkOutputs,
                 stepTrace: stepRecords,
                 applicability: reuse.applicability,
                 bindings,

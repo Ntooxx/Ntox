@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { MemoryStore } from "../memory/episodic.js";
 import { MistakeJournal } from "../meta/mistakes.js";
+import { ProcedureStore } from "../memory/procedure-store.js";
+import { verifyAndPromoteProcedure } from "../memory/procedure-harness.js";
 import { NtoxCognitiveLayer } from "./layer.js";
 
 describe("NtoxCognitiveLayer", () => {
@@ -361,5 +366,70 @@ describe("NtoxCognitiveLayer", () => {
     const episode = memory.getAll().find((e) => e.userMessage === "legacy embedder still works");
     expect(episode?.embedding).toEqual([1, 0, 0]);
     expect(episode?.embeddingModel).toBe("local-hash");
+  });
+});
+
+describe("verified procedure injection", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function storeWith(procedureState: "candidate" | "verified"): ProcedureStore {
+    const dir = mkdtempSync(join(tmpdir(), "ntox-proc-layer-"));
+    dirs.push(dir);
+    const store = new ProcedureStore({ path: join(dir, "procedures.json") });
+    const procedure = store.addProcedure({
+      name: "verify-harbor-ledger-procedure",
+      description: "verify the harbor ledger procedure after release",
+      steps: [{ id: "step_1", description: "read the ledger", tool: "read", args: { path: "/tmp/ledger" } }],
+      prerequisites: [],
+      scope: { applies: [], doesNotApply: [] },
+      parameters: [],
+      learnedScope: "/workspace",
+    });
+    if (procedureState === "verified") {
+      const promotion = verifyAndPromoteProcedure({
+        store,
+        procedureId: procedure.id,
+        taskId: "task-1",
+        envFingerprint: "env-1",
+        checkOutputs: [{ target: "ledger", type: "command", passed: true, detail: "check exited 0" }],
+      });
+      expect(promotion.ok).toBe(true);
+    }
+    return store;
+  }
+
+  async function contextFor(store: ProcedureStore) {
+    const layer = new NtoxCognitiveLayer(
+      {
+        cognitionEnabled: false,
+        theoryEnabled: false,
+        memoryEnabled: false,
+        mistakesEnabled: false,
+        strategyEnabled: false,
+        proceduresEnabled: true,
+      },
+      { procedureStore: store },
+    );
+    return layer.beforeStep({
+      sessionId: "procedure-session",
+      userMessage: "verify the harbor ledger procedure",
+    });
+  }
+
+  it("injects only verified procedures as untrusted task data", async () => {
+    const context = await contextFor(storeWith("verified"));
+    expect(context.diagnostics.proceduresIncluded).toBe(true);
+    expect(context.sections.map((section) => section.name)).toContain("procedures");
+    expect(context.prompt).toContain("UNTRUSTED TASK DATA");
+  });
+
+  it("does not surface unverified candidates", async () => {
+    const context = await contextFor(storeWith("candidate"));
+    expect(context.diagnostics.proceduresIncluded).toBe(false);
+    expect(context.sections.map((section) => section.name)).not.toContain("procedures");
   });
 });

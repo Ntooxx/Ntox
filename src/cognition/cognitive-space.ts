@@ -6,6 +6,10 @@ import { cosineSimilarity as _cosineSimilarity } from "../utils/math.js";
 
 const DIMS = 8;
 const SPACE_PATH = join(COGNITION_DIR, "cognitive-space.json");
+const LEARNING_RATE = 0.02;
+const LEARNING_ITERATIONS = 10;
+const OBSERVED_BOOST = 0.15;
+const MAX_OBSERVED_SIMILARITY = 0.9;
 
 // Explicit similarity lookup
 function targetSim(a: string, b: string): number {
@@ -199,5 +203,40 @@ export class CognitiveSpace {
       }
     }
     return Object.fromEntries(Object.entries(rels).sort(([, a], [, b]) => b - a));
+  }
+
+  learnFromCoOccurrence(domains: string[]): void {
+    this.load();
+    if (domains.length < 2) return;
+
+    let changed = false;
+    for (let i = 0; i < domains.length; i++) {
+      for (let j = i + 1; j < domains.length; j++) {
+        const a = domains[i];
+        const b = domains[j];
+        const va = this.domainVectors.get(a);
+        const vb = this.domainVectors.get(b);
+        if (a === b || !va || !vb) continue;
+
+        const target = Math.min(MAX_OBSERVED_SIMILARITY, targetSim(a, b) + OBSERVED_BOOST);
+        for (let iter = 0; iter < LEARNING_ITERATIONS; iter++) {
+          const current = this.cosineSimilarity(va, vb);
+          if (current >= target) break;
+          const error = current - target;
+          for (let k = 0; k < DIMS; k++) {
+            const updateA = LEARNING_RATE * error * (vb[k] - current * va[k]);
+            const updateB = LEARNING_RATE * error * (va[k] - current * vb[k]);
+            va[k] -= updateA;
+            vb[k] -= updateB;
+          }
+          const magA = Math.sqrt(va.reduce((s, v) => s + v * v, 0));
+          const magB = Math.sqrt(vb.reduce((s, v) => s + v * v, 0));
+          if (magA > 0) for (let k = 0; k < DIMS; k++) va[k] /= magA;
+          if (magB > 0) for (let k = 0; k < DIMS; k++) vb[k] /= magB;
+        }
+        changed = true;
+      }
+    }
+    if (changed) this.persist();
   }
 }

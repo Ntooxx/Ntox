@@ -28,6 +28,7 @@ const valid: NtoxConfig = {
   memoryEnabled: true,
   memoryRetrievalCount: 5,
   memoryScoring: "cosine",
+  localSemanticEnabled: true,
   proceduralMemoryEnabled: false,
   systemContextBudget: 6000,
   contextCompilerEnabled: true,

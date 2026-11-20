@@ -14,9 +14,14 @@ import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
   canonicalEvidenceContent,
+  currentVersionOf,
+  hashProcedureVersion,
   harnessKeypairPaths,
   SIGNATURE_PREFIX,
   type EvidenceContent,
+  type ProcedureState,
+  type ProcedureStore,
+  type VerificationEvidence,
 } from "./procedure-store.js";
 
 /**
@@ -53,4 +58,51 @@ export function signEvidence(evidence: EvidenceContent, keyDir?: string): string
   const privateKey = createPrivateKey(readFileSync(paths.privateKeyPath, "utf-8"));
   const signature = sign(null, Buffer.from(canonicalEvidenceContent(evidence), "utf-8"), privateKey);
   return `${SIGNATURE_PREFIX}${signature.toString("base64")}`;
+}
+
+export interface VerifyAndPromoteInput {
+  store: ProcedureStore;
+  procedureId: string;
+  taskId: string;
+  envFingerprint: string;
+  checkOutputs: VerificationEvidence["checkOutputs"];
+  timestamps?: number[];
+}
+
+export interface VerifyAndPromoteResult {
+  ok: boolean;
+  state?: ProcedureState;
+  reason?: string;
+  signature?: string;
+}
+
+/**
+ * Harness-side promotion of a candidate into a verified procedure.
+ *
+ * The caller MUST be harness/eval code that ran frozen checks and mechanical
+ * reuse outside the agent's authority. This function is the productised form of
+ * the Phase 3 promotion step: it binds evidence to the current version hash,
+ * signs it with the harness key, and hands it to the verification-only store.
+ * The agent runtime cannot reach it (import discipline is test-enforced).
+ */
+export function verifyAndPromoteProcedure(input: VerifyAndPromoteInput): VerifyAndPromoteResult {
+  const procedure = input.store.get(input.procedureId);
+  if (!procedure) return { ok: false, reason: "procedure not found" };
+  if (input.checkOutputs.length === 0 || input.checkOutputs.some((check) => !check.passed)) {
+    return { ok: false, reason: "harness checks did not all pass" };
+  }
+  const content: EvidenceContent = {
+    procedureId: procedure.id,
+    procedureVersion: procedure.currentVersion,
+    procedureHash: hashProcedureVersion(currentVersionOf(procedure)),
+    taskId: input.taskId,
+    envFingerprint: input.envFingerprint,
+    checkOutputs: input.checkOutputs,
+    timestamps: input.timestamps ?? [Date.now()],
+  };
+  const signature = signEvidence(content, input.store.keyDir);
+  const promotion = input.store.promoteWithEvidence(procedure.id, { ...content, harnessSignature: signature });
+  return promotion.ok
+    ? { ok: true, state: promotion.state, signature }
+    : { ok: false, reason: promotion.reason };
 }

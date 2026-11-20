@@ -60,6 +60,31 @@ function getExtendedKeywords(): Record<string, string[]> {
 }
 
 let extendedKeywordsCache: Record<string, string[]> | null = null;
+let keywordPatternsCache: Map<string, RegExp> | null = null;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function termPattern(term: string): RegExp {
+  return new RegExp(`(?<![a-z0-9])${escapeRegExp(term.toLowerCase())}(?![a-z0-9])`);
+}
+
+function hasTerm(text: string, term: string): boolean {
+  return termPattern(term).test(text.toLowerCase());
+}
+
+function getKeywordPatterns(): Map<string, RegExp> {
+  if (!keywordPatternsCache) {
+    keywordPatternsCache = new Map();
+    for (const keywords of Object.values(getCachedKeywords())) {
+      for (const kw of keywords) {
+        if (!keywordPatternsCache.has(kw)) keywordPatternsCache.set(kw, termPattern(kw));
+      }
+    }
+  }
+  return keywordPatternsCache;
+}
 
 function getCachedKeywords(): Record<string, string[]> {
   if (!extendedKeywordsCache) extendedKeywordsCache = getExtendedKeywords();
@@ -68,14 +93,15 @@ function getCachedKeywords(): Record<string, string[]> {
 
 function invalidateKeywordsCache(): void {
   extendedKeywordsCache = null;
+  keywordPatternsCache = null;
 }
 
 export function detectDomains(text: string): string[] {
   const lower = text.toLowerCase();
-  const allKeywords = getCachedKeywords();
+  const patterns = getKeywordPatterns();
   const domains: string[] = [];
-  for (const [domain, keywords] of Object.entries(allKeywords)) {
-    if (keywords.some((kw) => lower.includes(kw))) {
+  for (const [domain, keywords] of Object.entries(getCachedKeywords())) {
+    if (keywords.some((kw) => patterns.get(kw)?.test(lower))) {
       domains.push(domain);
     }
   }
@@ -112,12 +138,12 @@ export function findClosestDomain(term: string): string | null {
   for (const [domain, keywords] of Object.entries(getCachedKeywords())) {
     let score = 0;
     for (const kw of keywords) {
-      if (lower.includes(kw)) score += 2;
+      if (hasTerm(lower, kw)) score += 2;
       if (kw.includes(lower)) score += 1;
     }
     const domainWords = domain.split("_");
     for (const dw of domainWords) {
-      if (lower.includes(dw)) score += 1;
+      if (hasTerm(lower, dw)) score += 1;
     }
     if (score > bestScore) {
       bestScore = score;
@@ -130,4 +156,5 @@ export function findClosestDomain(term: string): string | null {
 export function resetDomainCache(): void {
   cachedExtensions = null;
   extendedKeywordsCache = null;
+  keywordPatternsCache = null;
 }

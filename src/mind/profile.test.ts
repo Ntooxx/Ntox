@@ -50,6 +50,9 @@ function ledgerStats(overrides: Partial<LedgerStats> = {}): LedgerStats {
     avgPredictionTokens: 0,
     byKind: [],
     byStrategy: [],
+    objectiveRows: 0,
+    objectiveRate: 0,
+    objectiveAvg: 0,
     ...overrides,
   };
 }

@@ -5,6 +5,8 @@ import {
   MAX_SKILL_PROPOSALS_PER_SESSION,
 } from "../../skills/auto-learner.js";
 import { maybeAuthorSkillOnStruggle } from "../../skills/self-author.js";
+import { proposeProcedureCandidate } from "../../memory/procedure-candidates.js";
+import type { ProcedureStep } from "../../memory/procedure-store.js";
 import { isRephrase, isThanked } from "../../mind/predictor.js";
 import { extractOpenLoops, normalizeLoopGoal } from "../../alive/open-loops.js";
 import type { Mind, MindTurnResult } from "../../mind/mind.js";
@@ -264,6 +266,36 @@ export async function runPostTurn(input: PostTurnInput): Promise<void> {
       if (learning.memoryId && callbacks.onMemoryStore) callbacks.onMemoryStore();
       if (learning.errors.length > 0) {
         console.error("[cognitive-layer-after]", learning.errors.join("; "));
+      }
+      if (
+        cfg.proceduralMemoryEnabled === true &&
+        cfg.procedureStore &&
+        input.lastTrace &&
+        !wasCorrection &&
+        !runtime.falseSuccessThisTurn
+      ) {
+        const steps: ProcedureStep[] = (input.lastTrace.toolCalls ?? [])
+          .filter((call) => call.success === true && Boolean(call.name))
+          .slice(0, 20)
+          .map((call, index) => ({
+            id: `step_${index + 1}`,
+            description: `${call.name} ${JSON.stringify(call.args ?? {}).slice(0, 200)}`.trim(),
+            tool: call.name,
+            args:
+              call.args && typeof call.args === "object" && !Array.isArray(call.args)
+                ? (call.args as Record<string, unknown>)
+                : {},
+          }));
+        const candidate = proposeProcedureCandidate({
+          store: cfg.procedureStore,
+          taskId: input.runTurnId,
+          userMessage: userInput,
+          steps,
+          learnedScope: cfg.policy?.profile.workspaceRoot ?? process.cwd(),
+        });
+        if (candidate.proposed && candidate.procedureId) {
+          callbacks.onProcedureCandidate?.(candidate.procedureId);
+        }
       }
     } catch (e) {
       console.error("[cognitive-layer-after]", e);

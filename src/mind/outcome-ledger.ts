@@ -36,6 +36,9 @@ export interface LedgerStats {
   avgPredictionTokens: number;
   byKind: KindEffect[];
   byStrategy: StrategyEffect[];
+  objectiveRows: number;
+  objectiveRate: number;
+  objectiveAvg: number;
 }
 
 export function scoreSignals(signals: TurnSignals): number {
@@ -276,6 +279,7 @@ export class OutcomeLedger {
       predictionSources[source] = (predictionSources[source] ?? 0) + 1;
     }
     const predictionTokens = rows.filter((r) => (r.predictionTokens ?? 0) > 0).map((r) => r.predictionTokens as number);
+    const objectiveRows = rows.filter((r) => r.signals.objectiveScore !== undefined);
 
     return {
       total,
@@ -291,6 +295,9 @@ export class OutcomeLedger {
       avgPredictionTokens: avg(predictionTokens),
       byKind,
       byStrategy,
+      objectiveRows: objectiveRows.length,
+      objectiveRate: objectiveRows.length > 0 ? objectiveRows.length / total : 0,
+      objectiveAvg: avg(objectiveRows.map((r) => r.score)),
     };
   }
 

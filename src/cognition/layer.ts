@@ -4,6 +4,8 @@ import { MemoryStore } from "../memory/episodic.js";
 import { TheoryMemory } from "../memory/theory-memory.js";
 import { MistakeJournal } from "../meta/mistakes.js";
 import { classifyQuery, getStrategyPrompt } from "../meta/strategist.js";
+import { ProcedureStore } from "../memory/procedure-store.js";
+import { renderProcedureForPrompt } from "../memory/procedure-reuse.js";
 import { SkillRegistry } from "../skills/registry.js";
 import type { Episode, PrimitiveRepresentation, QueryType } from "../types/index.js";
 import { CognitiveKernel } from "./kernel.js";
@@ -26,7 +28,7 @@ export interface CognitiveStepInput {
 }
 
 export interface CognitiveContextSection {
-  name: "strategy" | "patterns" | "memory" | "theories" | "corrections" | "recovery";
+  name: "strategy" | "patterns" | "memory" | "theories" | "corrections" | "recovery" | "procedures";
   content: string;
 }
 
@@ -44,6 +46,7 @@ export interface CognitiveStepContext {
     theoryIncluded: boolean;
     correctionIncluded: boolean;
     recoveryIncluded: boolean;
+    proceduresIncluded: boolean;
     errors: string[];
   };
 }
@@ -103,6 +106,7 @@ export interface CognitiveLayerOptions {
   mistakesEnabled?: boolean;
   strategyEnabled?: boolean;
   storeEnabled?: boolean;
+  proceduresEnabled?: boolean;
   memoryRetrievalCount?: number;
   maxToolOutcomesPerTurn?: number;
   embed?: CognitiveEmbedder;
@@ -114,6 +118,7 @@ export interface CognitiveLayerServices {
   theoryMemory?: TheoryMemory;
   mistakes?: MistakeJournal;
   skillRegistry?: SkillRegistry;
+  procedureStore?: ProcedureStore;
 }
 
 interface PendingStep {
@@ -148,6 +153,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
   private readonly memory: MemoryStore;
   private readonly theoryMemory: TheoryMemory;
   private readonly mistakes: MistakeJournal;
+  private readonly procedureStore?: ProcedureStore;
   private readonly pendingSteps = new Map<string, PendingStep>();
   private readonly toolOutcomes = new Map<string, CognitiveToolResult[]>();
   private readonly recentToolFailures = new Map<string, CognitiveToolResult[]>();
@@ -160,6 +166,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
       mistakesEnabled: options.mistakesEnabled ?? true,
       strategyEnabled: options.strategyEnabled ?? true,
       storeEnabled: options.storeEnabled ?? true,
+      proceduresEnabled: options.proceduresEnabled ?? false,
       memoryRetrievalCount: Math.max(1, options.memoryRetrievalCount ?? 5),
       maxToolOutcomesPerTurn: Math.max(1, options.maxToolOutcomesPerTurn ?? 20),
     };
@@ -169,6 +176,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     this.memory = services.memory ?? new MemoryStore();
     this.theoryMemory = services.theoryMemory ?? new TheoryMemory();
     this.mistakes = services.mistakes ?? new MistakeJournal();
+    this.procedureStore = services.procedureStore;
     this.kernel.setEnabled(this.options.cognitionEnabled);
   }
 
@@ -179,6 +187,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     mistakesEnabled?: boolean;
     strategyEnabled?: boolean;
     storeEnabled?: boolean;
+    proceduresEnabled?: boolean;
     memoryRetrievalCount?: number;
   }): void {
     if (flags.memoryRetrievalCount !== undefined) {
@@ -224,6 +233,22 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
         }
       } catch (error) {
         errors.push(errorMessage("mistakes", error));
+      }
+    }
+
+    let proceduresIncluded = false;
+    if (this.options.proceduresEnabled && this.options.storeEnabled && this.procedureStore) {
+      try {
+        const retrieved = this.procedureStore.retrieve(
+          { text: input.userMessage, embedding: embedding ?? undefined, embeddingModel: embedded?.model },
+          this.options.memoryRetrievalCount,
+        );
+        for (const item of retrieved.filter((entry) => entry.procedure.state === "verified").slice(0, 3)) {
+          proceduresIncluded = true;
+          sections.push({ name: "procedures", content: renderProcedureForPrompt(item.procedure) });
+        }
+      } catch (error) {
+        errors.push(errorMessage("procedures", error));
       }
     }
 
@@ -286,6 +311,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
         theoryIncluded,
         correctionIncluded,
         recoveryIncluded,
+        proceduresIncluded,
         errors,
       },
     };

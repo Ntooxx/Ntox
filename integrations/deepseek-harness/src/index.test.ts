@@ -43,6 +43,7 @@ function createLayer(): {
       theoryIncluded: false,
       correctionIncluded: false,
       recoveryIncluded: false,
+      proceduresIncluded: false,
       errors: [],
     },
   };

@@ -27,6 +27,7 @@ import { scheduleTool } from "../tools/schedule.js";
 import { createNotifyTool } from "../tools/notify.js";
 import { createProfileEvalTool } from "../tools/profile-eval.js";
 import { MemoryStore } from "../memory/episodic.js";
+import { ProcedureStore } from "../memory/procedure-store.js";
 import { UserModel } from "../memory/user-model.js";
 import { Reflector } from "../meta/reflector.js";
 import { MistakeJournal } from "../meta/mistakes.js";
@@ -120,6 +121,7 @@ export function createSharedInfra(config: NtoxConfig, profile?: WorkspaceProfile
     config.temperature,
     config.apiBaseUrl,
     config.provider,
+    config.localSemanticEnabled,
   );
 
   try {
@@ -255,6 +257,8 @@ export function createAgentConfig(
     skillSemanticMatchEnabled: config.skillSemanticMatchEnabled,
     skillAutoAuthorEnabled: config.skillAutoAuthorEnabled,
     skillRegistry: infra.skillRegistry,
+    procedureStore: config.proceduralMemoryEnabled ? new ProcedureStore() : undefined,
+    proceduralMemoryEnabled: config.proceduralMemoryEnabled,
     maxContextMessages: 120,
     contextTokenBudget: 300_000,
     ...overrides,

@@ -75,6 +75,8 @@ const ConfigSchema = z.object({
   memoryEnabled: z.boolean(),
   memoryRetrievalCount: z.number().int().min(1).max(100),
   memoryScoring: z.enum(["cosine", "hybrid"]),
+  /** Fall back to a local semantic embedder when remote embedding is unavailable. */
+  localSemanticEnabled: z.boolean(),
   /** Phase 3 experimental: verified procedural memory. Production default disabled. */
   proceduralMemoryEnabled: z.boolean(),
   systemContextBudget: z.number().int().min(200).max(20_000),
@@ -282,6 +284,10 @@ const DEFAULT_CONFIG: NtoxConfig = {
   // This value is validated by zod and read by resolveMemoryScoring() — env vars are
   // intentionally never consulted for scoring mode (see SECURITY.md).
   memoryScoring: "cosine" as const,
+  // Prefer a local semantic model over the hash fallback when remote embedding fails.
+  // The model is an optional download and is never installed implicitly; when absent the
+  // existing `local-hash` fallback still applies (no startup or CI failure).
+  localSemanticEnabled: true,
   // Phase 3 — Verified Procedural Memory: experimental, strictly off by default.
   proceduralMemoryEnabled: false,
   systemContextBudget: 20000,

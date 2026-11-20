@@ -37,6 +37,7 @@ export async function buildPromptAssembly(ctx: TurnContext): Promise<PromptAssem
     memoryContext,
     theoryContext,
     mistakesContext,
+    procedureContext,
     recoveryContext,
     searchContext,
     strategyPrompt,
@@ -138,6 +139,12 @@ export async function buildPromptAssembly(ctx: TurnContext): Promise<PromptAssem
       pinned: false,
       kind: "correction",
       id: `corrections:${hashText(mistakesContext)}`,
+    },
+    {
+      name: "procedures",
+      text: procedureContext ? `\n\n${procedureContext}` : "",
+      priority: 62,
+      pinned: false,
     },
     {
       name: "recovery",
