@@ -66,7 +66,13 @@
     "bench:m5": "npm run build && node scripts/m5-run.mjs",
     "bench:meta": "npm run build && node scripts/bench-meta.mjs",
     "eval:necessity": "npm run build && node scripts/bench-meta.mjs --necessity",
+    "eval:offline-recall": "npm run build && node scripts/measure-offline-recall.mjs --all",
+    "eval:injection": "npm run build && node scripts/measure-injection.mjs --layer=full",
+    "eval:skill-author": "npm run build && node scripts/measure-skill-author.mjs",
     "eval:longitudinal": "npm run build && node scripts/bench-meta.mjs --longitudinal",
+    "eval:scorecard": "npm run build && node scripts/experiments/scorecard/run.mjs",
+    "e2e:live": "npm run build && node scripts/e2e-live.mjs --all",
+    "scorecard": "node scripts/verify-scorecard.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

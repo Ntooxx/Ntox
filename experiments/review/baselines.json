@@ -1,0 +1,66 @@
+{
+  "recordedAt": "2026-11-19T22:45:32.825Z",
+  "verdict": "8/10",
+  "source": "independent review 2026-11-19 + Road to Good remediation",
+  "metrics": {
+    "offline-recall": {
+      "value": null,
+      "status": "unavailable",
+      "detail": {
+        "localHashSynonym": 0.4,
+        "localMiniLmSynonym": null,
+        "localHashExact": 1,
+        "localMiniLmExact": null,
+        "exactNoRegression": null
+      }
+    },
+    "injection-bypass": {
+      "value": null,
+      "status": "unavailable",
+      "detail": {
+        "layer": null,
+        "baselineBypassRate": null,
+        "baselineFalsePositiveRate": null,
+        "maliciousCases": null,
+        "benignCases": null
+      }
+    },
+    "skill-author-accept": {
+      "value": 1,
+      "status": "measured",
+      "detail": {
+        "mode": "deterministic-harness",
+        "heldOutStruggles": 12,
+        "note": "Deterministic harness uses a fixed synthetic provider and therefore measures authoring plumbing and rubric conformance, not model-authored quality. Re-run with NTOX_LIVE=1 against a real provider for the live quality number (Phase 1)."
+      }
+    },
+    "test-count": {
+      "value": 1654,
+      "status": "measured",
+      "detail": {
+        "source": "experiments/verification/report.json"
+      }
+    },
+    "coverage": {
+      "value": {
+        "lines": 64.22,
+        "functions": 67.01
+      },
+      "status": "measured",
+      "detail": {
+        "source": "coverage/coverage-summary.json",
+        "statements": 62.47,
+        "branches": 54.34
+      }
+    },
+    "ci-green-rate": {
+      "value": null,
+      "status": "unavailable",
+      "detail": {
+        "green": null,
+        "total": null,
+        "source": "experiments/review/measurements/ci-runs.json"
+      }
+    }
+  }
+}

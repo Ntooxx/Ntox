@@ -1,0 +1,337 @@
+{
+  "suiteId": "ntox-capability-scorecard-v1",
+  "version": 1,
+  "sha256": "8d43c4e000e4715c8d83c72b38109434d4019605b77eaee5f55fc8f9949ffc57",
+  "notes": "Frozen capability suite. Weights are relative within each dimension; dimension weights sum to 100. sha256 pins suiteId, version, dimensions and referenceBaselines (computed by suiteFingerprint).",
+  "referenceBaselines": [
+    {
+      "id": "ntox",
+      "label": "Ntox (earlier qualitative estimate)",
+      "measured": false,
+      "total": 78,
+      "scores": {
+        "memory": 8,
+        "learning": 8,
+        "skills": 8,
+        "runtime": 6,
+        "providers": 9,
+        "channels": 7,
+        "observability": 8,
+        "security": 8
+      }
+    },
+    {
+      "id": "letta",
+      "label": "Letta / MemGPT (qualitative estimate)",
+      "measured": false,
+      "total": 62,
+      "scores": {
+        "memory": 9,
+        "learning": 7,
+        "skills": 4,
+        "runtime": 6,
+        "providers": 6,
+        "channels": 4,
+        "observability": 5,
+        "security": 5
+      }
+    },
+    {
+      "id": "claude-code",
+      "label": "Claude Code (qualitative estimate)",
+      "measured": false,
+      "total": 51,
+      "scores": {
+        "memory": 6,
+        "learning": 3,
+        "skills": 5,
+        "runtime": 9,
+        "providers": 2,
+        "channels": 3,
+        "observability": 5,
+        "security": 8
+      }
+    }
+  ],
+  "dimensions": [
+    {
+      "id": "memory",
+      "label": "Memoria cross-session & recall",
+      "weight": 20,
+      "tasks": [
+        {
+          "id": "m1-recall",
+          "label": "Richiamo di fatti con embedder locale",
+          "kind": "memory-recall",
+          "weight": 0.6,
+          "facts": [
+            {
+              "fact": "the harbor ledger token is navy-ember-41",
+              "query": "What is the harbor ledger token?",
+              "expected": "navy-ember-41"
+            },
+            {
+              "fact": "the staging deploy codename is amber-quartz-7",
+              "query": "What is the staging deploy codename?",
+              "expected": "amber-quartz-7"
+            },
+            {
+              "fact": "postgres backup bucket is cobalt-vault-9",
+              "query": "Which bucket holds postgres backups?",
+              "expected": "cobalt-vault-9"
+            },
+            {
+              "fact": "the harbor ledger token is navy-ember-41",
+              "query": "Which secret label did we assign to the port accounting notes?",
+              "expected": "navy-ember-41"
+            },
+            {
+              "fact": "the staging deploy codename is amber-quartz-7",
+              "query": "What name did we give the pre-production release?",
+              "expected": "amber-quartz-7"
+            },
+            {
+              "fact": "postgres backup bucket is cobalt-vault-9",
+              "query": "Where are the relational database snapshots stored?",
+              "expected": "cobalt-vault-9"
+            }
+          ]
+        },
+        {
+          "id": "m2-gating",
+          "label": "La memoria entra nel prompt solo se abilitata",
+          "kind": "necessity",
+          "weight": 0.2,
+          "checkId": "memory-gating"
+        },
+        {
+          "id": "m3-offline-recall",
+          "label": "Recall@5 offline (artefatto)",
+          "kind": "artifact-metric",
+          "weight": 0.2,
+          "optional": true,
+          "path": "experiments/review/measurements/offline-recall.json",
+          "pointer": "results.local-hash.recallAt5",
+          "direction": "atLeast",
+          "target": 0.8
+        }
+      ]
+    },
+    {
+      "id": "learning",
+      "label": "Apprendimento / self-correction",
+      "weight": 20,
+      "tasks": [
+        {
+          "id": "l1-correction",
+          "label": "Precedenza delle correzioni",
+          "kind": "necessity",
+          "weight": 0.3,
+          "checkId": "correction-precedence"
+        },
+        {
+          "id": "l2-false-success",
+          "label": "Rilevamento ragionamento superficiale",
+          "kind": "necessity",
+          "weight": 0.25,
+          "checkId": "false-success-detection"
+        },
+        {
+          "id": "l3-kernel",
+          "label": "Apprendimento del kernel",
+          "kind": "necessity",
+          "weight": 0.2,
+          "checkId": "kernel-learning"
+        },
+        {
+          "id": "l4-pattern",
+          "label": "Compilazione dei pattern",
+          "kind": "necessity",
+          "weight": 0.25,
+          "checkId": "pattern-compilation"
+        }
+      ]
+    },
+    {
+      "id": "skills",
+      "label": "Auto-creazione & riutilizzo skill",
+      "weight": 12,
+      "tasks": [
+        {
+          "id": "s1-author",
+          "label": "Rubric di auto-scrittura su 12 struggle",
+          "kind": "skill-author",
+          "weight": 0.7,
+          "requests": [
+            "Deploy the staging build and verify the health endpoint after release.",
+            "Recover the JSONL memory store after a partially written episode.",
+            "Triage a failing integration test across three node versions.",
+            "Rotate the expired API credential without losing the active session.",
+            "Migrate episode vectors to a new embedding model with a backup.",
+            "Diagnose a provider timeout and retry with a smaller budget.",
+            "Reconcile two conflicting memory entries from different sessions.",
+            "Rebuild the offline semantic index after the model id changed.",
+            "Investigate intermittent websocket disconnects in the gateway.",
+            "Refactor an oversized module while keeping the public API stable.",
+            "Validate a cost budget before running the benchmark harness.",
+            "Handle a tool output that contains injected instructions safely."
+          ]
+        },
+        {
+          "id": "s2-plumbing",
+          "label": "API di auto-scrittura presenti",
+          "kind": "capability-exports",
+          "weight": 0.3,
+          "checks": [
+            { "module": "skills/auto-learner.js", "names": ["authorSkillFromStruggle", "shouldAuthorSkillOnStruggle"] },
+            { "module": "skills/self-author.js", "names": ["maybeAuthorSkillOnStruggle"] },
+            { "module": "skills/registry.js", "names": ["SkillRegistry"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "runtime",
+      "label": "Runtime agentico & tool",
+      "weight": 12,
+      "tasks": [
+        {
+          "id": "r1-exports",
+          "label": "Superfici runtime esportate",
+          "kind": "capability-exports",
+          "weight": 1,
+          "checks": [
+            { "module": "tools/registry.js", "names": ["ToolRegistry", "executeToolCall"] },
+            { "module": "core/dispatcher.js", "names": ["createSharedInfra", "createSessionInfra", "createAgentInfra", "createAgentConfig"] },
+            { "module": "core/agent.js", "names": ["Agent"] },
+            { "module": "core/llm.js", "names": ["LLMClient"] },
+            { "module": "cognition/index.js", "names": ["CognitiveKernel", "createCognitiveLayer", "NtoxCognitiveLayer"] },
+            { "module": "mcp/server.js", "names": ["createSkillMcpServer"] },
+            { "module": "evaluation/index.js", "names": ["runNecessityChecks", "runLongitudinal", "verifySuite"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "providers",
+      "label": "Provider multipli / local-first",
+      "weight": 10,
+      "tasks": [
+        {
+          "id": "p1-embed-offline",
+          "label": "Embedder locale senza API key",
+          "kind": "embed-offline",
+          "weight": 0.6
+        },
+        {
+          "id": "p2-provider-list",
+          "label": "Provider dichiarati nel setup",
+          "kind": "source-contains",
+          "weight": 0.4,
+          "file": "src/setup.ts",
+          "required": [
+            "openrouter",
+            "openai",
+            "deepseek",
+            "groq",
+            "anthropic",
+            "together",
+            "mistral",
+            "ollama",
+            "lmstudio",
+            "openai-compatible"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "channels",
+      "label": "Multi-canale & deployment",
+      "weight": 8,
+      "tasks": [
+        {
+          "id": "c1-surfaces",
+          "label": "Superfici di canale presenti",
+          "kind": "files-exist",
+          "weight": 1,
+          "files": [
+            "src/gateway/index.ts",
+            "src/gateway/telegram.ts",
+            "src/gateway/discord.ts",
+            "src/gateway/whatsapp.ts",
+            "src/gateway/slack.ts",
+            "src/gateway/web.ts",
+            "src/api/server.ts",
+            "src/mcp/server.ts",
+            "desktop/main.cjs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "observability",
+      "label": "Osservabilità & eval dedicate",
+      "weight": 10,
+      "tasks": [
+        {
+          "id": "o1-scripts",
+          "label": "Comandi di valutazione presenti",
+          "kind": "package-scripts",
+          "weight": 0.4,
+          "scripts": [
+            "eval:necessity",
+            "eval:longitudinal",
+            "eval:scorecard",
+            "bench:alive",
+            "bench:m5",
+            "scorecard",
+            "verify:all"
+          ]
+        },
+        {
+          "id": "o2-trace",
+          "label": "beforeStep produce sezioni, prompt e diagnostica",
+          "kind": "trace-diagnostics",
+          "weight": 0.6
+        }
+      ]
+    },
+    {
+      "id": "security",
+      "label": "Sicurezza & sandboxing",
+      "weight": 8,
+      "tasks": [
+        {
+          "id": "x1-bypass",
+          "label": "Bypass injection (artefatto)",
+          "kind": "artifact-metric",
+          "weight": 0.5,
+          "optional": true,
+          "path": "experiments/review/measurements/injection-bypass.json",
+          "pointer": "results.defense-in-depth.bypassRate",
+          "direction": "atMost",
+          "target": 0.05
+        },
+        {
+          "id": "x2-false-positive",
+          "label": "Falsi positivi injection (artefatto)",
+          "kind": "artifact-metric",
+          "weight": 0.25,
+          "optional": true,
+          "path": "experiments/review/measurements/injection-bypass.json",
+          "pointer": "results.defense-in-depth.falsePositiveRate",
+          "direction": "atMost",
+          "target": 0.01
+        },
+        {
+          "id": "x3-sensitive-paths",
+          "label": "Percorsi sensibili bloccati",
+          "kind": "source-contains",
+          "weight": 0.25,
+          "file": "src/tools/filesystem.ts",
+          "required": [".ssh", ".aws", ".env", ".gnupg", ".netrc", ".npmrc"]
+        }
+      ]
+    }
+  ]
+}

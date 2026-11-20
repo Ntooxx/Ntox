@@ -34,6 +34,26 @@ export type {
   SessionFactory,
 } from "./runner.js";
 export {
+  clamp01,
+  dimensionResult,
+  grade,
+  metricScore,
+  renderScorecardMarkdown,
+  suiteFingerprint,
+  totalScore,
+  verifySuite,
+} from "./scorecard.js";
+export type {
+  DimensionResult,
+  ReferenceBaseline,
+  ScorecardDimension,
+  ScorecardResult,
+  ScorecardSuite,
+  ScorecardTask,
+  ScorecardTaskKind,
+  TaskResult,
+} from "./scorecard.js";
+export {
   generateEvaluationReport,
   generateNecessityMarkdown,
   saveEvaluationReport,

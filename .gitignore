@@ -7,6 +7,7 @@ ntox/
 experiments/*
 !experiments/alive/
 !experiments/benchmark/
+!experiments/review/
 *.log
 shell-audit.log
 coverage/

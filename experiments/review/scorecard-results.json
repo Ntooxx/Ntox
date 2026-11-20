@@ -1,0 +1,126 @@
+{
+  "generatedAt": "2026-11-20T00:56:13.042Z",
+  "targetScore": 9,
+  "criteriaMet": 5,
+  "criteriaTotal": 6,
+  "allCriteriaMet": false,
+  "metrics": [
+    {
+      "id": "offline-recall",
+      "label": "Synonym recall@5 delta (local-minilm vs local-hash, holdout)",
+      "value": 0.5,
+      "target": {
+        "atLeast": 0.15,
+        "exactNoRegression": true
+      },
+      "command": "npm run eval:offline-recall  # reads experiments/review/measurements/offline-recall.json",
+      "status": "measured",
+      "detail": {
+        "scoredOn": "holdout",
+        "localHashSynonym": 0.4,
+        "localMiniLmSynonym": 0.9666666666666667,
+        "localHashExact": 1,
+        "localMiniLmExact": 1,
+        "exactNoRegression": true,
+        "holdoutQueries": 18,
+        "holdoutLocalHashSynonym": 1,
+        "holdoutLocalMiniLmSynonym": 1,
+        "holdoutExactNoRegression": true,
+        "independence": "holdout is a deterministic 30% partition of a self-authored set, not third-party validation"
+      },
+      "meetsTarget": true
+    },
+    {
+      "id": "injection-bypass",
+      "label": "Adversarial bypass rate / benign false-positive rate (holdout)",
+      "value": {
+        "bypassRate": 0,
+        "falsePositiveRate": 0
+      },
+      "target": {
+        "bypassRateBelow": 0.05,
+        "falsePositiveRateBelow": 0.01
+      },
+      "command": "npm run eval:injection  # reads experiments/review/measurements/injection-bypass.json",
+      "status": "measured",
+      "detail": {
+        "layer": "defense-in-depth",
+        "scoredOn": "holdout",
+        "baselineBypassRate": 0.2962962962962963,
+        "baselineFalsePositiveRate": 0.125,
+        "maliciousCases": 54,
+        "benignCases": 24,
+        "holdoutMaliciousCases": 15,
+        "holdoutBenignCases": 9,
+        "independence": "holdout is a deterministic 30% partition of a self-authored corpus, not third-party validation"
+      },
+      "meetsTarget": true
+    },
+    {
+      "id": "skill-author-accept",
+      "label": "Self-authored skill quality-rubric acceptance rate",
+      "value": 1,
+      "target": {
+        "atLeast": 0.8
+      },
+      "command": "npm run eval:skill-author  # reads experiments/review/measurements/skill-author-accept.json",
+      "status": "measured",
+      "detail": {
+        "mode": "deterministic-harness",
+        "heldOutStruggles": 12,
+        "note": "Deterministic harness uses a fixed synthetic provider and therefore measures authoring plumbing and rubric conformance, not model-authored quality. Re-run with NTOX_LIVE=1 against a real provider for the live quality number (Phase 1)."
+      },
+      "meetsTarget": true
+    },
+    {
+      "id": "test-count",
+      "label": "Passing tests (latest verification report)",
+      "value": 1687,
+      "target": {
+        "greaterThan": 0
+      },
+      "command": "npm run verify:all  # reads experiments/verification/report.json",
+      "status": "measured",
+      "detail": {
+        "source": "experiments/verification/report.json"
+      },
+      "meetsTarget": true
+    },
+    {
+      "id": "coverage",
+      "label": "Coverage ratchet (lines / functions)",
+      "value": {
+        "lines": 64.22,
+        "functions": 67.01
+      },
+      "target": {
+        "linesAtLeast": 62,
+        "functionsAtLeast": 65
+      },
+      "command": "npm run coverage  # reads coverage/coverage-summary.json",
+      "status": "measured",
+      "detail": {
+        "source": "coverage/coverage-summary.json",
+        "statements": 62.47,
+        "branches": 54.34
+      },
+      "meetsTarget": true
+    },
+    {
+      "id": "ci-green-rate",
+      "label": "CI green rate (last 20 runs)",
+      "value": null,
+      "target": {
+        "atLeast": 0.95
+      },
+      "command": "node scripts/verify-scorecard.mjs --refresh-ci  # or: gh run list --limit 20 --json conclusion",
+      "status": "unavailable",
+      "detail": {
+        "green": null,
+        "total": null,
+        "source": "experiments/review/measurements/ci-runs.json"
+      },
+      "meetsTarget": false
+    }
+  ]
+}

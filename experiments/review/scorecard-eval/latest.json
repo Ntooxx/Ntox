@@ -1,0 +1,277 @@
+{
+  "suiteId": "ntox-capability-scorecard-v1",
+  "suiteSha256": "8d43c4e000e4715c8d83c72b38109434d4019605b77eaee5f55fc8f9949ffc57",
+  "generatedAt": "2026-11-19T23:13:02.334Z",
+  "mode": "deterministic-offline",
+  "total": 93.5,
+  "coverage": 1,
+  "dimensions": [
+    {
+      "id": "memory",
+      "label": "Memoria cross-session & recall",
+      "weight": 20,
+      "coverage": 1,
+      "score": 6.75,
+      "tasks": [
+        {
+          "id": "m1-recall",
+          "label": "Richiamo di fatti con embedder locale",
+          "score": 0.5,
+          "passed": false,
+          "detail": "retrieved 3/6 frozen facts at R@5, threshold 0.5",
+          "measured": true
+        },
+        {
+          "id": "m2-gating",
+          "label": "La memoria entra nel prompt solo se abilitata",
+          "score": 1,
+          "passed": true,
+          "detail": "enabled memoryIncluded=true factPresent=true; disabled memoryIncluded=false",
+          "measured": true
+        },
+        {
+          "id": "m3-offline-recall",
+          "label": "Recall@5 offline (artefatto)",
+          "score": 0.8749999999999999,
+          "passed": false,
+          "detail": "results.local-hash.recallAt5=0.7 (atLeast 0.8); artifact 2026-11-19T23:09:35.095Z",
+          "measured": true
+        }
+      ]
+    },
+    {
+      "id": "learning",
+      "label": "Apprendimento / self-correction",
+      "weight": 20,
+      "coverage": 1,
+      "score": 10,
+      "tasks": [
+        {
+          "id": "l1-correction",
+          "label": "Precedenza delle correzioni",
+          "score": 1,
+          "passed": true,
+          "detail": "enabled correctionIncluded=true correctionsBeforeMemories=true; disabled leak=false",
+          "measured": true
+        },
+        {
+          "id": "l2-false-success",
+          "label": "Rilevamento ragionamento superficiale",
+          "score": 1,
+          "passed": true,
+          "detail": "surface flagged=true; deep flagged=false; recorded gap=9",
+          "measured": true
+        },
+        {
+          "id": "l3-kernel",
+          "label": "Apprendimento del kernel",
+          "score": 1,
+          "passed": true,
+          "detail": "disabled=0 chars; target=pat_seed_software-dev; after reinforcement=151 chars",
+          "measured": true
+        },
+        {
+          "id": "l4-pattern",
+          "label": "Compilazione dei pattern",
+          "score": 1,
+          "passed": true,
+          "detail": "sightings returned pattern at 3rd=true; compiled=true; compiledTemplates=1",
+          "measured": true
+        }
+      ]
+    },
+    {
+      "id": "skills",
+      "label": "Auto-creazione & riutilizzo skill",
+      "weight": 12,
+      "coverage": 1,
+      "score": 10,
+      "tasks": [
+        {
+          "id": "s1-author",
+          "label": "Rubric di auto-scrittura su 12 struggle",
+          "score": 1,
+          "passed": true,
+          "detail": "12/12 rubric-accepted, 12/12 authored",
+          "measured": true
+        },
+        {
+          "id": "s2-plumbing",
+          "label": "API di auto-scrittura presenti",
+          "score": 1,
+          "passed": true,
+          "detail": "4/4 exports present; missing: none",
+          "measured": true
+        }
+      ]
+    },
+    {
+      "id": "runtime",
+      "label": "Runtime agentico & tool",
+      "weight": 12,
+      "coverage": 1,
+      "score": 10,
+      "tasks": [
+        {
+          "id": "r1-exports",
+          "label": "Superfici runtime esportate",
+          "score": 1,
+          "passed": true,
+          "detail": "15/15 exports present; missing: none",
+          "measured": true
+        }
+      ]
+    },
+    {
+      "id": "providers",
+      "label": "Provider multipli / local-first",
+      "weight": 10,
+      "coverage": 1,
+      "score": 10,
+      "tasks": [
+        {
+          "id": "p1-embed-offline",
+          "label": "Embedder locale senza API key",
+          "score": 1,
+          "passed": true,
+          "detail": "model=local-hash, dim=256, keys cleared",
+          "measured": true
+        },
+        {
+          "id": "p2-provider-list",
+          "label": "Provider dichiarati nel setup",
+          "score": 1,
+          "passed": true,
+          "detail": "10/10 tokens present; missing: none",
+          "measured": true
+        }
+      ]
+    },
+    {
+      "id": "channels",
+      "label": "Multi-canale & deployment",
+      "weight": 8,
+      "coverage": 1,
+      "score": 10,
+      "tasks": [
+        {
+          "id": "c1-surfaces",
+          "label": "Superfici di canale presenti",
+          "score": 1,
+          "passed": true,
+          "detail": "9/9 files; missing: none",
+          "measured": true
+        }
+      ]
+    },
+    {
+      "id": "observability",
+      "label": "Osservabilità & eval dedicate",
+      "weight": 10,
+      "coverage": 1,
+      "score": 10,
+      "tasks": [
+        {
+          "id": "o1-scripts",
+          "label": "Comandi di valutazione presenti",
+          "score": 1,
+          "passed": true,
+          "detail": "7/7 scripts; missing: none",
+          "measured": true
+        },
+        {
+          "id": "o2-trace",
+          "label": "beforeStep produce sezioni, prompt e diagnostica",
+          "score": 1,
+          "passed": true,
+          "detail": "sections=1, promptChars=86, diagnostics=6",
+          "measured": true
+        }
+      ]
+    },
+    {
+      "id": "security",
+      "label": "Sicurezza & sandboxing",
+      "weight": 8,
+      "coverage": 1,
+      "score": 10,
+      "tasks": [
+        {
+          "id": "x1-bypass",
+          "label": "Bypass injection (artefatto)",
+          "score": 1,
+          "passed": true,
+          "detail": "results.defense-in-depth.bypassRate=0 (atMost 0.05); artifact 2026-11-19T23:12:01.314Z",
+          "measured": true
+        },
+        {
+          "id": "x2-false-positive",
+          "label": "Falsi positivi injection (artefatto)",
+          "score": 1,
+          "passed": true,
+          "detail": "results.defense-in-depth.falsePositiveRate=0 (atMost 0.01); artifact 2026-11-19T23:12:01.314Z",
+          "measured": true
+        },
+        {
+          "id": "x3-sensitive-paths",
+          "label": "Percorsi sensibili bloccati",
+          "score": 1,
+          "passed": true,
+          "detail": "6/6 tokens present; missing: none",
+          "measured": true
+        }
+      ]
+    }
+  ],
+  "referenceBaselines": [
+    {
+      "id": "ntox",
+      "label": "Ntox (earlier qualitative estimate)",
+      "measured": false,
+      "total": 78,
+      "scores": {
+        "memory": 8,
+        "learning": 8,
+        "skills": 8,
+        "runtime": 6,
+        "providers": 9,
+        "channels": 7,
+        "observability": 8,
+        "security": 8
+      }
+    },
+    {
+      "id": "letta",
+      "label": "Letta / MemGPT (qualitative estimate)",
+      "measured": false,
+      "total": 62,
+      "scores": {
+        "memory": 9,
+        "learning": 7,
+        "skills": 4,
+        "runtime": 6,
+        "providers": 6,
+        "channels": 4,
+        "observability": 5,
+        "security": 5
+      }
+    },
+    {
+      "id": "claude-code",
+      "label": "Claude Code (qualitative estimate)",
+      "measured": false,
+      "total": 51,
+      "scores": {
+        "memory": 6,
+        "learning": 3,
+        "skills": 5,
+        "runtime": 9,
+        "providers": 2,
+        "channels": 3,
+        "observability": 5,
+        "security": 8
+      }
+    }
+  ],
+  "isolationDir": "C:\\Users\\domenico\\AppData\\Local\\Temp\\ntox-scorecard-7r1dFy"
+}
