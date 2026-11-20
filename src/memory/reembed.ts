@@ -2,7 +2,14 @@ import { copyFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } fro
 import { createHash } from "node:crypto";
 import { EPISODES_JSONL_PATH, EPISODES_PATH, loadConfig } from "../core/config.js";
 import { LLMClient } from "../core/llm.js";
-import { EmbeddingService, LOCAL_HASH_TAG, LocalOnlyEmbedder, type Embedder } from "./embedding-service.js";
+import {
+  EmbeddingService,
+  LOCAL_HASH_TAG,
+  LOCAL_MINILM_TAG,
+  LocalOnlyEmbedder,
+  type Embedder,
+} from "./embedding-service.js";
+import { createLocalSemanticEmbedder } from "./local-semantic-embedder.js";
 import type { Episode } from "../types/index.js";
 
 export interface ReembedOptions {
@@ -42,6 +49,7 @@ interface Slot {
 
 function resolveEmbedder(model?: string): Embedder {
   if (model === LOCAL_HASH_TAG) return new LocalOnlyEmbedder();
+  if (model === LOCAL_MINILM_TAG) return createLocalSemanticEmbedder();
   const config = loadConfig();
   const embeddingModelId = model ?? config.embeddingModel;
   const llm = new LLMClient(

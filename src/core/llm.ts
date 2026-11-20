@@ -11,16 +11,15 @@ import {
   isRetryableError,
 } from "./errors.js";
 import { StreamLineParser } from "./stream-parser.js";
+import { loadCachedModels, saveCachedModels } from "./config.js";
 
 export function countTokens(text: string): number {
   if (!text) return 0;
-  const words = (text.match(/\S+/g) || []).length;
-  const byChars = text.length / 4;
-  const byWords = words * 1.33;
-  return Math.ceil((byChars + byWords) / 2);
+  return Math.ceil((text.length / 4 + (text.match(/\S+/g) || []).length * 1.33) / 2);
 }
 
 let tokenizerModule: Promise<typeof import("gpt-tokenizer")> | null = null;
+let usageModelsRequested = false;
 
 export async function countTokensExact(text: string): Promise<number> {
   if (!text) return 0;
@@ -120,11 +119,7 @@ const PROVIDERS: Record<string, ProviderConfig> = {
     chatUrl: null,
     embedUrl: null,
     modelsUrl: null,
-    headers: (key) => {
-      const h: Record<string, string> = {};
-      if (key) h.Authorization = `Bearer ${key}`;
-      return h;
-    },
+    headers: (key): Record<string, string> => (key ? { Authorization: `Bearer ${key}` } : {}),
     format: "openai",
     apiKeyRequired: false,
   },
@@ -151,10 +146,7 @@ const PROVIDERS: Record<string, ProviderConfig> = {
 const PROVIDER_LIST = Object.keys(PROVIDERS);
 
 function stripPrefix(modelId: string, provider: string): string {
-  if (modelId.startsWith(provider + "/")) {
-    return modelId.slice(provider.length + 1);
-  }
-  return modelId;
+  return modelId.startsWith(provider + "/") ? modelId.slice(provider.length + 1) : modelId;
 }
 
 function getProviderConfig(provider: string): ProviderConfig | undefined {
@@ -168,22 +160,15 @@ const MIN_FALLBACK_BUDGET_MS = 300;
 const STREAM_STALL_TIMEOUT_MS = 90000;
 
 function embedBudgetMs(): number {
-  const env = process.env.NTOX_EMBED_BUDGET_MS;
-  const parsed = env ? Number(env) : NaN;
+  const parsed = Number(process.env.NTOX_EMBED_BUDGET_MS);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_EMBED_BUDGET_MS;
 }
 
 function resolveProvider(configuredProvider: string, modelId: string): string {
-  // Model prefix overrides configured provider for local providers
-  const LOCAL = ["ollama", "lmstudio"];
-  for (const p of LOCAL) {
-    if (modelId.startsWith(p + "/")) return p;
-  }
+  const local = ["ollama", "lmstudio"].find((p) => modelId.startsWith(p + "/"));
+  if (local) return local;
   if (configuredProvider && PROVIDERS[configuredProvider]) return configuredProvider;
-  for (const p of PROVIDER_LIST) {
-    if (modelId.startsWith(p + "/")) return p;
-  }
-  return "openrouter";
+  return PROVIDER_LIST.find((p) => modelId.startsWith(p + "/")) ?? "openrouter";
 }
 
 export function modelSupportsTools(model: { supported_parameters?: string[] } | null | undefined): boolean | null {
@@ -390,12 +375,26 @@ async function* streamOpenAICompatible(
 
       if (parsed.usage) {
         yieldedUsage = true;
+        const inputTokens = parsed.usage.prompt_tokens;
+        const outputTokens = parsed.usage.completion_tokens;
+        if ((loadCachedModels() ?? []).length === 0 && !usageModelsRequested) {
+          usageModelsRequested = true;
+          void client
+            .fetchModels()
+            .then((models) => {
+              if (models.length) saveCachedModels(models);
+              else usageModelsRequested = false;
+            })
+            .catch(() => {
+              usageModelsRequested = false;
+            });
+        }
         yield {
           delta: "",
           usage: {
-            inputTokens: parsed.usage.prompt_tokens,
-            outputTokens: parsed.usage.completion_tokens,
-            cost: 0,
+            inputTokens,
+            outputTokens,
+            cost: estimateCost(client.activeModel, inputTokens, outputTokens, loadCachedModels() ?? []),
           },
         };
       }
@@ -805,6 +804,10 @@ export class LLMClient {
     this.configuredProvider = configuredProvider;
   }
 
+  get activeModel(): string {
+    return this.modelId;
+  }
+
   updateModel(modelId: string): void {
     this.modelId = modelId;
   }
@@ -867,18 +870,20 @@ export class LLMClient {
       }
     }
 
+    if (remaining() >= MIN_FALLBACK_BUDGET_MS && process.env.NTOX_EMBED_LOCAL_MINILM === "1") {
+      const { createLocalSemanticEmbedder } = await import("../memory/local-semantic-embedder.js");
+      const semantic = createLocalSemanticEmbedder({ force: true });
+      const result = (await semantic.available()) ? await semantic.embed(text) : null;
+      if (result?.model === "local-minilm") return (this.embedCache.set(text, result), result);
+    }
+
     if (remaining() >= MIN_FALLBACK_BUDGET_MS) {
       console.error("[embed] API embedding unavailable, using local fallback");
       this.embeddingFallbacks++;
-      // Kept deliberately: last-resort fallback keeps retrieval alive when no remote
-      // embedder is reachable within the budget. Tagged `local-hash` below so the
-      // model-mismatch skip in episodic retrieval excludes it from remote-model
-      // queries instead of silently comparing across embedding spaces.
+      // Last-resort fallback keeps retrieval alive when no remote embedder is
+      // reachable; tagged `local-hash` so model-mismatch skips exclude it.
       const local = localEmbed(text);
-      if (this.embedCache.size > 100) {
-        const first = this.embedCache.keys().next().value;
-        if (first) this.embedCache.delete(first);
-      }
+      if (this.embedCache.size > 100) this.embedCache.delete(this.embedCache.keys().next().value!);
       const meta = { vector: local, model: "local-hash" };
       this.embedCache.set(text, meta);
       return meta;
@@ -1220,9 +1225,16 @@ export async function probeProvider(provider: string, apiKey: string, baseUrl?: 
 export const LOCAL_PROVIDERS = ["ollama", "lmstudio"];
 
 export function estimateCost(modelId: string, inputTokens: number, outputTokens: number, models: ModelInfo[]): number {
-  const model = models.find((m) => m.id === modelId);
+  const model =
+    models.find((m) => m.id === modelId) ??
+    models.find((m) => m.id.endsWith(`/${modelId}`) || modelId.endsWith(`/${m.id}`));
   if (!model) return 0;
   return inputTokens * model.pricing.prompt + outputTokens * model.pricing.completion;
+}
+
+export function usageCost(usage: CostUsage, modelId: string): number {
+  if (usage?.cost > 0) return usage.cost;
+  return estimateCost(modelId, usage?.inputTokens || 0, usage?.outputTokens || 0, loadCachedModels() ?? []);
 }
 
 export function formatTokenCount(n: number): string {

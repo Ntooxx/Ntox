@@ -3,6 +3,9 @@ import { localEmbed } from "../core/local-embed.js";
 /** Provenance tag for vectors produced by the deterministic local hash embedder. */
 export const LOCAL_HASH_TAG = "local-hash";
 
+/** Provenance tag for vectors produced by the opt-in local MiniLM embedder. */
+export const LOCAL_MINILM_TAG = "local-minilm";
+
 export interface EmbeddedVector {
   vector: number[];
   /** Provenance tag: `remote:<provider>/<model>` or `local-hash`. */

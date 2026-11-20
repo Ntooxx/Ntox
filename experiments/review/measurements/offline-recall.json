@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-20T00:54:04.134Z",
+  "set": "synonym-set.json",
+  "results": {
+    "local-hash": {
+      "status": "measured",
+      "model": "local-hash",
+      "dim": 256,
+      "items": 30,
+      "queries": 60,
+      "durationMs": 18,
+      "recallAt5": 0.7,
+      "byKind": {
+        "synonym": {
+          "hits": 12,
+          "total": 30,
+          "recallAt5": 0.4
+        },
+        "exact": {
+          "hits": 30,
+          "total": 30,
+          "recallAt5": 1
+        }
+      },
+      "bySplit": {
+        "tuning": {
+          "queries": 42,
+          "recallAt5": 0.6904761904761905,
+          "byKind": {
+            "synonym": {
+              "hits": 7,
+              "total": 20,
+              "recallAt5": 0.35
+            },
+            "exact": {
+              "hits": 22,
+              "total": 22,
+              "recallAt5": 1
+            }
+          }
+        },
+        "holdout": {
+          "queries": 18,
+          "recallAt5": 0.7222222222222222,
+          "byKind": {
+            "synonym": {
+              "hits": 5,
+              "total": 10,
+              "recallAt5": 0.5
+            },
+            "exact": {
+              "hits": 8,
+              "total": 8,
+              "recallAt5": 1
+            }
+          }
+        }
+      }
+    },
+    "local-minilm": {
+      "status": "measured",
+      "model": "local-minilm",
+      "dim": 384,
+      "items": 30,
+      "queries": 60,
+      "durationMs": 886,
+      "recallAt5": 0.9833333333333333,
+      "byKind": {
+        "synonym": {
+          "hits": 29,
+          "total": 30,
+          "recallAt5": 0.9666666666666667
+        },
+        "exact": {
+          "hits": 30,
+          "total": 30,
+          "recallAt5": 1
+        }
+      },
+      "bySplit": {
+        "tuning": {
+          "queries": 42,
+          "recallAt5": 0.9761904761904762,
+          "byKind": {
+            "synonym": {
+              "hits": 19,
+              "total": 20,
+              "recallAt5": 0.95
+            },
+            "exact": {
+              "hits": 22,
+              "total": 22,
+              "recallAt5": 1
+            }
+          }
+        },
+        "holdout": {
+          "queries": 18,
+          "recallAt5": 1,
+          "byKind": {
+            "synonym": {
+              "hits": 10,
+              "total": 10,
+              "recallAt5": 1
+            },
+            "exact": {
+              "hits": 8,
+              "total": 8,
+              "recallAt5": 1
+            }
+          }
+        }
+      },
+      "deltaSynonymRecallAt5": 0.5666666666666667,
+      "exactNoRegression": true,
+      "deltaSynonymHoldout": 0.5,
+      "holdoutExactNoRegression": true
+    },
+    "remote": {
+      "status": "unavailable",
+      "reason": "embedder not installed or not configured",
+      "recallAt5": null,
+      "byKind": {}
+    }
+  }
+}
