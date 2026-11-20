@@ -5,6 +5,7 @@ import type { NtoxCognitiveLayer } from "../../cognition/layer.js";
 import type { Mind } from "../../mind/mind.js";
 import type { MindTurnHandle } from "../../mind/types.js";
 import type { AgentCallbacks } from "../agent.js";
+import { createUntrustedWrapper, detectToolCallInjection, markToolOutput } from "../injection-defenses.js";
 import {
   TOOL_CONCURRENCY,
   MAX_TOOL_CALLS_PER_TURN,
@@ -242,6 +243,7 @@ export async function runToolGroup(
   callbacks: AgentCallbacks,
 ): Promise<string[]> {
   const results: ToolResult[] = new Array(group.length);
+  const untrusted = createUntrustedWrapper();
   let cursor = 0;
   const workerCount = Math.min(TOOL_CONCURRENCY, group.length);
   const workers = Array.from({ length: workerCount }, async () => {
@@ -275,7 +277,9 @@ export async function runToolGroup(
       }
       const startedAt = Date.now();
       try {
-        results[index] = await tool.execute(item.args, toolContext);
+        results[index] = detectToolCallInjection(item.args)
+          ? { success: false, error: "POLICY_DENIED: injected instruction detected in tool arguments" }
+          : await tool.execute(item.args, toolContext);
       } catch (e) {
         results[index] = { success: false, error: e instanceof Error ? e.message : String(e) };
       }
@@ -327,7 +331,11 @@ export async function runToolGroup(
     } catch {
       /* best effort */
     }
-    ctx.pushMessage({ role: "tool", tool_call_id: item.tc.id, content: resultContent });
+    ctx.pushMessage({
+      role: "tool",
+      tool_call_id: item.tc.id,
+      content: markToolOutput(item.tc.name, resultContent, untrusted),
+    });
   }
   return contents;
 }

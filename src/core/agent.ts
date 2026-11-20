@@ -34,7 +34,7 @@ import type {
   AgentTurnTrace,
 } from "../types/index.js";
 import { deleteSessionSnapshot, loadSessionSnapshot, saveSessionSnapshot } from "./session-store.js";
-import { detectPromptInjection } from "./guard.js";
+import { detectInjectionDefense } from "./injection-defenses.js";
 import { resetPolicyRuntime, type PolicyRuntime } from "./policy.js";
 
 import { Mind } from "../mind/mind.js";
@@ -109,6 +109,8 @@ export interface AgentConfig {
   policy?: PolicyRuntime;
   skipReflection?: boolean;
   skillAutoLearn?: boolean;
+  skillSemanticMatchEnabled?: boolean;
+  skillAutoAuthorEnabled?: boolean;
   skillRegistry?: SkillRegistry;
   alive?: NtoxAliveBridge;
   mind?: Mind;
@@ -172,6 +174,9 @@ export class Agent {
     skillProposalTurn: 0,
     lastSkillProposalTurn: null,
     skillProposalsThisSession: 0,
+    skillAuthorTurn: 0,
+    lastSkillAuthorTurn: null,
+    skillAuthorsThisSession: 0,
     surpriseNotesThisSession: 0,
     surpriseReflectionsThisSession: 0,
   };
@@ -460,8 +465,8 @@ export class Agent {
     this.startTrace(rawInput);
 
     // 0a. Prompt injection guard — before the user message enters history.
-    // Structural markers block outright; phrase phrasings are stripped and warned.
-    const guard = detectPromptInjection(rawInput);
+    // Structural markers block; encoded/multilingual payloads are normalized first.
+    const guard = detectInjectionDefense(rawInput);
     if (guard.blocked) {
       const msg = "[Security] Potential prompt injection blocked. Your message was not processed.";
       if (this.currentTrace) this.currentTrace.blockedReason = guard.reason;

@@ -1,0 +1,275 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-20T00:53:37.426Z",
+  "results": {
+    "regex-guard": {
+      "status": "measured",
+      "layer": "regex-guard",
+      "model": "guard-v1-regex",
+      "generatedAt": "2026-11-19T23:05:35.803Z",
+      "maliciousCases": 54,
+      "bypassRate": 0.2962962962962963,
+      "blockedRate": 0.18518518518518517,
+      "warnedRate": 0.5185185185185185,
+      "byCategory": {
+        "structural": {
+          "total": 10,
+          "blocked": 6,
+          "warned": 3,
+          "bypassed": 1
+        },
+        "phrase": {
+          "total": 21,
+          "blocked": 0,
+          "warned": 21,
+          "bypassed": 0
+        },
+        "encoded": {
+          "total": 6,
+          "blocked": 0,
+          "warned": 0,
+          "bypassed": 6
+        },
+        "multilingual": {
+          "total": 5,
+          "blocked": 0,
+          "warned": 0,
+          "bypassed": 5
+        },
+        "homoglyph": {
+          "total": 4,
+          "blocked": 0,
+          "warned": 0,
+          "bypassed": 4
+        },
+        "tool-output": {
+          "total": 5,
+          "blocked": 2,
+          "warned": 3,
+          "bypassed": 0
+        },
+        "overflow": {
+          "total": 3,
+          "blocked": 2,
+          "warned": 1,
+          "bypassed": 0
+        }
+      },
+      "layersActive": [
+        "regex-structural",
+        "regex-phrase"
+      ],
+      "layersUsed": [],
+      "benignCases": 24,
+      "falsePositives": 3,
+      "falsePositiveIds": [
+        "f06",
+        "f07",
+        "f08"
+      ],
+      "falsePositiveRate": 0.125,
+      "softWarnings": 5,
+      "softWarningIds": [
+        "f01",
+        "f03",
+        "f04",
+        "f09",
+        "f11"
+      ],
+      "target": {
+        "bypassRateBelow": 0.05,
+        "falsePositiveRateBelow": 0.01
+      }
+    },
+    "defense-in-depth": {
+      "status": "measured",
+      "layer": "defense-in-depth",
+      "model": "guard-v2",
+      "generatedAt": "2026-11-20T00:53:37.426Z",
+      "maliciousCases": 54,
+      "bypassRate": 0,
+      "blockedRate": 0.24074074074074073,
+      "warnedRate": 0.7592592592592593,
+      "byCategory": {
+        "structural": {
+          "total": 10,
+          "blocked": 9,
+          "warned": 1,
+          "bypassed": 0
+        },
+        "phrase": {
+          "total": 21,
+          "blocked": 0,
+          "warned": 21,
+          "bypassed": 0
+        },
+        "encoded": {
+          "total": 6,
+          "blocked": 0,
+          "warned": 6,
+          "bypassed": 0
+        },
+        "multilingual": {
+          "total": 5,
+          "blocked": 0,
+          "warned": 5,
+          "bypassed": 0
+        },
+        "homoglyph": {
+          "total": 4,
+          "blocked": 0,
+          "warned": 4,
+          "bypassed": 0
+        },
+        "tool-output": {
+          "total": 5,
+          "blocked": 2,
+          "warned": 3,
+          "bypassed": 0
+        },
+        "overflow": {
+          "total": 3,
+          "blocked": 2,
+          "warned": 1,
+          "bypassed": 0
+        }
+      },
+      "layersActive": [
+        "structural-normalized",
+        "phrase-normalized",
+        "benign-suppression"
+      ],
+      "layersUsed": [
+        "structural",
+        "normalized",
+        "phrase",
+        "phrase-regex"
+      ],
+      "benignCases": 24,
+      "falsePositives": 0,
+      "falsePositiveIds": [],
+      "falsePositiveRate": 0,
+      "softWarnings": 0,
+      "softWarningIds": [],
+      "splitNote": "holdout is a deterministic 30% partition of a self-authored corpus, not independent third-party validation",
+      "bySplit": {
+        "tuning": {
+          "maliciousCases": 39,
+          "bypassRate": 0,
+          "blockedRate": 0.20512820512820512,
+          "warnedRate": 0.7948717948717948,
+          "byCategory": {
+            "structural": {
+              "total": 6,
+              "blocked": 5,
+              "warned": 1,
+              "bypassed": 0
+            },
+            "phrase": {
+              "total": 17,
+              "blocked": 0,
+              "warned": 17,
+              "bypassed": 0
+            },
+            "encoded": {
+              "total": 5,
+              "blocked": 0,
+              "warned": 5,
+              "bypassed": 0
+            },
+            "multilingual": {
+              "total": 4,
+              "blocked": 0,
+              "warned": 4,
+              "bypassed": 0
+            },
+            "homoglyph": {
+              "total": 1,
+              "blocked": 0,
+              "warned": 1,
+              "bypassed": 0
+            },
+            "tool-output": {
+              "total": 4,
+              "blocked": 2,
+              "warned": 2,
+              "bypassed": 0
+            },
+            "overflow": {
+              "total": 2,
+              "blocked": 1,
+              "warned": 1,
+              "bypassed": 0
+            }
+          },
+          "benignCases": 15,
+          "falsePositives": 0,
+          "falsePositiveIds": [],
+          "falsePositiveRate": 0,
+          "softWarnings": 0,
+          "softWarningIds": []
+        },
+        "holdout": {
+          "maliciousCases": 15,
+          "bypassRate": 0,
+          "blockedRate": 0.3333333333333333,
+          "warnedRate": 0.6666666666666666,
+          "byCategory": {
+            "structural": {
+              "total": 4,
+              "blocked": 4,
+              "warned": 0,
+              "bypassed": 0
+            },
+            "phrase": {
+              "total": 4,
+              "blocked": 0,
+              "warned": 4,
+              "bypassed": 0
+            },
+            "encoded": {
+              "total": 1,
+              "blocked": 0,
+              "warned": 1,
+              "bypassed": 0
+            },
+            "multilingual": {
+              "total": 1,
+              "blocked": 0,
+              "warned": 1,
+              "bypassed": 0
+            },
+            "homoglyph": {
+              "total": 3,
+              "blocked": 0,
+              "warned": 3,
+              "bypassed": 0
+            },
+            "tool-output": {
+              "total": 1,
+              "blocked": 0,
+              "warned": 1,
+              "bypassed": 0
+            },
+            "overflow": {
+              "total": 1,
+              "blocked": 1,
+              "warned": 0,
+              "bypassed": 0
+            }
+          },
+          "benignCases": 9,
+          "falsePositives": 0,
+          "falsePositiveIds": [],
+          "falsePositiveRate": 0,
+          "softWarnings": 0,
+          "softWarningIds": []
+        }
+      },
+      "target": {
+        "bypassRateBelow": 0.05,
+        "falsePositiveRateBelow": 0.01
+      }
+    }
+  }
+}
