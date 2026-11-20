@@ -1678,6 +1678,7 @@ export class Repl {
     if (denied.length > 0) lines.push(`  ${chalk.dim("policy")}    ${denied.length} denied`);
     if (trace.skill)
       lines.push(`  ${chalk.dim("skill")}     ${trace.skill.name} (${(trace.skill.confidence * 100).toFixed(0)}%)`);
+    if (trace.authoredSkill) lines.push(`  ${chalk.dim("authored")}   ${trace.authoredSkill} (saved to skills)`);
     if (trace.cognitiveSummary) lines.push(`  ${chalk.dim("cognition")} ${trace.cognitiveSummary}`);
     if (trace.retries > 0) lines.push(`  ${chalk.dim("retries")}   ${trace.retries}`);
     if (trace.injectionWarnings.length > 0)

@@ -91,6 +91,8 @@ const ConfigSchema = z.object({
   metaMistakesEnabled: z.boolean(),
   metaMinConfidence: z.number().min(0).max(1),
   skillAutoLearnEnabled: z.boolean(),
+  skillSemanticMatchEnabled: z.boolean(),
+  skillAutoAuthorEnabled: z.boolean(),
   skillMarketplaceIndex: z.string(),
   mcpServers: z
     .record(
@@ -296,6 +298,8 @@ const DEFAULT_CONFIG: NtoxConfig = {
   metaMistakesEnabled: true,
   metaMinConfidence: 0.5,
   skillAutoLearnEnabled: true,
+  skillSemanticMatchEnabled: true,
+  skillAutoAuthorEnabled: true,
   skillMarketplaceIndex: defaultMarketplaceIndex(),
   mcpServers: {},
   cognitiveEnabled: true,

@@ -4,6 +4,7 @@ import {
   shouldProposeSkill,
   MAX_SKILL_PROPOSALS_PER_SESSION,
 } from "../../skills/auto-learner.js";
+import { maybeAuthorSkillOnStruggle } from "../../skills/self-author.js";
 import { isRephrase, isThanked } from "../../mind/predictor.js";
 import { extractOpenLoops, normalizeLoopGoal } from "../../alive/open-loops.js";
 import type { Mind, MindTurnResult } from "../../mind/mind.js";
@@ -148,6 +149,23 @@ export async function runPostTurn(input: PostTurnInput): Promise<void> {
 
   if (cfg.skillAutoLearn !== false && callbacks.onSkillProposal) {
     scheduleSkillProposal(cfg, callbacks, runtime, input.lastTrace, fullResponse, wasCorrection);
+  }
+
+  if (cfg.skillAutoAuthorEnabled && cfg.skillRegistry && input.lastTrace) {
+    try {
+      await maybeAuthorSkillOnStruggle({
+        llm: cfg.llm,
+        registry: cfg.skillRegistry,
+        trace: input.lastTrace,
+        fullResponse,
+        corrected: wasCorrection,
+        falseSuccess: runtime.falseSuccessThisTurn,
+        toolFailure: toolExec.toolFailureThisTurn,
+        runtime,
+      });
+    } catch (e) {
+      console.error("[skill-author]", e);
+    }
   }
 
   if (callbacks.onProactiveSuggestion) {

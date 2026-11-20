@@ -1,4 +1,5 @@
 import { hashText } from "../../mind/util.js";
+import { LOCAL_MINILM_TAG } from "../../memory/embedding-service.js";
 import { buildNarrative } from "../../memory/narrative.js";
 import { renderPlanContext } from "../../tools/plan.js";
 import type { ContextKind } from "../../mind/types.js";
@@ -59,6 +60,23 @@ export async function buildSkillContext(ctx: TurnContext): Promise<void> {
       const def = cfg.skillLibrary.toSkillDefinition(m.skill);
       def.prompt = cfg.skillLibrary.getContextForQuery(m.skill.name, userInput) ?? def.description;
       skillMatches.push({ skill: def, confidence: m.confidence });
+    }
+
+    if (
+      cfg.skillSemanticMatchEnabled &&
+      ctx.queryEmbedding &&
+      (ctx.embeddingModel?.startsWith("remote:") || ctx.embeddingModel === LOCAL_MINILM_TAG)
+    ) {
+      try {
+        const semantic = await cfg.skillLibrary.findSemantic(ctx.queryEmbedding, ctx.embeddingModel, 5);
+        for (const match of semantic) {
+          const def = cfg.skillLibrary.toSkillDefinition(match.skill);
+          def.prompt = cfg.skillLibrary.getContextForQuery(match.skill.name, userInput) ?? def.description;
+          skillMatches.push({ skill: def, confidence: Math.min(0.95, 0.35 + match.similarity * 0.75) });
+        }
+      } catch (error) {
+        console.error("[skill-semantic]", error);
+      }
     }
   }
 

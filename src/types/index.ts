@@ -132,6 +132,11 @@ export interface NtoxConfig {
   metaMistakesEnabled: boolean;
   metaMinConfidence: number;
   skillAutoLearnEnabled: boolean;
+  /** Match skills with embedding similarity when the query uses a remote model;
+   *  keyword triggers remain the offline fallback. */
+  skillSemanticMatchEnabled: boolean;
+  /** Save a reusable skill automatically after a struggling turn (rate-limited). */
+  skillAutoAuthorEnabled: boolean;
   skillMarketplaceIndex: string;
   mcpServers?: Record<string, McpServerEntry>;
   cognitiveEnabled: boolean;
@@ -449,6 +454,8 @@ export interface AgentTurnTrace {
   searchUsed: boolean;
   cognitiveSummary?: string;
   skill?: { name: string; confidence: number };
+  /** Skill written to disk automatically after a struggling turn. */
+  authoredSkill?: string;
   toolCalls: AgentToolTrace[];
   workspaceProfile?: { id: string; name: string; workspaceRoot: string };
   policyDecisions: PolicyDecision[];

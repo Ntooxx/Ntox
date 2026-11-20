@@ -43,6 +43,8 @@ const valid: NtoxConfig = {
   metaMistakesEnabled: true,
   metaMinConfidence: 0.5,
   skillAutoLearnEnabled: true,
+  skillSemanticMatchEnabled: true,
+  skillAutoAuthorEnabled: true,
   skillMarketplaceIndex: "https://example.com/index.json",
   cognitiveEnabled: true,
   theoryEnabled: true,

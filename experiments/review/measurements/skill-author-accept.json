@@ -1,0 +1,204 @@
+{
+  "status": "measured",
+  "mode": "deterministic-harness",
+  "generatedAt": "2026-11-20T00:47:11.819Z",
+  "heldOutStruggles": 12,
+  "authored": 12,
+  "accepted": 12,
+  "acceptanceRate": 1,
+  "rubric": [
+    "validKebabName",
+    "descriptiveDescription",
+    "selfAuthoredCategory",
+    "actionablePrompt",
+    "hasTriggers",
+    "hasTools",
+    "hasExample"
+  ],
+  "target": {
+    "acceptanceRateAtLeast": 0.8
+  },
+  "note": "Deterministic harness uses a fixed synthetic provider and therefore measures authoring plumbing and rubric conformance, not model-authored quality. Re-run with NTOX_LIVE=1 against a real provider for the live quality number (Phase 1).",
+  "evaluations": [
+    {
+      "id": "h01",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-deploy-the-staging-build-and"
+    },
+    {
+      "id": "h02",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-recover-the-jsonl-memory-sto"
+    },
+    {
+      "id": "h03",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-triage-a-failing-integration"
+    },
+    {
+      "id": "h04",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-rotate-the-expired-api-crede"
+    },
+    {
+      "id": "h05",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-migrate-episode-vectors-to-a"
+    },
+    {
+      "id": "h06",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-diagnose-a-provider-timeout"
+    },
+    {
+      "id": "h07",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-reconcile-two-conflicting-me"
+    },
+    {
+      "id": "h08",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-rebuild-the-offline-semantic"
+    },
+    {
+      "id": "h09",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-investigate-intermittent-web"
+    },
+    {
+      "id": "h10",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-refactor-an-oversized-module"
+    },
+    {
+      "id": "h11",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-validate-a-cost-budget-befor"
+    },
+    {
+      "id": "h12",
+      "authored": true,
+      "accepted": true,
+      "checks": {
+        "validKebabName": true,
+        "descriptiveDescription": true,
+        "selfAuthoredCategory": true,
+        "actionablePrompt": true,
+        "hasTriggers": true,
+        "hasTools": true,
+        "hasExample": true
+      },
+      "name": "recover-handle-a-tool-output-that-co"
+    }
+  ]
+}

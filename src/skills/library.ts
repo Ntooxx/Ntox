@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { NTOX_DIR } from "../core/config.js";
 import { cosineSimilarity } from "../memory/episodic.js";
 import { extractMdSection } from "./markdown.js";
+import type { SkillSemanticIndex } from "./semantic-index.js";
 import type { SkillDefinition } from "../types/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,9 +33,11 @@ export class SkillLibrary {
   private loaded = false;
   private contentCache = new Map<string, string>();
   private externalPath: string;
+  private semanticIndex?: SkillSemanticIndex;
 
-  constructor(externalPath?: string) {
+  constructor(externalPath?: string, semanticIndex?: SkillSemanticIndex) {
     this.externalPath = externalPath || BUNDLED_SKILLS_PATH;
+    this.semanticIndex = semanticIndex;
   }
 
   private ensureDir(): void {
@@ -375,6 +378,24 @@ export class SkillLibrary {
     const voices = skill.voices.length > 0 ? ` [${skill.voices.join(", ")}]` : "";
     const combos = skill.combos.length > 0 ? `\n  Combos: ${skill.combos.slice(0, 3).join(", ")}` : "";
     return `${chalkLabel(skill.name)} (${skill.importance}/10) — ${skill.domain}${voices}\n  ${skill.description}${combos}`;
+  }
+
+  async findSemantic(
+    queryEmbedding: number[],
+    queryModel: string | undefined,
+    maxResults: number = 5,
+  ): Promise<{ skill: SkillIndex; similarity: number }[]> {
+    this.ensureLoaded();
+    if (!this.semanticIndex) return [];
+    const candidates = Array.from(this.index.values()).map((skill) => ({
+      name: skill.name,
+      description: skill.description,
+    }));
+    const matches = await this.semanticIndex.find(candidates, queryEmbedding, queryModel, maxResults);
+    return matches.flatMap((match) => {
+      const skill = this.index.get(match.name);
+      return skill ? [{ skill, similarity: match.similarity }] : [];
+    });
   }
 
   findByTrigger(query: string): { skill: SkillIndex; confidence: number }[] {

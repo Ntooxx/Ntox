@@ -3,7 +3,9 @@ import type { LLMClient } from "../core/llm.js";
 import type { AgentToolTrace, SkillDefinition } from "../types/index.js";
 import {
   shouldProposeSkill,
+  shouldAuthorSkillOnStruggle,
   proposeSkillFromTurn,
+  authorSkillFromStruggle,
   findTriggerConflict,
   renderSkillProposal,
   MAX_SKILL_PROPOSALS_PER_SESSION,
@@ -213,5 +215,73 @@ describe("renderSkillProposal", () => {
     expect(text).toContain("/skill save migrate-test-runner");
     expect(text).toContain("migrate tests");
     expect(text).toContain("read, edit, shell");
+  });
+});
+
+describe("shouldAuthorSkillOnStruggle", () => {
+  const struggling = {
+    ...turnContext({ falseSuccess: true }),
+    toolFailures: 0,
+    retries: 0,
+    critiqueGaps: 0,
+  };
+
+  it("accepts a false-success struggle", () => {
+    expect(shouldAuthorSkillOnStruggle(struggling)).toEqual({ ok: true });
+  });
+
+  it("accepts failed tool calls", () => {
+    expect(
+      shouldAuthorSkillOnStruggle({
+        ...struggling,
+        falseSuccess: false,
+        toolCalls: [toolCall("shell", false)],
+        toolFailures: 1,
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it("rejects turns with no struggle signal", () => {
+    const result = shouldAuthorSkillOnStruggle({ ...struggling, falseSuccess: false });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("no struggle");
+  });
+
+  it("respects the cooldown", () => {
+    const result = shouldAuthorSkillOnStruggle({ ...struggling, turnsSinceLastProposal: 2 });
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("authorSkillFromStruggle", () => {
+  it("generates a self-authored skill with failure context", async () => {
+    const llm = {
+      stream: async function* () {
+        yield {
+          delta: JSON.stringify({
+            name: "recover-from-failure",
+            description: "Recover from a failed tool call",
+            prompt: "Inspect the failure and retry with corrected arguments.",
+            triggers: ["tool failed"],
+            tools: ["shell"],
+          }),
+        };
+      },
+    } as unknown as LLMClient;
+
+    const skill = await authorSkillFromStruggle(llm, {
+      userInput: "debug the failing build pipeline",
+      response: "x".repeat(300),
+      toolCalls: [toolCall("shell", false)],
+      corrected: false,
+      falseSuccess: false,
+      toolFailures: 1,
+      retries: 1,
+      critiqueGaps: 2,
+    });
+
+    expect(skill?.name).toBe("recover-from-failure");
+    expect(skill?.category).toBe("self-authored");
+    expect(skill?.triggers).toEqual(["tool failed"]);
   });
 });

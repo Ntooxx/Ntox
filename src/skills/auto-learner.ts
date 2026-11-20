@@ -37,6 +37,59 @@ export function shouldProposeSkill(ctx: SkillTurnContext): SkillGateCheck {
   return { ok: true };
 }
 
+const AUTHOR_TURN_COOLDOWN = 12;
+
+export interface SkillStruggleContext extends SkillTurnContext {
+  toolFailures: number;
+  retries: number;
+  critiqueGaps: number;
+}
+
+export function shouldAuthorSkillOnStruggle(ctx: SkillStruggleContext): SkillGateCheck {
+  const struggled =
+    ctx.falseSuccess || ctx.corrected || ctx.toolFailures > 0 || ctx.retries > 0 || ctx.critiqueGaps > 0;
+  if (!struggled) return { ok: false, reason: "no struggle signal in this turn" };
+  if (ctx.userInput.trim().length < 15) return { ok: false, reason: "the request is trivial" };
+  if (ctx.turnsSinceLastProposal !== null && ctx.turnsSinceLastProposal < AUTHOR_TURN_COOLDOWN) {
+    return {
+      ok: false,
+      reason: `${ctx.turnsSinceLastProposal} turns since the last authored skill (cooldown ${AUTHOR_TURN_COOLDOWN})`,
+    };
+  }
+  return { ok: true };
+}
+
+const STRUGGLE_PROMPT = `You are a skill curator for Ntox, a CLI agent. The agent STRUGGLED on this exchange.
+Write a reusable skill that captures the correct procedure so the same struggle is avoided next time.
+
+Failure signals: false-success retry={FALSE_SUCCESS}, user correction={CORRECTED}, failed tool calls={TOOL_FAILURES}, retries={RETRIES}, critique gaps={CRITIQUE_GAPS}
+
+User request: {REQUEST}
+
+Tools used (in order):
+{TOOL_TRACE}
+
+Final response (excerpt):
+{RESPONSE}
+
+Rules:
+- Extract the repeatable procedure that SHOULD have been followed: which tools, which order, and what to verify.
+- Focus on the failure: if a tool failed, record how to detect and recover from it.
+- The prompt field must be written as instructions TO Ntox.
+- One-off answers and generic chat are not skills.
+- Return ONLY JSON, no extra text.
+{"skip": true} if there is no reusable lesson.
+Otherwise:
+{
+  "name": "<short kebab-case name>",
+  "description": "<one-line description>",
+  "category": "custom",
+  "prompt": "<detailed step-by-step instructions for the AI>",
+  "triggers": ["<2-5 phrases that should activate this skill>"],
+  "tools": ["<tool names needed>"],
+  "examples": ["<1-3 example queries>"]
+}`;
+
 const PROPOSAL_PROMPT = `You are a skill curator for Ntox, a CLI agent. Review one completed exchange and decide whether it shows a repeatable procedure worth saving as a reusable skill.
 
 User request: {REQUEST}
@@ -85,15 +138,7 @@ interface ProposalParse {
   examples?: unknown;
 }
 
-export async function proposeSkillFromTurn(
-  llm: LLMClient,
-  ctx: Pick<SkillTurnContext, "userInput" | "response" | "toolCalls">,
-): Promise<SkillDefinition | null> {
-  const toolTrace = ctx.toolCalls.map((call) => `- ${call.name}: ${compactToolArgs(call.args)}`).join("\n");
-  const prompt = PROPOSAL_PROMPT.replace("{REQUEST}", ctx.userInput.slice(0, 500))
-    .replace("{TOOL_TRACE}", toolTrace.slice(0, 3000))
-    .replace("{RESPONSE}", ctx.response.slice(0, RESPONSE_EXCERPT_MAX));
-
+async function generateSkillFromPrompt(llm: LLMClient, prompt: string): Promise<SkillDefinition | null> {
   let fullText = "";
   try {
     const stream = llm.stream([{ role: "user" as const, content: prompt }], "");
@@ -140,6 +185,39 @@ export async function proposeSkillFromTurn(
     updated: Date.now(),
     usageCount: 0,
   };
+}
+
+export async function proposeSkillFromTurn(
+  llm: LLMClient,
+  ctx: Pick<SkillTurnContext, "userInput" | "response" | "toolCalls">,
+): Promise<SkillDefinition | null> {
+  const toolTrace = ctx.toolCalls.map((call) => `- ${call.name}: ${compactToolArgs(call.args)}`).join("\n");
+  const prompt = PROPOSAL_PROMPT.replace("{REQUEST}", ctx.userInput.slice(0, 500))
+    .replace("{TOOL_TRACE}", toolTrace.slice(0, 3000))
+    .replace("{RESPONSE}", ctx.response.slice(0, RESPONSE_EXCERPT_MAX));
+  return generateSkillFromPrompt(llm, prompt);
+}
+
+export async function authorSkillFromStruggle(
+  llm: LLMClient,
+  ctx: Pick<
+    SkillStruggleContext,
+    "userInput" | "response" | "toolCalls" | "corrected" | "falseSuccess" | "toolFailures" | "retries" | "critiqueGaps"
+  >,
+): Promise<SkillDefinition | null> {
+  const toolTrace = ctx.toolCalls
+    .map((call) => `- ${call.name} (${call.success === false ? "FAILED" : "ok"}): ${compactToolArgs(call.args)}`)
+    .join("\n");
+  const prompt = STRUGGLE_PROMPT.replace("{FALSE_SUCCESS}", String(ctx.falseSuccess))
+    .replace("{CORRECTED}", String(ctx.corrected))
+    .replace("{TOOL_FAILURES}", String(ctx.toolFailures))
+    .replace("{RETRIES}", String(ctx.retries))
+    .replace("{CRITIQUE_GAPS}", String(ctx.critiqueGaps))
+    .replace("{REQUEST}", ctx.userInput.slice(0, 500))
+    .replace("{TOOL_TRACE}", toolTrace.slice(0, 3000))
+    .replace("{RESPONSE}", ctx.response.slice(0, RESPONSE_EXCERPT_MAX));
+  const skill = await generateSkillFromPrompt(llm, prompt);
+  return skill ? { ...skill, category: "self-authored" } : null;
 }
 
 export function findTriggerConflict(candidate: SkillDefinition, existing: SkillDefinition[]): string | null {

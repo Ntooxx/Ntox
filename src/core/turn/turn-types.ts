@@ -20,6 +20,9 @@ export interface TurnRuntime {
   skillProposalTurn: number;
   lastSkillProposalTurn: number | null;
   skillProposalsThisSession: number;
+  skillAuthorTurn: number;
+  lastSkillAuthorTurn: number | null;
+  skillAuthorsThisSession: number;
   surpriseNotesThisSession: number;
   surpriseReflectionsThisSession: number;
 }
