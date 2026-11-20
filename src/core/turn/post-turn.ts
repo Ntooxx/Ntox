@@ -7,6 +7,7 @@ import {
 import { maybeAuthorSkillOnStruggle } from "../../skills/self-author.js";
 import { proposeProcedureCandidate } from "../../memory/procedure-candidates.js";
 import type { ProcedureStep } from "../../memory/procedure-store.js";
+import { redactValue } from "../redact.js";
 import { isRephrase, isThanked } from "../../mind/predictor.js";
 import { extractOpenLoops, normalizeLoopGoal } from "../../alive/open-loops.js";
 import type { Mind, MindTurnResult } from "../../mind/mind.js";
@@ -19,7 +20,7 @@ import type { SelfAwareness } from "../../meta/self-aware.js";
 import type { NtoxCognitiveLayer } from "../../cognition/layer.js";
 import type { NtoxAliveBridge } from "../../alive/ntox.js";
 import type { AlivePulse } from "../../alive/engine.js";
-import type { Message, AgentTurnTrace } from "../../types/index.js";
+import type { AgentToolTrace, Message, AgentTurnTrace } from "../../types/index.js";
 import type { AgentCallbacks, AgentConfig } from "../agent.js";
 import type { ToolExecContext } from "./tool-executor.js";
 import type { TurnRuntime } from "./turn-types.js";
@@ -55,6 +56,24 @@ export interface PostTurnInput extends PostTurnInfo {
   toolExec: ToolExecContext;
   manageContextWindow: () => Promise<void>;
   publishAliveActions: (pulse: AlivePulse, callbacks: AgentCallbacks) => void;
+}
+
+/** Build procedure steps from a trace, redacting any secrets before persistence. */
+export function buildProcedureSteps(toolCalls: readonly AgentToolTrace[] | undefined): ProcedureStep[] {
+  return (toolCalls ?? [])
+    .filter((call) => call.success === true && Boolean(call.name))
+    .slice(0, 20)
+    .map((call, index) => {
+      const safeArgs = redactValue(
+        call.args && typeof call.args === "object" && !Array.isArray(call.args) ? call.args : {},
+      ) as Record<string, unknown>;
+      return {
+        id: `step_${index + 1}`,
+        description: `${call.name} ${JSON.stringify(safeArgs).slice(0, 200)}`.trim(),
+        tool: call.name,
+        args: safeArgs,
+      };
+    });
 }
 
 function scheduleSkillProposal(
@@ -274,18 +293,7 @@ export async function runPostTurn(input: PostTurnInput): Promise<void> {
         !wasCorrection &&
         !runtime.falseSuccessThisTurn
       ) {
-        const steps: ProcedureStep[] = (input.lastTrace.toolCalls ?? [])
-          .filter((call) => call.success === true && Boolean(call.name))
-          .slice(0, 20)
-          .map((call, index) => ({
-            id: `step_${index + 1}`,
-            description: `${call.name} ${JSON.stringify(call.args ?? {}).slice(0, 200)}`.trim(),
-            tool: call.name,
-            args:
-              call.args && typeof call.args === "object" && !Array.isArray(call.args)
-                ? (call.args as Record<string, unknown>)
-                : {},
-          }));
+        const steps = buildProcedureSteps(input.lastTrace.toolCalls);
         const candidate = proposeProcedureCandidate({
           store: cfg.procedureStore,
           taskId: input.runTurnId,

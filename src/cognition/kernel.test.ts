@@ -81,14 +81,14 @@ describe("CognitiveKernel", () => {
       .getPatterns()
       .getAll?.()
       .find((p) => p.name.includes("rust") || p.name.includes("design"));
-    expect(kernel.getRequireEvidenceForPromotion()).toBe(true);
+    expect(kernel.getRequireEvidenceForPromotion()).toBe(false);
     if (target) expect((target.objectiveHits ?? 0)).toBeGreaterThanOrEqual(1);
   });
 
-  it("exposes the evidence-required flag", () => {
-    expect(kernel.getRequireEvidenceForPromotion()).toBe(true);
-    kernel.setRequireEvidenceForPromotion(false);
+  it("exposes the evidence-required flag (off by default)", () => {
     expect(kernel.getRequireEvidenceForPromotion()).toBe(false);
+    kernel.setRequireEvidenceForPromotion(true);
+    expect(kernel.getRequireEvidenceForPromotion()).toBe(true);
   });
 
   it("exposes sub-components", () => {
