@@ -21,6 +21,7 @@ NTOX is a self-improving AI agent that runs locally. Unlike standard LLM tool lo
 - **Learns from experience** — corrections outrank conflicting facts, patterns compile into reusable skills
 - **Remembers everything** — persistent episodic memory with semantic search: remote embeddings when a provider is configured, local-hash fallback offline, every vector tagged with the embedding model that produced it
 - **Self-corrects** — detects shallow reasoning and retries with deeper analysis
+- **Writes its own skills** — after a struggling turn it saves a reusable skill to disk (rate-limited, duplicate-protected)
 - **Works everywhere** — terminal REPL, Telegram, Discord, WhatsApp, Slack, Web UI, Desktop app
 - **Stays local** — runs on your machine, your data never leaves unless you configure a remote provider
 
@@ -89,7 +90,7 @@ ntox          # Start chatting
 | **Multi-Channel Gateway** | Telegram, Discord, WhatsApp, Slack, Web UI — all sharing one agent runtime |
 | **Cognitive Kernel** | Compresses queries to primitives, matches patterns in 8D vector space, auto-compiles frequent patterns |
 | **Persistent Memory** | Every exchange embedded and searchable. Corrections outrank conflicting facts. Embeddings are remote-first with a local-hash fallback; every vector is tagged with the model that produced it, and `ntox memory reembed` migrates older entries onto the active model. |
-| **Skill Library** | 103 reasoning skills across 18 categories, matched semantically at prompt time |
+| **Skill Library** | 103 reasoning skills across 18 categories, matched by embeddings when a remote model is configured (keyword triggers offline) |
 | **MCP Bridge** | Use external MCP servers as tools, serve NTOX skills to any MCP host |
 | **Workspace Policy** | Profiles constrain reads/writes/shell paths. Auto-checkpoints before edits. |
 | **Docker Sandboxing** | Optional container isolation for shell commands |
@@ -105,17 +106,65 @@ ntox          # Start chatting
 | Telegram | Core | Voice, approvals, image pipelines |
 | Web UI | Core | Chat + static assets |
 | HTTP API | Core | REST/SSE server |
-| Discord | Best-effort | Community-maintained |
-| WhatsApp | Best-effort | Community-maintained |
-| Slack | Best-effort | Community-maintained |
-| Electron desktop | Best-effort | Thin client over the local API; auth/landscape smoke tests only, no UI render coverage |
-| MCP bridge | Best-effort | External MCP servers as tools |
-| Marketplace | Best-effort | Skill distribution surface; bundled index for offline lookup |
+| Discord | Best-effort | Gateway contract tests; community-maintained |
+| WhatsApp | Best-effort | Gateway + channel contract tests; approvals via reply buttons |
+| Slack | Best-effort | Socket-mode contract tests; allowlist enforced |
+| MCP bridge | Best-effort | In-memory MCP contract tests; policy and approval covered |
+| Marketplace | Best-effort | Bundled offline index + lookup/fetch contract tests |
+
+Electron desktop is **Experimental** and is not part of the shipped support
+matrix. It is a thin client over the local API with auth/landscape smoke tests
+only and no UI render coverage.
 
 Core surfaces gate every release. Best-effort surfaces merge only with tests,
-a README section, and a named owner. Non-shipping directories (`experiments/`,
-`glyphs/`, `site/`, `desktop/`) are sandboxed and excluded from the published
-npm package; the `marketplace/` index is bundled for offline skill discovery.
+a README section, and a named owner (see `.github/CODEOWNERS`). Non-shipping
+directories (`experiments/`, `glyphs/`, `site/`, `desktop/`) are sandboxed and
+excluded from the published npm package; the `marketplace/` index is bundled
+for offline skill discovery.
+
+### Best-effort surface details
+
+#### Discord
+
+Setup: set `DISCORD_BOT_TOKEN`, then `npm run gateway discord`. Contract tests
+cover token validation, typing, message handling, and error/reconnect paths.
+Not supported: slash commands, threads, voice channels, component buttons, or
+role-based access control. Known limit: approvals are handled in the CLI/API,
+not in Discord; there is no in-channel approval UI.
+
+#### WhatsApp
+
+Setup: configure the Meta Cloud API token, phone id, and webhook verify token;
+expose the webhook over HTTPS. Contract tests cover signature validation, text
+and caption messages, voice transcription, image attachments, approval reply
+buttons, and failure paths. Not supported: groups, status updates, calls, or
+outbound template messages outside a reply. Known limit: media is stored in the
+local NTOX directory and is subject to its retention policy.
+
+#### Slack
+
+Setup: provide a bot token and app token for socket mode, plus an optional
+channel allowlist. Contract tests cover connect, DM replies, mention gating,
+allowlist refusals, error replies, and reconnect. Not supported: slash commands,
+modals, threads, or file uploads. Known limit: channel messages are answered
+only when the bot is mentioned; approvals are not surfaced in-channel.
+
+#### MCP bridge
+
+Setup: add `mcpServers` entries to the NTOX config, each with a stdio `command`
+or an HTTP `url`. Contract tests cover connect/list, tool execution, argument
+errors, policy denials with interactive approval, disconnect, and reconnect.
+Not supported: OAuth flows, resource/prompt negotiation, sampling, or adding
+servers at runtime. Known limit: qualified tool names are truncated to 64
+characters and remote arguments are validated by the provider schema.
+
+#### Marketplace
+
+Setup: the bundled `marketplace/index.json` works offline; an HTTP index can be
+configured for community skills. Contract tests cover index parsing, lookup,
+listing, cache/TTL behaviour, stale fallback, and private-network URL blocking.
+Not supported: signed packages, version pinning, automatic updates, or paid
+skills. Known limit: entries are community-provided and unverified.
 
 ---
 

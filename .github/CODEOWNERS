@@ -1,2 +1,13 @@
 # Default owners
 * @Ntooxx
+
+# Best-effort surface owners
+src/gateway/discord.ts @Ntooxx
+src/gateway/discord.test.ts @Ntooxx
+src/gateway/whatsapp.ts @Ntooxx
+src/gateway/whatsapp.channel.ts @Ntooxx
+src/gateway/slack.ts @Ntooxx
+src/mcp/bridge.ts @Ntooxx
+src/mcp/server.ts @Ntooxx
+src/skills/marketplace.ts @Ntooxx
+desktop/ @Ntooxx

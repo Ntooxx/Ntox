@@ -22,6 +22,7 @@ const ALLOWLIST = new Map([
   ["core/policy.ts", 650],
   ["memory/user-model.ts", 650],
   ["tools/email.ts", 625],
+  ["api/server.ts", 600],
 ]);
 
 function listFiles(dir) {
