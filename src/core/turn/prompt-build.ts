@@ -4,12 +4,21 @@ import { learnDomainKeyword, findClosestDomain } from "../../cognition/domains.j
 import { renderPromptMemoryItems } from "../../memory/episodic.js";
 import { renderTheoryItems } from "../../memory/theory-memory.js";
 import { hashText } from "../../mind/util.js";
+import { decideRouting } from "../../evaluation/routing.js";
 import type { QueryType } from "../../types/index.js";
 import type { ContextKind } from "../../mind/types.js";
 import type { TurnContext } from "./turn-types.js";
 
 export async function buildTurnPhase1to5(ctx: TurnContext): Promise<void> {
   const { cfg, callbacks, userInput, responseMode } = ctx;
+  const routing = decideRouting(userInput, cfg.routingMode);
+  ctx.routing = routing;
+  if (ctx.currentTrace) {
+    ctx.currentTrace.routing = { mode: routing.mode, route: routing.route, confidence: routing.confidence };
+  }
+  if (routing.suppressTools && cfg.directSystemPrompt) {
+    ctx.systemPromptOverride = cfg.directSystemPrompt;
+  }
   // 1. Strategy
   let queryType: QueryType = "general";
   let strategyPrompt = "";
@@ -141,9 +150,13 @@ export async function buildTurnPhase1to5(ctx: TurnContext): Promise<void> {
     relevance: number;
   }[] = [];
 
-  const embedPromise = cfg.memoryEnabled ? cfg.llm.embedWithMeta(userInput).catch(() => null) : Promise.resolve(null);
+  const embedPromise =
+    cfg.memoryEnabled && !routing.suppressCognitiveSections
+      ? cfg.llm.embedWithMeta(userInput).catch(() => null)
+      : Promise.resolve(null);
 
-  const [searchCtx, embedMeta] = await Promise.all([ctx.resolveSearchContext(userInput), embedPromise]);
+  const searchPromise = routing.suppressSearch ? Promise.resolve("") : ctx.resolveSearchContext(userInput);
+  const [searchCtx, embedMeta] = await Promise.all([searchPromise, embedPromise]);
   const searchContext = searchCtx;
   if (ctx.currentTrace) ctx.currentTrace.searchUsed = searchContext.length > 0;
   const queryEmbedding: number[] | null = embedMeta?.vector ?? null;
@@ -161,6 +174,7 @@ export async function buildTurnPhase1to5(ctx: TurnContext): Promise<void> {
       turnId: ctx.runTurnId,
       embedding: queryEmbedding,
       embeddingModel,
+      includeSections: !routing.suppressCognitiveSections,
     });
     for (const section of layerCtx.sections) {
       if (section.name === "corrections") mistakesContext = section.content;
@@ -179,8 +193,9 @@ export async function buildTurnPhase1to5(ctx: TurnContext): Promise<void> {
     }
   } catch (e) {
     console.error("[cognitive-layer]", e);
-    if (cfg.mistakesEnabled) mistakesContext = cfg.mistakes.buildMistakesContext(userInput);
-    if (cfg.memoryEnabled) {
+    if (!routing.suppressCognitiveSections && cfg.mistakesEnabled)
+      mistakesContext = cfg.mistakes.buildMistakesContext(userInput);
+    if (!routing.suppressCognitiveSections && cfg.memoryEnabled) {
       memoryContext = cfg.memory.buildMemoryContext(
         queryEmbedding,
         cfg.memoryRetrievalCount,
@@ -188,12 +203,12 @@ export async function buildTurnPhase1to5(ctx: TurnContext): Promise<void> {
         userInput,
       );
     }
-    if (cfg.memoryEnabled && (cfg.theoryEnabled ?? true)) {
+    if (!routing.suppressCognitiveSections && cfg.memoryEnabled && (cfg.theoryEnabled ?? true)) {
       theoryContext = ctx.theoryMemory.buildTheoryContext(userInput);
     }
   }
 
-  if (ctx.mindTurn && ctx.mind) {
+  if (ctx.mindTurn && ctx.mind && !routing.suppressCognitiveSections) {
     if (ctx.mindTurn.disabledKind === "memory") {
       memoryContext = "";
     } else if (cfg.memoryEnabled) {

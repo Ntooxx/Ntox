@@ -102,7 +102,5 @@ export function verifyAndPromoteProcedure(input: VerifyAndPromoteInput): VerifyA
   };
   const signature = signEvidence(content, input.store.keyDir);
   const promotion = input.store.promoteWithEvidence(procedure.id, { ...content, harnessSignature: signature });
-  return promotion.ok
-    ? { ok: true, state: promotion.state, signature }
-    : { ok: false, reason: promotion.reason };
+  return promotion.ok ? { ok: true, state: promotion.state, signature } : { ok: false, reason: promotion.reason };
 }

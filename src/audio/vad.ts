@@ -1,4 +1,8 @@
-export function findSpeechBounds(samples: Int16Array, threshold = 400, window = 160): { start: number; end: number } | null {
+export function findSpeechBounds(
+  samples: Int16Array,
+  threshold = 400,
+  window = 160,
+): { start: number; end: number } | null {
   let start = -1;
   let end = -1;
   for (let index = 0; index + window <= samples.length; index += window) {

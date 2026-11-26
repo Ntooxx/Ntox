@@ -70,6 +70,7 @@ console.log("Built cognition and alive artifact smoke test passed.");
 runNpm("root typecheck", ["run", "typecheck"], workspace);
 runNpm("root lint", ["run", "lint"], workspace);
 run("size budget", process.execPath, [resolve(workspace, "scripts", "size-budget.mjs")], workspace);
+run("trust anchor", process.execPath, [resolve(workspace, "scripts", "check-trust-anchor.mjs")], workspace);
 runNpm("root tests", ["test"], workspace);
 runNpm("root build", ["run", "build"], workspace);
 runNpm("root format check", ["run", "format:check"], workspace);

@@ -6,9 +6,24 @@ export const MIN_MEANINGFUL_SCORE = 0.2;
 /** Objective hits required before a pattern may be promoted to a skill. */
 export const MIN_OBJECTIVE_HITS = 3;
 
+/** Signed objective score plus the provenance that makes it auditable. */
+export interface ObjectiveEvidence {
+  /** Score in -1..1, ready for the ledger and the cognitive kernel. */
+  score: number;
+  provenance: EvidenceProvenance;
+}
+
 /** Map an `ObjectiveResult.score` (0..1) into the ledger's signed score range (-1..1). */
 export function objectiveScoreFromResult(result: ObjectiveResult): number {
   return clamp(result.score * 2 - 1, -1, 1);
+}
+
+/** Build signed objective evidence from an evaluator result and its provenance. */
+export function objectiveEvidenceFromResult(
+  result: ObjectiveResult,
+  provenance: EvidenceProvenance,
+): ObjectiveEvidence {
+  return { score: objectiveScoreFromResult(result), provenance };
 }
 
 /** Whether a signed objective score carries enough signal to train or promote. */

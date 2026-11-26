@@ -25,11 +25,7 @@ function isHoldoutId(id: string, fingerprint: string, ratio: number): boolean {
 }
 
 /** Deterministically split task ids into train/holdout for a given fingerprint. */
-export function splitHoldout(
-  ids: string[],
-  fingerprint: string,
-  ratio = 0.2,
-): { train: string[]; holdout: string[] } {
+export function splitHoldout(ids: string[], fingerprint: string, ratio = 0.2): { train: string[]; holdout: string[] } {
   const unique = Array.from(new Set(ids)).sort();
   const train: string[] = [];
   const holdout: string[] = [];

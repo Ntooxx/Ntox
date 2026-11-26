@@ -35,4 +35,12 @@ export { createStreamingVoicePipeline } from "./stream.js";
 export type { StreamingVoiceOptions, StreamingVoicePipeline } from "./stream.js";
 export { findSpeechBounds, isSilent } from "./vad.js";
 export { assertAudioToolAllowed, containsAudioData, stripAudioData } from "./policy.js";
-export type { AudioConfig, AudioFormat, AudioProvider, SynthesizeOptions, SynthesizeResult, TranscribeOptions, TranscribeResult } from "./types.js";
+export type {
+  AudioConfig,
+  AudioFormat,
+  AudioProvider,
+  SynthesizeOptions,
+  SynthesizeResult,
+  TranscribeOptions,
+  TranscribeResult,
+} from "./types.js";

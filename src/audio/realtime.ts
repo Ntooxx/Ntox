@@ -44,8 +44,7 @@ export function createRealtimeSession(config: AudioConfig, options: RealtimeSess
   const base = (options.baseUrl || "wss://api.openai.com/v1/realtime").replace(/\/$/, "");
   const model = options.model || "gpt-4o-realtime-preview";
   const url = `${base}?model=${encodeURIComponent(model)}`;
-  const factory =
-    options.socketFactory ?? ((target: string) => defaultSocketFactory(target, apiKey));
+  const factory = options.socketFactory ?? ((target: string) => defaultSocketFactory(target, apiKey));
   const socket = factory(url);
 
   const audioListeners: ((bytes: Uint8Array) => void)[] = [];
@@ -90,9 +89,7 @@ export function createRealtimeSession(config: AudioConfig, options: RealtimeSess
   return {
     ready,
     sendAudio(bytes) {
-      socket.send(
-        JSON.stringify({ type: "input_audio_buffer.append", audio: Buffer.from(bytes).toString("base64") }),
-      );
+      socket.send(JSON.stringify({ type: "input_audio_buffer.append", audio: Buffer.from(bytes).toString("base64") }));
     },
     commitAudio() {
       socket.send(JSON.stringify({ type: "input_audio_buffer.commit" }));

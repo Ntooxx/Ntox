@@ -6,16 +6,17 @@ Documento di progetto — collegato al baseline `experiments/alive/2026-10-18-ba
 
 ## Stato di implementazione
 
-**Fatto e testato (1717 test verdi, typecheck pulito, lint 0 errori):**
+**Fatto e testato (typecheck pulito, lint 0 errori, suite di test verde):**
 
-- P0 — `EvidenceProvenance` in `TurnSignals` (`src/mind/types.ts`), `objectiveScore` già supportato dal ledger (`src/mind/outcome-ledger.ts:42`), adapter `src/mind/evidence.ts` (`objectiveScoreFromResult`, `meaningfulObjective`, `buildEvidenceProvenance`), metriche oggettive in `LedgerStats` (`objectiveRows/objectiveRate/objectiveAvg`).
+- P0 — `EvidenceProvenance` in `TurnSignals` (`src/mind/types.ts`), `objectiveScore` già supportato dal ledger (`src/mind/outcome-ledger.ts:42`), adapter `src/mind/evidence.ts` (`objectiveScoreFromResult`, `objectiveEvidenceFromResult`, `meaningfulObjective`, `buildEvidenceProvenance`), metriche oggettive in `LedgerStats` (`objectiveRows/objectiveRate/objectiveAvg`). `self-play.ts` usa l'adapter e registra la provenance.
 - P0/P1 — gate nel kernel: `CognitiveKernel.requireEvidenceForPromotion` (default **on**): la critica euristica può regolare la forza dei pattern ma **non** promuove skill al registry; la promozione richiede `objectiveHits >= 3` (vedi `hasSufficientObjectiveEvidence`). `PatternStore.recordObjective` traccia le evidenze; `getAll()` per ispezione.
+- P0 — canale dell'evidenza cablato: `runPostTurn` (`src/core/turn/post-turn.ts`) accetta `PostTurnInfo.objective`, lo passa a `NtoxCognitiveLayer.afterTurn` e a `kernel.process(query, response, objective)`, e lo registra nel ledger con provenance. I turni senza evaluator esterno passano `null`: non viene fabbricata evidenza.
 - P2 — `src/evaluation/holdout.ts`: `splitHoldout` (split deterministico per fingerprint), `isHoldout`, `transferSummary`.
 - P3 — `src/meta/autonomy.ts`: `enforceBudget` e `calibrationGuardrail` (blocca l'espansione se ECE peggiora mentre l'identità diverge).
 
 **Resta da cablare (mancante per il giro completo):**
 
-- Alimentare `objectiveScore` dal turno normale (oggi solo `self-play.ts:64` lo imposta): chiamare gli evaluator e passare l'evidenza a `kernel.process(query, response, objective)`.
+- Produrre `objectiveScore` nel turno conversazionale: l'unico produttore reale in-repo resta `self-play.ts`; le conversazioni normali non hanno ground truth e passano `null`. Servono check espliciti con artifact verificabile prima di contare su evidenza esterna nelle chat.
 - Collegare `splitHoldout` all'esecuzione reale di `evaluation/curriculum.ts` + report ALIVE.
 - Collegare `enforceBudget`/`calibrationGuardrail` a `idle`/`self-play`.
 
@@ -81,7 +82,7 @@ Failure mode: una risposta lunga e priva di esitazioni viene premiata anche se �
 - `registry.add` in `src/cognition/kernel.ts:104` viene chiamato solo dopo il gate.
 - `src/skills/lifecycle.ts` + `src/meta/effectiveness.ts`: pensionare (o degradare) le skill con tasso di successo oggettivo mobile sotto soglia su K tentativi; il ritiro è un evento registrato nel ledger, non una cancellazione silenziosa.
 
-**Accettazione:** ogni skill compilata o procedura promossa ha evidenza firmata/verificabile collegata; nessun agent-runtime module importa `procedure-harness.ts`.
+**Accettazione:** ogni skill compilata o procedura promossa ha evidenza firmata/verificabile collegata; nessun agent-runtime module importa `procedure-harness.ts`. Difeso automaticamente da `npm run check:trust-anchor` (`scripts/check-trust-anchor.mjs`), integrato in `npm run verify:all`: lo scan copre agent runtime, client e adapter, escludendo solo il signer e il lato harness di fiducia.
 
 ### P2 — Transfer misurato su held-out
 

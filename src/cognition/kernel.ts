@@ -33,7 +33,7 @@ export class CognitiveKernel {
     this.critic = new Critic(true);
     this.registry = registry;
     this.enabled = false;
-    this.requireEvidenceForPromotion = false;
+    this.requireEvidenceForPromotion = true;
   }
 
   setEnabled(val: boolean): void {
@@ -46,8 +46,9 @@ export class CognitiveKernel {
   /**
    * When enabled, a pattern is promoted to a registry skill only once it has
    * accumulated meaningful objective evidence. Heuristic critique may still
-   * tune pattern strength, but never promotes to the skill library. Off by
-   * default; enable it once the turn loop feeds an `objective` into process().
+   * tune pattern strength, but never promotes to the skill library. On by
+   * default: the turn loop feeds an `objective` into process() whenever an
+   * external evaluator produced one, and passes `null` otherwise.
    */
   setRequireEvidenceForPromotion(val: boolean): void {
     this.requireEvidenceForPromotion = val;

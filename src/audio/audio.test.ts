@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createGroqStt, createLocalAudio, createOpenAiAudio, resolveAudioProviders, ttsInstructionsFromProfile } from "./index.js";
+import {
+  createGroqStt,
+  createLocalAudio,
+  createOpenAiAudio,
+  resolveAudioProviders,
+  ttsInstructionsFromProfile,
+} from "./index.js";
 import type { AudioConfig } from "./types.js";
 
 const base: AudioConfig = {
@@ -28,7 +34,9 @@ afterEach(() => {
 
 describe("audio provider isolation", () => {
   it("uses the TTS key and model instead of the LLM key", async () => {
-    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+    const fetchMock = vi.fn(
+      async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const provider = createOpenAiAudio({ ...base, ttsApiKey: "audio-key", ttsModel: "gpt-4o-mini-tts" });
     const result = await provider.synthesize("ciao", { instructions: "be brief" });
@@ -40,7 +48,10 @@ describe("audio provider isolation", () => {
   });
 
   it("honours a custom audio base URL", async () => {
-    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ text: "ok" }), { status: 200 }));
+    const fetchMock = vi.fn(
+      async (_url: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ text: "ok" }), { status: 200 }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const provider = createOpenAiAudio({ ...base, sttApiKey: "audio-key", audioBaseUrl: "http://127.0.0.1:9000/v1/" });
     await provider.transcribe(new Uint8Array([1]), { filename: "audio.webm" });
@@ -60,7 +71,9 @@ describe("audio provider isolation", () => {
   });
 
   it("calls a local endpoint without credentials", async () => {
-    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(new Uint8Array([7]), { status: 200 }));
+    const fetchMock = vi.fn(
+      async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(new Uint8Array([7]), { status: 200 }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const provider = createLocalAudio({ ...base, audioBaseUrl: "http://127.0.0.1:8080" });
     const result = await provider.synthesize("ciao", { format: "wav" });

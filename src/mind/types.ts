@@ -19,13 +19,7 @@ export interface ToolCallRecord {
 }
 
 export type EvidenceEvaluator =
-  | "exact"
-  | "containsAll"
-  | "factRecall"
-  | "constraints"
-  | "numeric"
-  | "command"
-  | "model-judge";
+  "exact" | "containsAll" | "factRecall" | "constraints" | "numeric" | "command" | "model-judge";
 
 export interface EvidenceProvenance {
   /** Which evaluator produced the objective score. */

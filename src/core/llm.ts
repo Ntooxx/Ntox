@@ -13,10 +13,7 @@ import {
 import { StreamLineParser } from "./stream-parser.js";
 import { loadCachedModels, saveCachedModels } from "./config.js";
 
-export function countTokens(text: string): number {
-  if (!text) return 0;
-  return Math.ceil((text.length / 4 + (text.match(/\S+/g) || []).length * 1.33) / 2);
-}
+export { countTokens, countMessageTokens } from "./token-count.js";
 
 let tokenizerModule: Promise<typeof import("gpt-tokenizer")> | null = null;
 let usageModelsRequested = false;
@@ -26,10 +23,6 @@ export async function countTokensExact(text: string): Promise<number> {
   if (!tokenizerModule) tokenizerModule = import("gpt-tokenizer");
   const { encode } = await tokenizerModule;
   return encode(text).length;
-}
-
-export function countMessageTokens(messages: Message[]): number {
-  return messages.reduce((s, m) => s + countTokens(m.content), 0);
 }
 
 interface ProviderConfig {

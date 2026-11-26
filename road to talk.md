@@ -6,15 +6,11 @@ Documento di progetto — collegato a `road-to-self-truth.md` e al baseline `exp
 
 ---
 
-## 1. Tesi
+## 1. Tesi (stato aggiornato al codice)
 
-Oggi Ntox ha già l'**anatomia** della voce ma non ha la **bocca nel terminale** e non ha un **proprio timbro**:
+La tesi originale è realizzata: `src/audio/` fornisce pipeline gemelle di ascolto/parlato con provider indipendente da quello LLM, il REPL sente e parla, e il timbro deriva dal profilo cognitivo. Le sezioni 2–3 e le fasi di implementazione sotto sono state riconciliate con il codice: la "falla 401" e il "REPL muto" non sono più difetti aperti.
 
-- `src/tools/stt.ts` trascrive con Whisper, `src/tools/voice.ts` sintetizza con OpenAI TTS — ma **entrambi puntano a `api.openai.com` usando `config.apiKey`**, che di default è una chiave **OpenRouter** (`src/core/config.ts:185-186`). Con la configurazione standard le chiamate audio falliscono con 401. È il primo difetto da chiudere.
-- La voce esiste solo nei canali *messaggistica*: Telegram/WhatsApp (voice note) e Web UI (`WebVoiceHandlers`). Il **CLI REPL** — la superficie core — è muto e sordo.
-- La "voce" di Ntox oggi è solo **stilistica**: `ProfileVoice { directness, verbosity }` in `src/mind/profile.ts:17` e il voice A/B di `scripts/bench-alive.mjs:45` misurano *come scrive*, non *come suona*.
-
-**Talk = due pipeline gemelle (ascolto/parlato) con un provider audio indipendente da quello LLM, una voce configurabile e un timbro derivato dal profilo cognitivo.**
+**Obiettivo residuo:** rendere la voce *verificabile* (latenza misurata, privacy documentata, segnale audio subordinato a `objectiveScore`) e completare il percorso offline self-contained.
 
 ---
 
@@ -22,28 +18,26 @@ Oggi Ntox ha già l'**anatomia** della voce ma non ha la **bocca nel terminale**
 
 | Capability | File | Cosa offre |
 |---|---|---|
-| STT | `src/tools/stt.ts:5` | `sttTool`: base64 o path → testo, modello `whisper-1`, endpoint OpenAI transcriptions |
-| TTS | `src/tools/voice.ts:15` | `ttsTool`: testo → data URL audio, modello `tts-1`, voci `alloy/echo/fable/onyx/nova/shimmer`, formati mp3/opus/aac/flac/wav/pcm |
-| Registrazione tool | `src/core/dispatcher.ts:156` | `ttsTool` (e `sttTool`) già nel registry e nella allowlist (`src/core/config.ts:160`) |
-| Wrapper gateway | `src/gateway/index.ts:461-475` | `transcribeAudio` / `synthesizeSpeech` già cablati ai tool |
-| Voice handlers Web | `src/gateway/index.ts:535-550` | `WebVoiceHandlers { transcribe, synthesize }` per la UI |
-| Voice note | `src/gateway/media-send.ts` | `createTelegramVoiceSender`, `createWhatsAppVoiceSender` |
-| Telegram voice | `src/gateway/telegram.ts:273-322` | download → transcribe → `onMessage` → synthesize → `sendVoice` |
-| Modalità voce | `src/gateway/voice-mode.ts:5` | `VoiceMode = "on"\|"off"\|"auto"`, `resolveVoiceReply`, `voiceReplyText` (max 600 char), `/voice` |
-| Utility audio | `src/gateway/voice.ts` | `audioFilenameFor`, `clampTtsText` (4000 char), `voiceAudioError`, `dataUrlToVoice` |
-| Profilo vocale | `src/mind/profile.ts:17` | `ProfileVoice { directness, verbosity }`, `voiceFromLedger` — il "carattere" da mappare sul timbro |
-| Identity A/B | `src/benchmark/voice-ab.ts`, `scripts/m5-run.mjs:197` | `runVoiceAB` — misura quanto la voce stilistica è riconoscibile |
+| Provider audio | `src/audio/index.ts:7` | `resolveAudioProviders(config)`: OpenAI/Groq/local per STT, OpenAI/OpenRouter/local per TTS |
+| Tool STT/TTS | `src/tools/stt.ts`, `src/tools/voice.ts` | delegano al provider audio con chiave/endpoint dedicati — non usano più `config.apiKey` fisso |
+| Config audio | `src/types/index.ts:106-112`, `src/core/config.ts:71-77` | `sttProvider/sttModel`, `ttsProvider/ttsModel/ttsVoice/ttsStyle`, `audioBaseUrl`, `sttApiKey/ttsApiKey` |
+| Setup/doctor | `src/setup.ts:74-86`, `src/doctor.ts:193-227` | domande audio in setup e check "Audio provider raggiungibile" |
+| REPL | `src/cli/repl.ts`, `voice-input.ts`, `voice-output.ts` | `/mic on\|off\|auto`, `/speak on\|off`, `/voice ...`, `/voice live`; cattura via comando configurabile + VAD, playback di sistema |
+| Streaming/realtime | `src/audio/stream.ts`, `src/audio/realtime.ts` | pipeline VAD→STT→LLM→TTS con interruzione, e sessione Realtime WebSocket con barge-in |
+| Policy audio | `src/audio/policy.ts` | `assertAudioToolAllowed`, `containsAudioData`, `stripAudioData` |
+| Timbro identitario | `src/audio/identity.ts` | `ttsInstructionsFromProfile` / `resolveTtsInstructions` da `ProfileVoice` |
+| Voice A/B audio | `src/benchmark/audio-voice-ab.ts`, `src/benchmark/alive.ts:20` | `audioIdentificationRate` in `AliveMetrics` |
+| Canali | `src/gateway/`, `src/gateway/media-send.ts` | Web handlers, voice note Telegram/WhatsApp, `/voice` nei canali |
 
 ---
 
-## 3. Cosa manca
+## 3. Cosa resta aperto
 
-1. **Disaccoppiamento audio/LLM** — `sttTool`/`ttsTool` usano `config.apiKey` e URL OpenAI fissi, ignorando `provider` e `apiBaseUrl`. Con OpenRouter (default) non funzionano.
-2. **Nessuna scelta di modello/voce** — `NtoxConfig` (`src/types/index.ts:100-167`) non ha campi audio; non si può scegliere motore, modello o timbro.
-3. **REPL muto** — nessun microfono, nessuna riproduzione, nessun push-to-talk in `src/cli/repl.ts`.
-4. **Voce non identitaria** — `ProfileVoice` non influisce sul suono; l'identity A/B resta testuale.
-5. **Nessuna modalità conversazionale** — il flusso è sempre *turno → testo → (opzionale) voice note*; manca il full-duplex con barge-in.
-6. **Nessun percorso offline** — se la rete manca, non esiste STT/TTS locale, pur essendo "local-first" un pilastro del progetto.
+1. **Privacy non documentata** — `SECURITY.md` non ha ancora la sezione "Audio — biometrici e retention": audio greco non va nel ledger né nella memoria episodica, consenso esplicito prima dell'invio a provider remoti.
+2. **Offline non self-contained** — il provider `local` (`src/audio/local.ts`) parla con un endpoint HTTP locale (`NTOX_LOCAL_STT_URL`/`NTOX_LOCAL_TTS_URL` o `audioBaseUrl`), non con modelli embedded whisper.cpp/Kokoro. Nessun byte esce, ma serve un processo separato.
+3. **Latenza non misurata** — la telemetria end-of-speech → inizio risposta (target < 1 s Realtime / < 2 s locale) non è ancora esposta in `/trace`.
+4. **Segnale audio secondario** — `audioIdentificationRate` è una metrica A/B, non ancora subordinata a `objectiveScore`/calibrazione nel senso del P0 di `road-to-self-truth.md`.
+5. **Baseline di verifica** — la support matrix voce è già nel README e `npm run verify:all` passa 14/14 check, incluso lo scan del trust anchor (typecheck, lint, size, test, build, format, pack, smoke CLI/cognizione e adapter).
 
 ---
 
@@ -127,51 +121,52 @@ src/audio/                       (nuovo — provider audio, speculare ai 10 prov
 
 ## 7. Fasi di implementazione
 
-### Fase 0 — Chiudere la falla dei 401 (immediata)
+Stato aggiornato: Fasi 0–3 chiuse, Fase 4 parziale, Fase 5 parziale.
 
-- [ ] Aggiungere a `NtoxConfig` (`src/types/index.ts:100`) e a `ConfigSchema` (`src/core/config.ts:65`): `sttProvider`, `sttModel`, `ttsProvider`, `ttsModel`, `ttsVoice`, `ttsInstructions`, `audioBaseUrl?`, `sttApiKey?`, `ttsApiKey?`.
-- [ ] `sttTool` e `ttsTool` leggono chiave/endpoint dal **provider audio**, non da `config.apiKey` fisso. Default: OpenAI per TTS, OpenAI/Groq per STT.
-- [ ] `src/setup.ts`: 3 domande in più (usare audio? provider? voce?).
-- [ ] `src/doctor.ts`: check "Audio provider raggiungibile".
-- [ ] Test: con chiave OpenRouter e provider audio OpenAI, la richiesta parte con la chiave audio corretta (oggi fallirebbe).
+### Fase 0 — Chiudere la falla dei 401 — **fatta**
 
-### Fase 1 — Provider audio
+- [x] Campi audio in `NtoxConfig` (`src/types/index.ts:106-112`) e `ConfigSchema` (`src/core/config.ts:71-77`).
+- [x] `sttTool`/`ttsTool` leggono chiave/endpoint dal provider audio (`resolveAudioFromConfig`), non da `config.apiKey`.
+- [x] `src/setup.ts:74-86`: domande audio; `src/doctor.ts:193-227`: check provider raggiungibile.
+- [x] Test `src/audio/audio.test.ts:30`: "uses the TTS key and model instead of the LLM key".
 
-- [ ] Creare `src/audio/` con `resolveAudioProviders(config)` speculare al resolver LLM.
-- [ ] Implementare adapter OpenAI, Groq, locale per STT; OpenAI, OpenRouter, locale per TTS.
-- [ ] `sttTool`/`ttsTool` delegano; i test attuali (`src/tools/voice.test.ts`, `src/tools/stt.test.ts`) devono restare verdi.
-- [ ] Test di contratto per ogni provider (mock fetch), incluso il fallback local-hash→locale.
+### Fase 1 — Provider audio — **fatta**
 
-### Fase 2 — Voce identitaria
+- [x] `src/audio/index.ts:7`: `resolveAudioProviders(config)` speculare al resolver LLM.
+- [x] Adapter OpenAI, Groq, locale per STT; OpenAI, OpenRouter, locale per TTS.
+- [x] `sttTool`/`ttsTool` delegano; test di contratto in `src/audio/audio.test.ts`, `policy.test.ts`, `realtime.test.ts`, `stream.test.ts`.
+- [x] Nessun fallback local-hash: il provider `local` richiede un endpoint HTTP (vedi Fase 5).
 
-- [ ] `src/audio/identity.ts`: `ProfileVoice` → `ttsInstructions`, con legame a `mind.profile` (`src/mind/mind.ts:285`).
-- [ ] `ttsTool` accetta `instructions` opzionali; `synthesizeSpeech` (`src/gateway/index.ts:469`) passa quelle del profilo.
-- [ ] Estendere `handleVoiceCommand` (`src/gateway/voice-mode.ts:72`) con `voice`, `style`, `engine`.
-- [ ] Estendere `runVoiceAB` con variante audio; aggiungere `audioIdentificationRate` ad `AliveMetrics`.
-- [ ] Test: due profili con directness diversa producono `instructions` diverse.
+### Fase 2 — Voce identitaria — **fatta**
 
-### Fase 3 — Il REPL sente e parla
+- [x] `src/audio/identity.ts`: `ProfileVoice` → `ttsInstructions`, legato a `mind.profile`.
+- [x] `ttsTool` accetta `instructions`; `synthesizeSpeech` passa quelle del profilo.
+- [x] `handleVoiceCommand` (`src/gateway/voice-mode.ts:113-115`) con `voice`, `style`, `engine`.
+- [x] `audioIdentificationRate` in `AliveMetrics` (`src/benchmark/alive.ts:20`) e `src/benchmark/audio-voice-ab.ts`.
+- [x] Test `src/audio/audio.test.ts:79`: directness/verbosity → istruzioni TTS distinte.
 
-- [ ] `src/cli/voice-input.ts`: cattura microfono via `ffmpeg`/`sox` (o `portaudio` come dipendenza opzionale), VAD con soglia di silenzio, push-to-talk (es. `Ctrl+Space`).
-- [ ] `src/cli/voice-output.ts`: playback del data URL TTS via player di sistema (`afplay`/`aplay`/`powershell`), con coda non bloccante.
-- [ ] Comandi REPL: `/mic on|off|auto`, `/speak on|off`, `/voice voice ...` (riutilizzo del parser gateway).
-- [ ] Il testo trascritto entra nello stesso `agent.process` del testo digitato — **nessun percorso parallelo** nel kernel cognitivo.
-- [ ] Test: audio sintetico → transcript → risposta → audio, con fetch mockati.
+### Fase 3 — Il REPL sente e parla — **fatta**
 
-### Fase 4 — Conversazione full-duplex
+- [x] `src/cli/voice-input.ts`: cattura via comando configurabile (`NTOX_RECORD_COMMAND`) + VAD (`src/audio/vad.ts`); push-to-talk con Invio, non `Ctrl+Space`.
+- [x] `src/cli/voice-output.ts`: playback del data URL TTS via player di sistema.
+- [x] `/mic on|off|auto`, `/speak on|off`, `/voice ...`, `/voice live` in `src/cli/repl.ts`.
+- [x] Il testo trascritto entra nello stesso percorso agent del testo digitato.
+- [x] Test I/O voce in `src/cli/voice-io.test.ts`.
 
-- [ ] Provider Realtime (`gpt-4o-realtime-preview`) con WebSocket: audio in streaming, barge-in, interruzione.
-- [ ] In alternativa pipeline locale streaming: VAD → STT → LLM → TTS, con `AbortController` sul TTS quando l'utente parla sopra.
-- [ ] Modalità `/voice live` solo per REPL e Web UI; i canali messaggistica restano voice-note (già adatti al loro medium).
+### Fase 4 — Conversazione full-duplex — **parziale**
+
+- [x] Provider Realtime (`src/audio/realtime.ts`) con WebSocket, barge-in e interruzione.
+- [x] Pipeline streaming locale (`src/audio/stream.ts`) con VAD → STT → LLM → TTS e interruzione.
+- [x] `/voice live` per REPL e Web UI; canali messaggistica restano voice-note.
 - [ ] Telemetria: latenza end-of-speech → inizio risposta, target < 1 s (Realtime) / < 2 s (locale).
 
-### Fase 5 — Offline, sicurezza, documentazione
+### Fase 5 — Offline, sicurezza, documentazione — **parziale**
 
-- [ ] Profilo `local`: whisper.cpp + Kokoro/Piper, nessun byte in uscita; rilevamento automatico se `audioBaseUrl` punta a `localhost`.
-- [ ] Policy: il microfono è un tool come gli altri — allowlist, audit in `/trace`, nessuna registrazione persistente senza consenso esplicito.
-- [ ] `SECURITY.md`: sezione "Audio — biometrici e retention"; i dati vocali non entrano nel ledger né nella memoria episodica.
-- [ ] README: support matrix con `Voice (REPL)` e `Voice (live)`, aggiornamento riga `src/tools/` in Architecture.
-- [ ] `npm run verify:all`, `npm run lint`, `npm run typecheck` verdi.
+- [ ] Profilo `local` self-contained: oggi `src/audio/local.ts` parla con un endpoint HTTP locale, non con whisper.cpp/Kokoro embedded.
+- [x] Policy microfono come tool: allowlist, `assertAudioToolAllowed`, redazione audio da `src/audio/policy.ts`.
+- [ ] `SECURITY.md`: sezione "Audio — biometrici e retention".
+- [x] README: support matrix con `Voice (REPL)` (`Core`) e `Voice (live)` (`Experimental`).
+- [x] `npm run verify:all` verde — 14/14 gate, incluso lo scan del trust anchor (typecheck, lint, size, 1.760 test, build, format, pack, smoke CLI/cognizione, adapter typecheck/test/build/pack).
 
 ---
 
@@ -210,7 +205,7 @@ src/audio/                       (nuovo — provider audio, speculare ai 10 prov
 
 1. `ntox setup` configura audio senza errori con una chiave OpenRouter e una chiave audio distinta; `ntox doctor` riporta tutti i check verdi.
 2. REPL: `/mic on`, parlo, Ntox trascrive, risponde e **parla**; `/trace` mostra modello STT, modello TTS, voce e istruzioni usate.
-3. Telegram/WhatsApp/Web continuano a funzionare con i test attuali verdi — nessuna regressione nei 1717 test.
+3. Telegram/WhatsApp/Web continuano a funzionare con i test attuali verdi — nessuna regressione nella suite.
 4. Due profili con `directness` diversa sono distinguibili **all'ascolto** nel voice A/B audio.
 5. `npm run verify:all` verde e README aggiornato con la support matrix voce.
 
@@ -218,4 +213,4 @@ src/audio/                       (nuovo — provider audio, speculare ai 10 prov
 
 ## 11. Ordine di priorità consigliato
 
-**Fase 0 → 1 → 2 → 3 → 5 → 4.** La Fase 4 (Realtime) è il "wow" ma è anche la più costosa e la più facile da sbagliare: ha senso solo dopo che la Fase 0 ha reso l'audio affidabile e la Fase 2 ha dato a Ntox una voce che vale la pena ascoltare.
+**Fase 0 → 1 → 2 → 3 → 5 → 4.** Le Fasi 0–3 sono chiuse: restano la Fase 5 (sicurezza/offline/verifica) e la telemetria della Fase 4. La latenza era il motivo per cui Realtime andava dopo l'audio affidabile — ora che l'audio è affidabile, misurarla è il prossimo passo.

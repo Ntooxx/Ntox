@@ -1,4 +1,11 @@
-import { AUDIO_FORMAT_MIME, resolveFormat, type AudioConfig, type AudioProvider, type SynthesizeOptions, type TranscribeOptions } from "./types.js";
+import {
+  AUDIO_FORMAT_MIME,
+  resolveFormat,
+  type AudioConfig,
+  type AudioProvider,
+  type SynthesizeOptions,
+  type TranscribeOptions,
+} from "./types.js";
 
 const DEFAULT_BASE = "https://api.openai.com/v1";
 

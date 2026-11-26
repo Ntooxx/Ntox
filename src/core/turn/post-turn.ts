@@ -12,6 +12,7 @@ import { isRephrase, isThanked } from "../../mind/predictor.js";
 import { extractOpenLoops, normalizeLoopGoal } from "../../alive/open-loops.js";
 import type { Mind, MindTurnResult } from "../../mind/mind.js";
 import type { TurnSignals } from "../../mind/types.js";
+import type { ObjectiveEvidence } from "../../mind/evidence.js";
 import type { InterventionContext } from "../../meta/intervention.js";
 import type { DisagreementContext } from "../../meta/disagreement.js";
 import type { SessionContext } from "../../meta/session-intent.js";
@@ -31,6 +32,8 @@ export interface PostTurnInfo {
   attempts: number;
   turnCostUsd: number;
   turnTokens: number;
+  /** External evaluator evidence for this turn, when a check was available. */
+  objective?: ObjectiveEvidence;
 }
 
 export interface PostTurnInput extends PostTurnInfo {
@@ -281,6 +284,7 @@ export async function runPostTurn(input: PostTurnInput): Promise<void> {
         assistantResponse: responseBuffer,
         embedding: queryEmbedding,
         embeddingModel,
+        objective: input.objective?.score ?? null,
       });
       if (learning.memoryId && callbacks.onMemoryStore) callbacks.onMemoryStore();
       if (learning.errors.length > 0) {
@@ -314,7 +318,11 @@ export async function runPostTurn(input: PostTurnInput): Promise<void> {
     }
     if (cfg.cognitiveKernel.isEnabled() && runtime.lastCognitiveResult) {
       try {
-        runtime.lastCognitiveResult = cfg.cognitiveKernel.process(userInput, responseBuffer);
+        runtime.lastCognitiveResult = cfg.cognitiveKernel.process(
+          userInput,
+          responseBuffer,
+          input.objective?.score ?? null,
+        );
       } catch (e) {
         console.error("[cognition]", e);
       }
@@ -353,6 +361,7 @@ export async function runPostTurn(input: PostTurnInput): Promise<void> {
         abandoned: fullResponse.trim().length === 0 && responseBuffer.trim().length === 0,
         falseSuccess: runtime.falseSuccessThisTurn,
         toolFailure: toolExec.toolFailureThisTurn,
+        ...(input.objective ? { objectiveScore: input.objective.score, evidence: input.objective.provenance } : {}),
       };
       const correction = wasCorrection
         ? { topicKey: userInput.slice(0, 80), correction: userInput.slice(0, 500) }

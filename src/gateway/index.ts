@@ -44,7 +44,7 @@ import { renderSkillProposal } from "../skills/auto-learner.js";
 import { installSkillFromSource, renderSkillInstallResult } from "../skills/installer.js";
 import { createMarketplace, renderMarketplaceList } from "../skills/marketplace.js";
 import { diffSkillByName, renderSkillStats } from "../skills/lifecycle.js";
-import { createRoutineRuntime, renderRoutineRun, runRoutine } from "../skills/routine.js";
+import { executeRoutineByName } from "./routine-run.js";
 import { renderMcpStatus } from "../mcp/bridge.js";
 import { ConversationStore } from "./conversations.js";
 import {
@@ -91,29 +91,14 @@ function getOrCreateSessionInfra(chatId: string, sharedInfra: SharedInfra) {
   return sessionInfras.get(chatId)!;
 }
 
-async function executeRoutineByName(name: string): Promise<string> {
-  const skill = shared.skillRegistry.get(name);
-  if (!skill) return `Skill "${name}" not found.`;
-  if (!skill.steps || skill.steps.length === 0) {
-    return `Skill "${name}" has no routine steps. Add a "steps" array to make it a routine.`;
-  }
-  const runtime = createRoutineRuntime({ llm: shared.llm, tools: shared.tools, skillRegistry: shared.skillRegistry });
-  const result = await runRoutine(skill, runtime);
-  shared.skillRegistry.incrementUsage(name);
-  return renderRoutineRun(skill, result);
-}
-
 export async function runGateway(channel?: string): Promise<void> {
   const mcpStatuses = await shared.mcp.connectAll().catch((error: unknown) => {
     console.error("[mcp] connect failed:", error);
     return [];
   });
   for (const status of mcpStatuses) {
-    if (status.state === "connected") {
-      console.log(`[mcp] ${status.name}: ${status.tools.length} tool(s)`);
-    } else if (status.state === "failed") {
-      console.error(`[mcp] ${status.name} failed: ${status.error}`);
-    }
+    if (status.state === "connected") console.log(`[mcp] ${status.name}: ${status.tools.length} tool(s)`);
+    else if (status.state === "failed") console.error(`[mcp] ${status.name} failed: ${status.error}`);
   }
   const sessions = new SessionManager();
   const alivePusher = new AlivePusher({
@@ -310,7 +295,7 @@ export async function runGateway(channel?: string): Promise<void> {
         }
         if (skillLifecycleParse.kind === "run") {
           if (!skillLifecycleParse.name) return direct("Usage: /skill run <name>");
-          return direct(await executeRoutineByName(skillLifecycleParse.name));
+          return direct(await executeRoutineByName(shared, skillLifecycleParse.name));
         }
         if (skillLifecycleParse.kind === "diff") {
           if (!skillLifecycleParse.name) return direct("Usage: /skill diff <name> [source]");
@@ -626,7 +611,7 @@ export async function runGateway(channel?: string): Promise<void> {
   cron.setExecutor(async (prompt, job) => {
     const routineParse = parseSkillLifecycleCommand(prompt);
     if (routineParse.kind === "run" && routineParse.name) {
-      return executeRoutineByName(routineParse.name);
+      return executeRoutineByName(shared, routineParse.name);
     }
     if (isDigestPrompt(prompt)) {
       return renderDigest({

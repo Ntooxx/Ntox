@@ -14,7 +14,12 @@ export function ttsInstructionsFromProfile(voice: ProfileVoice): string {
       : directness < 0.4
         ? "Soften the delivery with brief acknowledgements."
         : "Keep a balanced, matter-of-fact delivery.";
-  const length = verbosity > 0.6 ? "Allow a little more detail." : verbosity < 0.4 ? "Keep answers short." : "Use medium-length answers.";
+  const length =
+    verbosity > 0.6
+      ? "Allow a little more detail."
+      : verbosity < 0.4
+        ? "Keep answers short."
+        : "Use medium-length answers.";
   return `Speak with directness ${directness.toFixed(2)} and verbosity ${verbosity.toFixed(2)}. ${shape} ${length} Preserve calibration: admit uncertainty instead of asserting with false confidence.`;
 }
 

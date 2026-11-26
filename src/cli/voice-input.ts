@@ -17,7 +17,10 @@ export interface RecorderSession {
 }
 
 function parseCommand(template: string, outputPath: string): { command: string; args: string[] } {
-  const parts = template.replace(/\{out\}/g, outputPath).split(/\s+/).filter(Boolean);
+  const parts = template
+    .replace(/\{out\}/g, outputPath)
+    .split(/\s+/)
+    .filter(Boolean);
   return { command: parts[0]!, args: parts.slice(1) };
 }
 
@@ -45,4 +48,3 @@ export function startRecorder(options: RecorderOptions = {}): RecorderSession {
     },
   };
 }
-

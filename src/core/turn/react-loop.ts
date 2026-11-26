@@ -17,6 +17,8 @@ import {
   MAX_WEB_TOOL_CALLS_PER_TURN,
   WEB_TOOL_NAMES,
   commitsToImmediateAction,
+  isCompleteAnswer,
+  allowsAgenticContinuation,
   unfinishedPlanTasks,
   collectTurnFailures,
   responseAddressesFailures,
@@ -31,6 +33,7 @@ import {
   type ToolExecContext,
 } from "./tool-executor.js";
 import { checkFalseSuccess } from "./false-success.js";
+import type { RoutingDecision } from "../../evaluation/routing.js";
 
 export interface ReactLoopInput {
   cfg: AgentConfig;
@@ -45,6 +48,7 @@ export interface ReactLoopInput {
   toolExec: ToolExecContext;
   runtime: TurnRuntime;
   trace: AgentTurnTrace | null;
+  routing?: RoutingDecision;
   finishTrace: (response?: string, error?: string) => void;
   commitTurn: (finalText: string) => void;
   pushMessage: (msg: Message) => void;
@@ -57,6 +61,8 @@ export async function* runReactLoop(input: ReactLoopInput): AsyncGenerator<strin
   const openaiTools = input.openaiTools;
   const fullSystemPrompt = input.fullSystemPrompt;
   const toolContext = input.toolContext;
+  const agenticContinuation = allowsAgenticContinuation(input.routing?.route);
+  const emitFinalStream = openaiTools.length === 0 || responseMode === "simple-query" || !agenticContinuation;
 
   // 10. ReAct loop
   callbacks.onPhase?.("responding");
@@ -108,7 +114,8 @@ export async function* runReactLoop(input: ReactLoopInput): AsyncGenerator<strin
         }
         if (chunk.delta) {
           responseBuffer += chunk.delta;
-          callbacks.onToken(chunk.delta);
+          if (emitFinalStream) callbacks.onToken(chunk.delta);
+          else callbacks.onIntermediate?.(chunk.delta);
         }
       }
     } catch (e) {
@@ -185,11 +192,9 @@ export async function* runReactLoop(input: ReactLoopInput): AsyncGenerator<strin
             `or state the blocker and the single next step that would actually change the outcome.`,
         });
       }
-      fullResponse += responseBuffer;
       continue;
     }
 
-    // Tool-build enforcement
     if (responseMode === "tool-build" && attempts < 3) {
       const correction =
         "[BUILD MODE] You explained instead of building. Create the file NOW using the write tool. No explanation. No questions. Just build it.";
@@ -220,6 +225,8 @@ export async function* runReactLoop(input: ReactLoopInput): AsyncGenerator<strin
 
     if (
       !done &&
+      agenticContinuation &&
+      !isCompleteAnswer(responseBuffer) &&
       openaiTools.length > 0 &&
       actionNudges < MAX_ACTION_NUDGES &&
       attempts < 6 &&
@@ -239,6 +246,7 @@ export async function* runReactLoop(input: ReactLoopInput): AsyncGenerator<strin
 
     if (
       !done &&
+      agenticContinuation &&
       planContinues < MAX_PLAN_CONTINUES &&
       attempts < MAX_TURN_ATTEMPTS &&
       openaiTools.length > 0 &&
@@ -265,7 +273,7 @@ export async function* runReactLoop(input: ReactLoopInput): AsyncGenerator<strin
       }
     }
 
-    if (!done && failureExplains < MAX_FAILURE_EXPLAINS && attempts < MAX_TURN_ATTEMPTS) {
+    if (!done && agenticContinuation && failureExplains < MAX_FAILURE_EXPLAINS && attempts < MAX_TURN_ATTEMPTS) {
       const failures = collectTurnFailures(trace);
       if (
         failures.length > 0 &&
@@ -290,6 +298,7 @@ export async function* runReactLoop(input: ReactLoopInput): AsyncGenerator<strin
     }
 
     fullResponse += responseBuffer;
+    if (!emitFinalStream) callbacks.onToken(fullResponse);
     input.pushMessage({ role: "assistant", content: responseBuffer });
 
     input.commitTurn(fullResponse);
@@ -302,11 +311,12 @@ export async function* runReactLoop(input: ReactLoopInput): AsyncGenerator<strin
 
   if (!done) {
     const notice = buildTurnLimitNotice(toolExec, cfg.sessionId);
-    callbacks.onToken(notice);
-    input.pushMessage({ role: "assistant", content: notice });
     const finalText = (fullResponse + notice).trim();
+    if (!emitFinalStream) callbacks.onToken(finalText);
+    else callbacks.onToken(notice);
+    input.pushMessage({ role: "assistant", content: notice });
     input.commitTurn(finalText);
-    yield notice;
+    yield finalText;
     input.saveSession();
   }
 }

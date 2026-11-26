@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   objectiveScoreFromResult,
+  objectiveEvidenceFromResult,
   meaningfulObjective,
   hasSufficientObjectiveEvidence,
   buildEvidenceProvenance,
@@ -12,6 +13,14 @@ describe("evidence adapter", () => {
     expect(objectiveScoreFromResult({ passed: true, score: 1, detail: "" })).toBe(1);
     expect(objectiveScoreFromResult({ passed: true, score: 0.6, detail: "" })).toBeCloseTo(0.2);
     expect(objectiveScoreFromResult({ passed: false, score: 0, detail: "" })).toBe(-1);
+  });
+
+  it("pairs the signed score with its provenance", () => {
+    const provenance = buildEvidenceProvenance({ evaluator: "factRecall", artifactRef: "task-1", now: () => 99 });
+    const evidence = objectiveEvidenceFromResult({ passed: true, score: 0.8, detail: "" }, provenance);
+    expect(evidence.score).toBeCloseTo(0.6);
+    expect(evidence.provenance).toBe(provenance);
+    expect(evidence.provenance.evaluator).toBe("factRecall");
   });
 
   it("considers only meaningful magnitudes as evidence", () => {

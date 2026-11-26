@@ -22,7 +22,8 @@ export const ttsTool: Tool = {
     const text = String(args.text);
     if (!text) return { success: false, error: "Text is required" };
 
-    const voice = args.voice && TTS_VOICES.includes(args.voice as (typeof TTS_VOICES)[number]) ? String(args.voice) : undefined;
+    const voice =
+      args.voice && TTS_VOICES.includes(args.voice as (typeof TTS_VOICES)[number]) ? String(args.voice) : undefined;
     const format = resolveFormat(args.format);
 
     try {

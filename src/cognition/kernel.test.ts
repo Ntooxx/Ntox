@@ -81,14 +81,20 @@ describe("CognitiveKernel", () => {
       .getPatterns()
       .getAll?.()
       .find((p) => p.name.includes("rust") || p.name.includes("design"));
-    expect(kernel.getRequireEvidenceForPromotion()).toBe(false);
-    if (target) expect((target.objectiveHits ?? 0)).toBeGreaterThanOrEqual(1);
+    expect(kernel.getRequireEvidenceForPromotion()).toBe(true);
+    if (target) expect(target.objectiveHits ?? 0).toBeGreaterThanOrEqual(1);
   });
 
-  it("exposes the evidence-required flag (off by default)", () => {
-    expect(kernel.getRequireEvidenceForPromotion()).toBe(false);
-    kernel.setRequireEvidenceForPromotion(true);
+  it("requires external evidence to promote patterns by default", () => {
+    kernel.setEnabled(true);
+    for (let i = 0; i < 10; i++) kernel.process("rust design notes", "a detailed design document", null);
+    expect(registry.list().some((skill) => skill.category === "compiled")).toBe(false);
+  });
+
+  it("exposes the evidence-required flag (on by default)", () => {
     expect(kernel.getRequireEvidenceForPromotion()).toBe(true);
+    kernel.setRequireEvidenceForPromotion(false);
+    expect(kernel.getRequireEvidenceForPromotion()).toBe(false);
   });
 
   it("exposes sub-components", () => {

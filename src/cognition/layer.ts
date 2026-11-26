@@ -25,6 +25,7 @@ export interface CognitiveStepInput {
   embeddingModel?: string;
   workspace?: string;
   metadata?: Record<string, string>;
+  includeSections?: boolean;
 }
 
 export interface CognitiveContextSection {
@@ -75,6 +76,8 @@ export interface CognitiveTurnResult {
   embedding?: number[] | null;
   embeddingModel?: string;
   correction?: CognitiveCorrection;
+  /** Signed score from an external evaluator; null when the turn has no ground truth. */
+  objective?: number | null;
 }
 
 export interface CognitiveLearningResult {
@@ -200,13 +203,14 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
   async beforeStep(input: CognitiveStepInput): Promise<CognitiveStepContext> {
     const errors: string[] = [];
     const sections: CognitiveContextSection[] = [];
+    const includeSections = input.includeSections !== false;
     const queryType = classifyQuery(input.userMessage);
     const embedded = await this.resolveEmbedding(input.userMessage, input.embedding, input.embeddingModel, errors);
     const embedding = embedded?.vector ?? null;
     let primitive: PrimitiveRepresentation | undefined;
     let patternCount = 0;
 
-    if (this.options.strategyEnabled) {
+    if (includeSections && this.options.strategyEnabled) {
       sections.push({ name: "strategy", content: getStrategyPrompt(queryType) });
     }
 
@@ -215,7 +219,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
         const result = this.kernel.process(input.userMessage);
         primitive = result.primitive;
         patternCount = result.patterns.length;
-        if (result.cognitiveContext.trim()) {
+        if (includeSections && result.cognitiveContext.trim()) {
           sections.push({ name: "patterns", content: result.cognitiveContext });
         }
       } catch (error) {
@@ -224,7 +228,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     }
 
     let correctionIncluded = false;
-    if (this.options.mistakesEnabled && this.options.storeEnabled) {
+    if (includeSections && this.options.mistakesEnabled && this.options.storeEnabled) {
       try {
         const context = this.mistakes.buildMistakesContext(input.userMessage);
         if (context.trim()) {
@@ -237,7 +241,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     }
 
     let proceduresIncluded = false;
-    if (this.options.proceduresEnabled && this.options.storeEnabled && this.procedureStore) {
+    if (includeSections && this.options.proceduresEnabled && this.options.storeEnabled && this.procedureStore) {
       try {
         const retrieved = this.procedureStore.retrieve(
           { text: input.userMessage, embedding: embedding ?? undefined, embeddingModel: embedded?.model },
@@ -252,7 +256,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
       }
     }
 
-    const failures = this.recentToolFailures.get(input.sessionId) ?? [];
+    const failures = includeSections ? (this.recentToolFailures.get(input.sessionId) ?? []) : [];
     let recoveryIncluded = false;
     if (failures.length > 0) {
       recoveryIncluded = true;
@@ -261,7 +265,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     }
 
     let memoryIncluded = false;
-    if (this.options.memoryEnabled && this.options.storeEnabled) {
+    if (includeSections && this.options.memoryEnabled && this.options.storeEnabled) {
       try {
         const context = this.memory.buildMemoryContext(
           embedding,
@@ -279,7 +283,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
     }
 
     let theoryIncluded = false;
-    if (this.options.theoryEnabled && this.options.storeEnabled) {
+    if (includeSections && this.options.theoryEnabled && this.options.storeEnabled) {
       try {
         const context = this.theoryMemory.buildTheoryContext(input.userMessage);
         if (context.trim()) {
@@ -369,7 +373,7 @@ export class NtoxCognitiveLayer implements CognitiveLayer {
 
     if (this.options.cognitionEnabled && this.options.storeEnabled) {
       try {
-        const result = this.kernel.process(userMessage, turn.assistantResponse);
+        const result = this.kernel.process(userMessage, turn.assistantResponse, turn.objective ?? null);
         compiledPatterns = result.compiledPatterns;
       } catch (error) {
         errors.push(errorMessage("cognition", error));

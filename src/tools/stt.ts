@@ -4,7 +4,8 @@ import { resolveAudioFromConfig } from "../audio/index.js";
 
 export const sttTool: Tool = {
   name: "stt",
-  description: "Transcribe audio to text using the configured STT provider. Accepts base64-encoded audio or a file path.",
+  description:
+    "Transcribe audio to text using the configured STT provider. Accepts base64-encoded audio or a file path.",
   parameters: {
     type: "object",
     properties: {

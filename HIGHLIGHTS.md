@@ -109,7 +109,7 @@ unavailable from a local checkout and requires the Actions API.
 | Exact-match recall@5 | 100.0% | 100.0% | 100.0% | no regression | met |
 | Injection bypass / benign FP | 29.6% / 12.5% (regex guard) | **0.0% / 0.0%** (54 adversarial + 24 benign) | **0.0% / 0.0%** (15 adversarial + 9 benign) | < 5% / < 1% | met |
 | Self-authored skill acceptance | — | **100%** (12/12, deterministic harness) | not split (synthetic) | ≥ 80% | met* |
-| Tests / coverage | 1,654 tests | **1,687 tests**, lines **64.22%**, functions **67.01%** | — | > 0, ≥ 62 / 65 | met |
+| Tests / coverage | 1,654 tests | **1,760 tests** (`npm run verify:all`: 14/14 gates, incl. trust-anchor scan); last coverage run: lines **64.22%**, functions **67.01%** | — | > 0, ≥ 62 / 65 | met |
 | CI green rate (last 20) | — | unavailable locally | — | ≥ 95% | not measured |
 
 The metrics are scored on a **fixed tuning/holdout split** (`scripts/lib/corpus-split.mjs`,

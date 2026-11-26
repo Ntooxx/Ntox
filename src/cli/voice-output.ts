@@ -21,7 +21,10 @@ export function dataUrlToBuffer(dataUrl: string): { bytes: Buffer; mimeType: str
 
 function platformCommand(file: string): { command: string; args: string[] } {
   if (process.platform === "win32") {
-    return { command: "powershell", args: ["-NoProfile", "-Command", `(New-Object Media.SoundPlayer '${file}').PlaySync()`] };
+    return {
+      command: "powershell",
+      args: ["-NoProfile", "-Command", `(New-Object Media.SoundPlayer '${file}').PlaySync()`],
+    };
   }
   if (process.platform === "darwin") return { command: "afplay", args: [file] };
   return { command: "aplay", args: [file] };
@@ -39,7 +42,10 @@ export async function playDataUrlAudio(dataUrl: string, options: PlaybackOptions
   try {
     const template = options.command || process.env.NTOX_PLAY_COMMAND;
     const base = template
-      ? template.replace(/\{file\}/g, file).split(/\s+/).filter(Boolean)
+      ? template
+          .replace(/\{file\}/g, file)
+          .split(/\s+/)
+          .filter(Boolean)
       : (() => {
           const command = platformCommand(file);
           return [command.command, ...command.args];

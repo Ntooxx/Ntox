@@ -77,6 +77,7 @@ export async function buildPromptAssembly(ctx: TurnContext): Promise<PromptAssem
       console.error("[mind-identity]", e);
     }
   }
+  const baseSystemPrompt = ctx.systemPromptOverride ?? cfg.systemPrompt;
   const systemContextBudget = cfg.systemContextBudget ?? DEFAULT_SYSTEM_CONTEXT_TOKEN_BUDGET;
 
   const sectionSpecs: {
@@ -96,16 +97,19 @@ export async function buildPromptAssembly(ctx: TurnContext): Promise<PromptAssem
     },
     {
       name: "researchGuidance",
-      text: RESEARCH_QUESTION_PATTERN.test(userInput)
-        ? "\n\n## Research Accuracy\nNTOX has searched and, when possible, opened scholarly source pages. Answer in one response; do not repeat the same search or emit tool-call syntax. Keep the answer focused (about 800 words maximum). Treat fetched source excerpts as directly checked evidence, and search snippets only as leads. For each important claim, distinguish source-supported facts from inference and recommendation, and cite the source URL that supports it. Check whether a source actually supports the claim before citing it. Search coverage is limited: never infer nobody has done something from missing results. For novelty, identify the narrow scope checked and say it remains unverified when evidence is insufficient. Do not call an idea a paper seed or claim it is yours to take without evidence."
-        : "",
+      text:
+        !ctx.routing?.suppressCognitiveSections && RESEARCH_QUESTION_PATTERN.test(userInput)
+          ? "\n\n## Research Accuracy\nNTOX has searched and, when possible, opened scholarly source pages. Answer in one response; do not repeat the same search or emit tool-call syntax. Keep the answer focused (about 800 words maximum). Treat fetched source excerpts as directly checked evidence, and search snippets only as leads. For each important claim, distinguish source-supported facts from inference and recommendation, and cite the source URL that supports it. Check whether a source actually supports the claim before citing it. Search coverage is limited: never infer nobody has done something from missing results. For novelty, identify the narrow scope checked and say it remains unverified when evidence is insufficient. Do not call an idea a paper seed or claim it is yours to take without evidence."
+          : "",
       priority: 99,
       pinned: true,
     },
     {
       name: "recommendationGuidance",
       text:
-        !RESEARCH_QUESTION_PATTERN.test(userInput) && RECOMMENDATION_QUESTION_PATTERN.test(userInput)
+        !ctx.routing?.suppressCognitiveSections &&
+        !RESEARCH_QUESTION_PATTERN.test(userInput) &&
+        RECOMMENDATION_QUESTION_PATTERN.test(userInput)
           ? "\n\n## Recommendation Integrity\nGive a recommendation that follows from the user's stated goal and relevant known constraints. Separate facts you know from assumptions and your judgment. If a key constraint is missing, state the assumption you used and give a low-risk next step that can produce evidence. For personal advice, avoid presenting a preference-sensitive judgment as an objective fact. For project or build advice, ground claims in the files or behavior you inspected; say what you could not verify. Give the main trade-off and a concrete way to judge whether the recommendation worked."
           : "",
       priority: 98,
@@ -199,7 +203,7 @@ export async function buildPromptAssembly(ctx: TurnContext): Promise<PromptAssem
       reliabilityBySection.set(rec.section, current === 0 ? rel : (current + rel) / 2);
     }
 
-    const baseTokens = Math.ceil(cfg.systemPrompt.length / 4);
+    const baseTokens = Math.ceil(baseSystemPrompt.length / 4);
     const cognitiveBudget = Math.max(400, systemContextBudget - baseTokens);
     const items: CompilableItem[] = sectionSpecs
       .filter((s) => s.text)
@@ -219,14 +223,14 @@ export async function buildPromptAssembly(ctx: TurnContext): Promise<PromptAssem
       sectionSpecs.filter((s) => s.text && selected.has(s.id ?? s.name)).map((s) => s.name),
     );
     assembled = assembleSelectedSystemPrompt(
-      cfg.systemPrompt,
+      baseSystemPrompt,
       sectionSpecs.map(({ name, text, priority }) => ({ name, text, priority })),
       selectedNames,
     );
     droppedSections = assembled.dropped;
   } else {
     assembled = assembleBudgetedSystemPrompt(
-      cfg.systemPrompt,
+      baseSystemPrompt,
       sectionSpecs.map(({ name, text, priority }) => ({ name, text, priority })),
       systemContextBudget,
     );
@@ -247,7 +251,7 @@ export async function buildPromptAssembly(ctx: TurnContext): Promise<PromptAssem
   }
   if (ctx.currentTrace) {
     ctx.currentTrace.contextBudget = buildContextBudgetLedger({
-      system: cfg.systemPrompt,
+      system: baseSystemPrompt,
       strategy: strategyPrompt,
       cognition: cognitiveContext,
       memory: memoryContext,
@@ -267,9 +271,13 @@ export async function buildPromptAssembly(ctx: TurnContext): Promise<PromptAssem
     });
   }
 
-  const openaiTools = cfg.tools
-    .toOpenAITools()
-    .filter((tool) => !(RESEARCH_QUESTION_PATTERN.test(userInput) && tool.function.name === "search"));
+  const searchDisabled =
+    ctx.routing?.suppressSearch === true ||
+    ctx.routing?.suppressTools === true ||
+    RESEARCH_QUESTION_PATTERN.test(userInput);
+  const openaiTools = ctx.routing?.suppressTools
+    ? []
+    : cfg.tools.toOpenAITools().filter((tool) => !(searchDisabled && tool.function.name === "search"));
   const toolContext = {
     sessionId: cfg.sessionId,
     turnId: ctx.runTurnId,
@@ -279,10 +287,11 @@ export async function buildPromptAssembly(ctx: TurnContext): Promise<PromptAssem
 
   // 9a. Debate detection — route complex research questions to multi-agent debate
   const isDebateQuery =
-    userInput.startsWith("/debate") ||
-    (userInput.length > 80 &&
-      /\b(?:debate|compare|analyze|evaluate|assess)\b/i.test(userInput) &&
-      /\b(?:why|how|should|is it|are there|what are the implications)\b/i.test(userInput));
+    ctx.routing?.route !== "direct" &&
+    (userInput.startsWith("/debate") ||
+      (userInput.length > 80 &&
+        /\b(?:debate|compare|analyze|evaluate|assess)\b/i.test(userInput) &&
+        /\b(?:why|how|should|is it|are there|what are the implications)\b/i.test(userInput)));
 
   if (isDebateQuery && !cfg.cognitiveKernel.isEnabled()) {
     let skipDebate = false;

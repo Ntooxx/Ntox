@@ -2,6 +2,7 @@ import { buildCurriculum, type Curriculum } from "../evaluation/curriculum.js";
 import { evaluateObjective } from "../evaluation/objective-evaluators.js";
 import type { EvalSession } from "../evaluation/runner.js";
 import type { Mind } from "./mind.js";
+import { buildEvidenceProvenance, objectiveEvidenceFromResult } from "./evidence.js";
 
 export interface SelfPlayDeps {
   createSession: () => EvalSession;
@@ -42,6 +43,10 @@ export async function runSelfPlay(deps: SelfPlayDeps, options: SelfPlayOptions):
     const probe = await session.send(task.probe);
     tokens += probe.tokens ?? 0;
     const objective = await evaluateObjective(task.check, probe.response);
+    const evidence = objectiveEvidenceFromResult(
+      objective,
+      buildEvidenceProvenance({ evaluator: task.check.type, artifactRef: `selfplay:${task.id}` }),
+    );
 
     const handle = deps.mind.beginTurn({
       turnId: `selfplay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
@@ -61,7 +66,8 @@ export async function runSelfPlay(deps: SelfPlayDeps, options: SelfPlayOptions):
           abandoned: probe.response.trim().length === 0,
           falseSuccess: false,
           toolFailure: false,
-          objectiveScore: objective.score * 2 - 1,
+          objectiveScore: evidence.score,
+          evidence: evidence.provenance,
         },
         { tokens, predictionSource: "selfplay", predictionTokens: 0 },
       );
